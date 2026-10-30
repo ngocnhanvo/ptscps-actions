@@ -1,0 +1,77 @@
+name: PTSCPS initial WordPress installation (FTPS only)
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Check only, or upload tracked WordPress source files into an unconfigured admin docroot'
+        type: choice
+        options: [preflight, deploy]
+        required: true
+        default: preflight
+      source_sha:
+        description: 'Exact reviewed commit SHA of ptscps-php/master'
+        required: true
+        default: '8e58f9552e1c113b8b2d3c6734b40823ea9be568'
+        type: string
+      confirm:
+        description: 'DEPLOY_WORDPRESS_FIRST_INSTALL required for deploy mode'
+        required: false
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: ptscps-wordpress-bootstrap
+  cancel-in-progress: false
+jobs:
+  bootstrap:
+    if: >-
+      github.repository == 'ngocnhanvo/ptscps-actions'
+      && (inputs.mode == 'preflight'
+          || (inputs.mode == 'deploy' && inputs.confirm == 'DEPLOY_WORDPRESS_FIRST_INSTALL'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      ENV_FILE: ${{ secrets.ENV_FILE }}
+      FTP_SERVER: ${{ secrets.FTP_SERVER }}
+      FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+      FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+    steps:
+      - name: Checkout PTSCPS Actions
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Checkout PTSCPS WordPress master (no Astro)
+        uses: actions/checkout@v4
+        with:
+          repository: ngocnhanvo/ptscps-php
+          ref: master
+          token: ${{ secrets.SOURCE_REPO_PAT }}
+          path: source-php
+          persist-credentials: false
+      - name: Validate tracked WordPress source and bootstrap program
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$ENV_FILE" && test -n "$FTP_SERVER" && test -n "$FTP_USERNAME" && test -n "$FTP_PASSWORD"
+          test "$(git -C source-php symbolic-ref --short HEAD)" = master
+          test "$(git -C source-php rev-parse HEAD)" = "${{ inputs.source_sha }}"
+          test -f source-php/wp-includes/version.php
+          test -f source-php/wp-admin/index.php
+          test ! -e source-php/wp-config.php
+          python3 -B -m py_compile scripts/ptscps-wordpress-bootstrap.py
+          php -l source-php/wp-load.php
+      - name: Strict FTPS preflight (no WordPress or Astro build)
+        if: inputs.mode == 'preflight'
+        shell: bash
+        run: python3 -B scripts/ptscps-wordpress-bootstrap.py preflight
+      - name: Initial full WordPress FTPS upload, readback verification, resumable
+        if: inputs.mode == 'deploy' && inputs.confirm == 'DEPLOY_WORDPRESS_FIRST_INSTALL'
+        shell: bash
+        run: python3 -B scripts/ptscps-wordpress-bootstrap.py deploy --workers 4
+      - name: Summarize deployment scope
+        shell: bash
+        run: |
+          {
+            echo "PTSCPS initial WordPress file transfer: ${{ inputs.mode }}"
+            echo 'No WordPress database, wp-config.php, uploads, or Astro build modifications are permitted.'
+          } >> "$GITHUB_STEP_SUMMARY"
