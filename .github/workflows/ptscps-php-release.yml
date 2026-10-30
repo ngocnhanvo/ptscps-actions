@@ -1,0 +1,92 @@
+name: PTSCPS PHP deployment (manual opt-in)
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type DEPLOY_PHP to allow WordPress PHP upload (no Astro build)'
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: ptscps-wp-php-release
+  cancel-in-progress: false
+jobs:
+  wordpress-php:
+    if: github.repository == 'ngocnhanvo/ptscps-actions' && inputs.confirm == 'DEPLOY_PHP'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout PTSCPS Actions deploy script
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Checkout only PTSCPS WordPress PHP master
+        uses: actions/checkout@v4
+        with:
+          repository: ngocnhanvo/ptscps-php
+          ref: master
+          token: ${{ secrets.SOURCE_REPO_PAT }}
+          path: source-php
+          persist-credentials: false
+      - name: PHP syntax and project identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          php -l source-php/ptscps-unzip.php
+          php -l source-php/wp-content/plugins/github-trigger/vcs-build-trigger.php
+          php -l source-php/wp-content/mu-plugins/esc-github-trigger-config.php
+          php -l source-php/wp-content/mu-plugins/esc-seo-files.php
+          ! grep -Eqi 'nghiencuukhoahoc|EduResearch Hub' source-php/wp-content/mu-plugins/esc-seo-files.php
+          php -l source-php/wp-content/plugins/github-trigger/tests/build-status-regression.php
+          php source-php/wp-content/plugins/github-trigger/tests/build-status-regression.php
+          test "$(cat source-php/ptscps-unzip-v2.ready)" = 'PTSCPS_ASTRO_UNZIP_PROTOCOL=2'
+          python3 -m py_compile scripts/ptscps-php-live-release.py
+      - name: Release only PTSCPS WordPress PHP files with protected FTPS
+        shell: bash
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ptscps-php-live-release.py
+      - name: Probe configured WordPress unzip ready marker (NO BUILD)
+        shell: bash
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os, ssl, time
+          from urllib.parse import urlsplit
+          from urllib.request import HTTPSHandler, HTTPRedirectHandler, Request, build_opener
+          class NoRedirect(HTTPRedirectHandler):
+              def redirect_request(self,*args,**kwargs):
+                  return None
+          values=[]
+          for line in os.environ['ENV_FILE'].splitlines():
+              if line.strip().startswith('WC_URL='):
+                  values.append(line.split('=',1)[1].strip().strip('"').strip("'"))
+          if len(values)!=1:
+              raise RuntimeError('Expected one WordPress WC_URL in ENV_FILE')
+          parsed=urlsplit(values[0])
+          if not (parsed.scheme=='https' and parsed.hostname
+              and not parsed.username and not parsed.password and parsed.port in (None,443)
+              and parsed.path in ('','/') and not parsed.query and not parsed.fragment):
+              raise RuntimeError('Invalid WordPress HTTPS origin in ENV_FILE')
+          client=build_opener(HTTPSHandler(context=ssl.create_default_context()),NoRedirect)
+          url=parsed.geturl().rstrip('/')+'/ptscps-unzip-v2.ready'
+          for attempt in range(3):
+              try:
+                  with client.open(Request(url,method='GET'),timeout=20) as response:
+                      if response.status==200 and response.read(100).strip()==b'PTSCPS_ASTRO_UNZIP_PROTOCOL=2':
+                          print('PTSCPS_WP_UNZIP_READY_MARKER=PASS')
+                          break
+              except Exception:
+                  pass
+              if attempt==2:
+                  raise RuntimeError('Configured WP unzip readiness endpoint unavailable')
+              time.sleep(3)
+          PY

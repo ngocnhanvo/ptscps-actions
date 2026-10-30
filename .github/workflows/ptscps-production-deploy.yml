@@ -1,0 +1,323 @@
+name: PTSCPS Astro deployment (WordPress Build Website only)
+on:
+  repository_dispatch:
+    types: [wp_trigger_build]
+permissions:
+  contents: read
+concurrency:
+  group: ptscps-astro-production-deploy
+  cancel-in-progress: false
+jobs:
+  astro:
+    if: >-
+      github.repository == 'ngocnhanvo/ptscps-actions'
+      && github.ref == 'refs/heads/main'
+      && github.event_name == 'repository_dispatch'
+      && github.event.action == 'wp_trigger_build'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      ENV_FILE: ${{ secrets.ENV_FILE }}
+      SOURCE_REPO_PAT: ${{ secrets.SOURCE_REPO_PAT }}
+      FTP_SERVER: ${{ secrets.FTP_SERVER }}
+      FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+      FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+      ZIP_PATH: source/upload/ptscps-astro.zip
+      PTSCPS_PRODUCTION_SOURCE: master
+      PTSCPS_DEPLOY_SOURCE_BRANCH: master
+      PTSCPS_DEPLOY_REQUEST_DOMAIN: ${{ github.event.client_payload.site_domain }}
+    steps:
+      - name: Checkout immutable PTSCPS deploy scripts
+        uses: actions/checkout@v4
+        with:
+          path: actions-hub
+      - name: Checkout only Astro PRODUCTION branch
+        uses: actions/checkout@v4
+        with:
+          repository: ngocnhanvo/ptscps-astro
+          ref: master
+          token: ${{ secrets.SOURCE_REPO_PAT }}
+          path: source
+          persist-credentials: false
+      - name: Verify PTSCPS production source and configured WordPress/frontend destinations
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$ENV_FILE" && test -n "$SOURCE_REPO_PAT"
+          test -n "$FTP_SERVER" && test -n "$FTP_USERNAME" && test -n "$FTP_PASSWORD"
+          test "$(git -C source symbolic-ref --short HEAD)" = master
+          sha="$(git -C source rev-parse HEAD)"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
+          echo "PTSCPS_DEPLOY_COMMIT=$sha" >> "$GITHUB_ENV"
+          python3 - <<'PY'
+          import os,re
+          from urllib.parse import urlsplit
+          vals={}
+          for line in os.environ['ENV_FILE'].splitlines():
+              m=re.match(r'^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$',line)
+              if m:vals[m[1]]=m[2].strip().strip('"\'')
+          def origin(key):
+              url=urlsplit(vals.get(key,''))
+              if (url.scheme!='https' or not url.hostname or url.username or url.password
+                  or url.port not in (None,443) or url.path not in ('','/')
+                  or url.query or url.fragment):
+                  raise RuntimeError('Invalid HTTPS origin: '+key)
+              return url.hostname, 'https://'+url.hostname
+          wp_host,wp_origin=origin('WC_URL')
+          client_host,client_origin=origin('WC_URL_CLIENT')
+          if wp_host==client_host:
+              raise RuntimeError('WordPress and frontend origins cannot be identical')
+          # Same as inherited NCKH workflow, but migrate-safe: target is
+          # derived exclusively from the validated WC_URL_CLIENT, not a new var.
+          target='/domains/'+client_host+'/public_html/'
+          if os.environ.get('PTSCPS_DEPLOY_REQUEST_DOMAIN')!=client_host:
+              raise RuntimeError('Build trigger domain disagrees with WordPress frontend')
+          if any(x in vals for x in ('NCKH_GOOGLE_OAUTH_JSON','NCKH_SESSION_KEY',
+                                     'PTSCPS_GOOGLE_OAUTH_JSON','PTSCPS_SESSION_KEY',
+                                     'GOOGLE_OAUTH_STAGING_JSON')):
+              raise RuntimeError('Private runtime credentials cannot be written into build .env')
+          with open(os.environ['GITHUB_ENV'],'a',encoding='utf8') as out:
+              out.write('PTSCPS_CLIENT_HOST='+client_host+'\n')
+              out.write('PTSCPS_CLIENT_ORIGIN='+client_origin+'\n')
+              out.write('PTSCPS_WP_ORIGIN='+wp_origin+'\n')
+              out.write('ASTRO_FTP_TARGET='+target+'\n')
+              out.write('FTP_ASTRO_DIR='+target+'\n')
+          print('PASS: PTSCPS master and deployment target derived from WC_URL_CLIENT')
+          PY
+      - name: Refuse application-specific private runtime in reusable PTSCPS
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -d source/src/lib/nckh
+          test ! -d source/src/pages/api/nckh
+          test ! -d source/src/pages/api/auth/google
+      - name: Check signed unzip staging destination before any build or FTP
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile actions-hub/scripts/ptscps-remote-unzip.py
+          python3 actions-hub/scripts/ptscps-remote-unzip.py verify
+      - name: Read deployed sitemap Save token from PTSCPS FTPS (no XML transfer)
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+          python3 -m py_compile actions-hub/scripts/ptscps-published-sitemap-revision.py
+          python3 actions-hub/scripts/ptscps-published-sitemap-revision.py
+      # GitHub-hosted runners are ephemeral: reuse downloaded packages
+      # keyed by the Astro production lockfile. Never cache node_modules or .env.
+      - name: Set up pnpm 9 (without installing project dependencies)
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+          run_install: false
+      - name: Set up Node.js 24 with pnpm store cache
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: source/pnpm-lock.yaml
+      # Same production data cache model as Blue Sea: retain Astro's
+      # native .cache across fresh runners. No special Page/section filtering.
+      - name: Restore and update Astro cache
+        uses: actions/cache@v4
+        with:
+          path: source/.cache
+          key: ptscps-prod-dot-cache-v2-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            ptscps-prod-dot-cache-v2-${{ runner.os }}-
+      - name: Build Astro Production (incremental WordPress data cache)
+        shell: bash
+        working-directory: source
+        run: |
+          set -euo pipefail
+          # Restore verified pnpm store where available; recreate dependencies
+          # from the exact lockfile on every run. Cache miss is still safe.
+          pnpm install --frozen-lockfile --prefer-offline
+          printf '%s\n' "$ENV_FILE" > .env
+          # Keep original Astro build settings from ENV_FILE and WordPress.
+          # Unit tests run separately in non-deploy CI, not in every build.
+          pnpm run build-git
+          node --check dist/server/entry.mjs
+          test -s dist/client/index.html
+          test -s dist/server/entry.mjs
+          # Generic SSR entrypoint is mandatory.
+          test -s dist/server/entry.mjs
+          echo "Build source SHA: $(git rev-parse HEAD) (master)" >> "$GITHUB_STEP_SUMMARY"
+      - name: Package only compiled staging output (strictly no .env)
+        shell: bash
+        working-directory: source
+        run: |
+          set -euo pipefail
+          mkdir -p deploy upload
+          # All three root HTML entrypoints and representative _astro CSS/JS
+          # and image assets have been tested by reversible FTPS removal.
+          # Their public URLs continue to return identical content from
+          # the Astro Node runtime client tree. Keep one canonical copy.
+          # Reproducible staging probes: 39211910217, 39212152303,
+          # 39212358489 (CSS/JS/WebP passed), 39212524243 (restored OK).
+          cp -a dist/. deploy/
+          test -s deploy/client/index.html
+          test -s deploy/server/entry.mjs
+          test ! -e deploy/index.html
+          test ! -e deploy/_astro
+          # Apache serves these three public metadata files from document-root.
+          # The Astro SSR runtime serves app assets from client/, while old root
+          # copies remain unchanged unless explicitly included in the archive.
+          # Whitelist ONLY the public, content-checked metadata; never flatten
+          # HTML, _astro assets, application data or private runtime files.
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          from urllib.parse import urlsplit
+          import xml.etree.ElementTree as ET
+
+          root = Path("deploy")
+          origin = os.environ['PTSCPS_CLIENT_ORIGIN']
+          state_file = root / "client" / ".ptscps-sitemap-deploy-state.json"
+          if not state_file.is_file():
+              raise RuntimeError("Missing signed-build sitemap Save revision decision")
+          state = json.loads(state_file.read_text())
+          if state.get("origin") != origin or not isinstance(state.get("changed"), bool):
+              raise RuntimeError("Unexpected sitemap deploy decision")
+          rev = state.get("revision")
+          import re
+          if not isinstance(rev, str) or re.fullmatch(r"(?:legacy|[a-f0-9-]{36})", rev) is None:
+              raise RuntimeError("Unexpected sitemap Save revision")
+          # Workflow-local metadata (not uploaded publicly except safe revision
+          # token in the existing ptscps-staging-build.json).
+          Path(".ptscps-sitemap-package-state.json").write_text(json.dumps(state))
+          state_file.unlink()
+          published = {}
+          for name in ("llms.txt", "robots.txt"):
+              compiled = root / "client" / name
+              if not compiled.is_file():
+                  raise RuntimeError("Missing WordPress SEO metadata: " + name)
+              raw = compiled.read_bytes()
+              if not raw:
+                  raise RuntimeError("Invalid compiled SEO metadata: " + name)
+              published[name] = raw
+
+          if state["changed"]:
+              compiled = root / "client" / "sitemap.xml"
+              if not compiled.is_file():
+                  raise RuntimeError("Saved sitemap XML missing from build")
+              raw = compiled.read_bytes()
+              try:
+                  xmlroot = ET.fromstring(raw)
+              except ET.ParseError as e:
+                  raise RuntimeError("Invalid WordPress XML: " + str(e))
+              ns = "{http://www.sitemaps.org/schemas/sitemap/0.9}"
+              if xmlroot.tag != ns + "urlset":
+                  raise RuntimeError("Invalid sitemap namespace")
+              urls = []
+              for item in xmlroot.findall(ns + "url"):
+                  loc = item.find(ns + "loc")
+                  if loc is None or not loc.text:
+                      raise RuntimeError("Missing sitemap loc")
+                  value = loc.text.strip()
+                  p = urlsplit(value)
+                  if p.scheme != "https" or p.netloc != os.environ['PTSCPS_CLIENT_HOST'] or p.query or p.fragment:
+                      raise RuntimeError("Sitemap loc uses unsafe origin")
+                  urls.append(value)
+              if not urls or origin + "/" not in urls or len(urls) != len(set(urls)):
+                  raise RuntimeError("Sitemap homepage missing/duplicate")
+              published["sitemap.xml"] = raw
+              print("SITEMAP SAVE DETECTED: XML included in deploy")
+          else:
+              # The signed PHP activator copies the unchanged public file
+              # locally into the new client directory. Do not send XML.
+              (root / "client" / "sitemap.xml").unlink(missing_ok=True)
+              if (root / "sitemap.xml").exists():
+                  raise RuntimeError("Unchanged sitemap must not be at ZIP root")
+              print("SITEMAP UNCHANGED: XML excluded from deploy; hosting retains prior XML")
+
+          # WordPress already validated and saved robots/llms. Preserve the
+          # administrator's public settings; no staging or one-page policy.
+          for name, data in published.items():
+              (root / name).write_bytes(data)
+          print("PASS: production SEO root files from WP; update sitemap=" + str(state["changed"]))
+          PY
+          echo "$(date +%s)" > deploy/pm2-reload.txt
+          python3 - <<'PY'
+          import json,os
+          sha=os.environ['PTSCPS_DEPLOY_COMMIT']
+          state=json.load(open('.ptscps-sitemap-package-state.json',encoding='utf8'))
+          with open('deploy/ptscps-staging-build.json','w',encoding='utf8') as handle:
+              json.dump({
+                  'branch':'master','commit':sha,'target':os.environ['PTSCPS_CLIENT_HOST'],
+                  'sitemap_revision':state['revision'],
+              },handle)
+          PY
+          test ! -e deploy/.env
+          test -s deploy/server/entry.mjs
+          test -s deploy/client/index.html
+          cd deploy
+          zip -q -r ../upload/ptscps-astro.zip .
+          cd ..
+          python3 - <<'PY'
+          import json
+          import os
+          from zipfile import ZipFile
+          with ZipFile('upload/ptscps-astro.zip') as z:
+              names=z.namelist()
+              if '.env' in names or any('private-runtime' in name for name in names):
+                  raise RuntimeError('Refusing archive with private runtime secrets')
+              # No flattened client output must reappear at root.
+              if any(name in names for name in ('index.html','_astro/')):
+                  raise RuntimeError('Duplicate application assets outside client/ are forbidden')
+              state=json.load(open('.ptscps-sitemap-package-state.json',encoding='utf8'))
+              for static in ('llms.txt','robots.txt'):
+                  if static not in names or ('client/' + static) not in names:
+                      raise RuntimeError('Missing WordPress metadata: ' + static)
+                  if z.read(static) != z.read('client/' + static):
+                      raise RuntimeError('Metadata copies differ: ' + static)
+              present='sitemap.xml' in names and 'client/sitemap.xml' in names
+              absent='sitemap.xml' not in names and 'client/sitemap.xml' not in names
+              if state['changed'] and (not present or z.read('sitemap.xml')!=z.read('client/sitemap.xml')):
+                  raise RuntimeError('Saved sitemap missing or mismatched in archive')
+              if not state['changed'] and not absent:
+                  raise RuntimeError('Unchanged sitemap XML must be excluded from archive')
+              meta=json.loads(z.read('ptscps-staging-build.json'))
+              if meta.get('branch')!='master' or meta.get('commit')!=os.environ['PTSCPS_DEPLOY_COMMIT'] or meta.get('sitemap_revision')!=state['revision']:
+                  raise RuntimeError('Archive revision marker mismatch')
+              for required in ('server/entry.mjs','client/index.html','ptscps-staging-build.json'):
+                  if required not in names:raise RuntimeError('Missing staged bundle file: '+required)
+          print('PASS: ZIP contains dev server/client and provenance, no private environment file.')
+          PY
+      - name: Install encrypted FTP client
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v lftp >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq --no-install-recommends lftp
+          fi
+      - name: Upload compiled staging archive by FTP-TLS
+        shell: bash
+        run: bash actions-hub/scripts/ptscps-resumable-ftp.sh
+      - name: Verify provenance and activate staging bundle using signed PHP rollback
+        shell: bash
+        run: python3 actions-hub/scripts/ptscps-remote-unzip.py unpack
+      - name: Verify public homepage after deploy (read-only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os,urllib.request,time
+          url=os.environ['PTSCPS_CLIENT_ORIGIN']+'/'
+          result=None
+          for attempt in range(5):
+              try:
+                  with urllib.request.urlopen(urllib.request.Request(url,headers={'Cache-Control':'no-cache'}),timeout=18) as resp:
+                      result=(resp.status,resp.headers.get('Content-Type',''))
+                      if resp.status==200 and 'html' in result[1].lower():
+                          print('PTSCPS_PUBLIC_HOME_SMOKE=PASS')
+                          break
+              except Exception as exc:
+                  result=(type(exc).__name__,)
+              time.sleep(4)
+          else:
+              raise RuntimeError('Homepage not verified after deployment: '+str(result))
+          PY

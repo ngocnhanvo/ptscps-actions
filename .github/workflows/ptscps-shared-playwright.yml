@@ -1,0 +1,105 @@
+name: PTSCPS shared Playwright (manual, read-only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: 'Read-only browser test'
+        type: choice
+        required: true
+        default: smoke
+        options:
+          - smoke
+          - wordpress-site-health
+          - wordpress-build-trigger-audit
+permissions:
+  contents: read
+
+jobs:
+  configured-origins:
+    name: Read validated site origins from ENV_FILE
+    runs-on: ubuntu-latest
+    outputs:
+      frontend_url: ${{ steps.origins.outputs.frontend_url }}
+      frontend_host: ${{ steps.origins.outputs.frontend_host }}
+      wordpress_url: ${{ steps.origins.outputs.wordpress_url }}
+      wordpress_host: ${{ steps.origins.outputs.wordpress_host }}
+    steps:
+      - name: Resolve only approved HTTPS origins
+        id: origins
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          from urllib.parse import urlsplit
+          vals={}
+          for line in os.environ.get('ENV_FILE','').splitlines():
+              line=line.strip()
+              if line.startswith('export '): line=line[7:].strip()
+              for name in ('WC_URL','WC_URL_CLIENT'):
+                  if line.startswith(name+'='):
+                      if name in vals: raise SystemExit('Duplicate origin configuration')
+                      vals[name]=line.split('=',1)[1].strip().strip('"').strip("'")
+          if set(vals)!={'WC_URL','WC_URL_CLIENT'}:
+              raise SystemExit('Missing WordPress or frontend origin')
+          result={}
+          for key,label in (('WC_URL','wordpress'),('WC_URL_CLIENT','frontend')):
+              parsed=urlsplit(vals[key])
+              if (parsed.scheme!='https' or not parsed.hostname or parsed.username or parsed.password
+                  or parsed.port not in (None,443) or parsed.path not in ('','/')
+                  or parsed.query or parsed.fragment):
+                  raise SystemExit('Invalid site origin: '+label)
+              result[label+'_url']='https://'+parsed.hostname
+              result[label+'_host']=parsed.hostname
+          if result['wordpress_host']==result['frontend_host']:
+              raise SystemExit('WordPress/frontend origins must be isolated')
+          with open(os.environ['GITHUB_OUTPUT'],'a',encoding='utf-8') as out:
+              for key,value in result.items():out.write(key+'='+value+'\n')
+          print('PTSCPS_PLAYWRIGHT_ORIGINS=PASS; sourced_from=ENV_FILE; no credentials logged')
+          PY
+
+  public-smoke:
+    needs: configured-origins
+    name: Test PTSCPS public website
+    if: >-
+      (github.event_name == 'push' && github.event.head_commit.message == 'test: trigger read-only PTSCPS public smoke') || (github.event_name == 'workflow_dispatch' && inputs.suite == 'smoke')
+    uses: ngocnhanvo/knowledge-actions/.github/workflows/playwright.yml@main
+    with:
+      site_url: ${{ needs.configured-origins.outputs.frontend_url }}
+      expected_hostname: ${{ needs.configured-origins.outputs.frontend_host }}
+      suite: smoke
+
+  wordpress-site-health:
+    needs: configured-origins
+    name: Test PTSCPS WordPress Site Health without disclosing DB_NAME
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.suite == 'wordpress-site-health') || (github.event_name == 'push' && github.event.head_commit.message == 'test: trigger read-only PTSCPS WordPress site health')
+    uses: ngocnhanvo/knowledge-actions/.github/workflows/playwright.yml@main
+    with:
+      site_url: ${{ needs.configured-origins.outputs.wordpress_url }}
+      expected_hostname: ${{ needs.configured-origins.outputs.wordpress_host }}
+      suite: wordpress-site-health
+      # Optional tenant-specific DB fingerprints come from GitHub repository Variables.
+      # Never embed a cloned site's original database identity in a reusable workflow.
+      expected_db_sha256: ${{ vars.PTSCPS_EXPECTED_DB_SHA256 }}
+      disallowed_db_sha256: ${{ vars.PTSCPS_DISALLOWED_DB_SHA256 }}
+    secrets:
+      WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
+      WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
+
+  wordpress-build-trigger-audit:
+    needs: configured-origins
+    name: Read-only audit of PTSCPS WP Build Website dashboard
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.suite == 'wordpress-build-trigger-audit') || (github.event_name == 'push' && github.event.head_commit.message == 'test: trigger read-only PTSCPS build UI audit')
+    uses: ngocnhanvo/knowledge-actions/.github/workflows/playwright.yml@main
+    with:
+      site_url: ${{ needs.configured-origins.outputs.wordpress_url }}
+      expected_hostname: ${{ needs.configured-origins.outputs.wordpress_host }}
+      suite: wordpress-build-trigger-audit
+    secrets:
+      WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
+      WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
