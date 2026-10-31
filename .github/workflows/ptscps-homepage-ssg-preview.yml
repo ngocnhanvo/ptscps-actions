@@ -1,0 +1,139 @@
+name: PTSCPS homepage SSG browser preview (read-only)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'audit/ptscps-homepage-preview.ready'
+
+permissions:
+  contents: read
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.0-noble
+      options: --ipc=host
+    env:
+      ENV_FILE: ${{ secrets.ENV_FILE }}
+    steps:
+      - name: Resolve validated frontend origin
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os,re
+          from urllib.parse import urlsplit
+          vals={}
+          for line in os.environ.get('ENV_FILE','').splitlines():
+              m=re.match(r'^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$',line)
+              if m: vals[m.group(1)]=m.group(2).strip().strip('"\'')
+          front=urlsplit(vals.get('WC_URL_CLIENT',''))
+          if (front.scheme!='https' or not front.hostname or front.username or front.password
+              or front.port not in (None,443) or front.path not in ('','/')
+              or front.query or front.fragment):
+              raise SystemExit('Invalid WC_URL_CLIENT origin')
+          origin='https://'+front.hostname
+          with open(os.environ['GITHUB_ENV'],'a',encoding='utf8') as out:
+              out.write('PTSCPS_CLIENT_ORIGIN='+origin+'\n')
+          print('PTSCPS_PREVIEW_ORIGIN=PASS')
+          PY
+
+      - name: Install Playwright wrapper
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm init -y >/dev/null 2>&1
+          npm install --no-package-lock --ignore-scripts --no-audit --no-fund playwright@1.64.0 >/dev/null
+
+      - name: Render deployed SSG bundle as root and capture screenshots
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p preview
+          node --input-type=module <<'JS'
+          import { chromium } from 'playwright';
+          import { writeFile } from 'node:fs/promises';
+
+          const origin = process.env.PTSCPS_CLIENT_ORIGIN;
+          if (!origin) throw new Error('PTSCPS_CLIENT_ORIGIN is missing');
+          const staticEntry = origin + '/client/index.html';
+          const browser = await chromium.launch({ headless: true });
+          const notes = [];
+
+          async function capture(name, viewport, isMobile = false) {
+            const context = await browser.newContext({
+              viewport,
+              isMobile,
+              deviceScaleFactor: 1,
+              locale: 'vi-VN',
+            });
+            const page = await context.newPage();
+            const failed = [];
+            page.on('requestfailed', request => {
+              try {
+                const u = new URL(request.url());
+                if (u.origin === origin) failed.push(u.pathname);
+              } catch {}
+            });
+
+            await page.route(origin + '/**', async route => {
+              const request = route.request();
+              const url = new URL(request.url());
+              let mapped = null;
+              if (url.origin === origin && url.pathname === '/') {
+                mapped = staticEntry;
+              } else if (
+                url.origin === origin &&
+                !url.pathname.startsWith('/client/') &&
+                (url.pathname.startsWith('/_astro/') ||
+                 url.pathname.startsWith('/images/') ||
+                 url.pathname.startsWith('/data/'))
+              ) {
+                mapped = origin + '/client' + url.pathname + url.search;
+              }
+              if (!mapped) return route.continue();
+              const response = await route.fetch({ url: mapped });
+              await route.fulfill({ response });
+            });
+
+            const response = await page.goto(origin + '/', {
+              waitUntil: 'domcontentloaded',
+              timeout: 60000,
+            });
+            if (!response || response.status() !== 200) {
+              throw new Error(`Preview root did not render HTTP 200 (${response?.status()})`);
+            }
+            await page.locator('body').waitFor({ state: 'visible', timeout: 15000 });
+            await page.evaluate(async () => { if (document.fonts?.ready) await document.fonts.ready; });
+            await page.waitForTimeout(2500);
+            const bodyText = (await page.locator('body').innerText()).trim();
+            if (bodyText.length < 30) throw new Error('Preview has no meaningful visible content');
+            await page.screenshot({ path: `preview/home-${name}.png`, fullPage: true });
+            notes.push(`${name}: title=${JSON.stringify(await page.title())}; body_chars=${bodyText.length}; failed_same_origin=${failed.slice(0,20).join(',') || 'none'}`);
+            await context.close();
+          }
+
+          try {
+            await capture('desktop', { width: 1440, height: 1000 }, false);
+            await capture('mobile', { width: 390, height: 844 }, true);
+            await writeFile('preview/preview-meta.txt', [
+              'PTSCPS homepage SSG preview',
+              'Simulation: public / is fulfilled from deployed /client/index.html.',
+              'Root static assets are mapped to /client equivalents inside Playwright only.',
+              ...notes,
+            ].join('\n') + '\n');
+          } finally {
+            await browser.close();
+          }
+          JS
+
+      - name: Publish screenshot artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ptscps-homepage-ssg-preview
+          path: preview/
+          if-no-files-found: error
+          retention-days: 7
