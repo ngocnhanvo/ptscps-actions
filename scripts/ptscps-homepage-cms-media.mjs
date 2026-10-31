@@ -242,7 +242,7 @@ try {
       let reused = false;
       if (exact?.id) reused = await selectExisting(exact.id, spec.basename);
       if (!reused) await uploadCurrent(spec.file);
-      const attachment = await finishSelection(spec.alt, spec.basename);
+      const attachment = await finishSelection(spec.alt, path.basename(spec.file));
       // Use the native TablePress helper callback. If WordPress's asynchronous
       // send-to-editor response leaves it empty, rebuild the same image from the
       // selected WP library attachment (never from the legacy URL).
