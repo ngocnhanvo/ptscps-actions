@@ -3,7 +3,15 @@
 Updated: 2026-10-31
 Code mode: `auto-build`
 
-## LATEST CHECKPOINT — Homepage 2026-10-31 (supersedes historical statuses below)
+## LATEST CHECKPOINT — Header WordPress integrated and deployed 2026-10-31
+
+- This section **supersedes the older Homepage checkpoint below**; old claims about a missing Header menu are historical, not current blockers.
+- Native WordPress `Header.vi` now exists: menu ID `1767`, `code=Header`, `lang=vi`, type `dropdown`. Exactly one verified published destination: `Trang chủ`, native item ID `82514`, `key=home`, `href=/`, `linkType=internal`. Guarded setup run [`41219401043`](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/41219401043) **PASS**, no duplicate menu/item created.
+- WordPress **Build Website** triggered via native authenticated admin UI, run [`41219602534`](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/41219602534) **PASS**. The resulting production deploy [`41219661285`](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/41219661285) **PASS** (SSG + public homepage smoke), log: `1 WordPress Header menu, 1 changed, wordpress`. Astro source remains `ngocnhanvo/ptscps-astro@master` SHA `b79a88aac76fc4e7bb69f3078f836e99de9de3bd`; this was a CMS-data rebuild, not a source-code change.
+- Focused read-only browser QA [`41220075280`](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/41220075280) **PASS**: live desktop at 1440px shows `Trang chủ` linking `/`; live mobile at 390px opens hamburger, shows the same valid link and sets `aria-expanded=true`. WordPress REST readback still shows exactly one item.
+- **Do not repeat** native Header creation, WordPress build/deploy, 12/12 ESC Table images, prior full-page Visual QA or this focused menu QA. Do not hardcode navigation in Astro. Additional menu links must wait for actual migrated/published target pages; no invented URLs. Next: remaining content migration, then link mapping/menus/footer/policy pages; SSR runtime remains a non-blocking warning for SSG.
+
+## HISTORICAL CHECKPOINT — Homepage 2026-10-31 (superseded by Header checkpoint above)
 
 - Astro source `ngocnhanvo/ptscps-astro@master` at `b79a88aac76fc4e7bb69f3078f836e99de9de3bd` has been deployed through **native WordPress Build Website**.
 - WordPress build trigger: `41214276700`; production deployment: **`41214333199` PASS**, including SSG smoke `/` and public homepage smoke.
