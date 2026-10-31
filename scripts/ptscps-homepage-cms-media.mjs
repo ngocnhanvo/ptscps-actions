@@ -213,7 +213,13 @@ try {
     }));
     console.log('CMS_MEDIA_EDITOR_SHAPE=' + JSON.stringify(editorShape));
 
-    for (const spec of pending) {
+    for (const [index, spec] of pending.entries()) {
+      // WordPress media modal may keep a stale upload pane after inserting an
+      // attachment. Save each confirmed row, then re-open the editor cleanly.
+      if (index > 0) {
+        await page.goto(origin + '/wp-admin/admin.php?page=tablepress&action=edit&table_id=' + encodeURIComponent(table), { waitUntil:'domcontentloaded', timeout:45000 });
+        await page.waitForFunction(() => Boolean(window.tp?.editor?.options?.data), null, { timeout:30000 });
+      }
       await openPicker(table, spec.row, imageCol);
       const candidates = await mediaCandidates(spec.basename);
       const exact = candidates.find(item => {
@@ -274,6 +280,8 @@ try {
       assert(cellProbe.matches.length > 0 || cellProbe.coords.some(c => c.img),
         `Native picker did not insert image ${table} row ${spec.row}`);
       console.log(`CMS_MEDIA_CELL=${table}:${spec.row} native_insert=PASS reused=${reused ? 'YES':'NO'}`);
+      await saveAndReadBack(table, [spec]);
+      console.log(`CMS_MEDIA_ROW=${table}:${spec.row} SAVE_READBACK=PASS`);
     }
 
     await saveAndReadBack(table, tableSpecs);
