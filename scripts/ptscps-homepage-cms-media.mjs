@@ -57,11 +57,28 @@ async function mediaCandidates(basename) {
 }
 
 async function openPicker(table, dataRow, imageCol) {
-  await page.evaluate(({ dataRow, imageCol }) => {
+  const selectorPath = await page.evaluate(({ dataRow, imageCol }) => {
     const editor = window.tp?.editor;
-    if (!editor || typeof editor.selectCell !== 'function') throw new Error('TablePress editor.selectCell unavailable');
-    editor.selectCell(dataRow + 2, imageCol);
+    if (!editor) throw new Error('TablePress editor unavailable');
+    const row = dataRow + 2;
+    const candidates = [['editor', editor]];
+    for (const [key, value] of Object.entries(editor)) {
+      if (value && typeof value === 'object') candidates.push([`editor.${key}`, value]);
+    }
+    for (const [name, candidate] of candidates) {
+      if (typeof candidate.selectCell === 'function') {
+        candidate.selectCell(row, imageCol);
+        return name + '.selectCell';
+      }
+      if (typeof candidate.selectCellByCoords === 'function') {
+        candidate.selectCellByCoords(imageCol, row);
+        return name + '.selectCellByCoords';
+      }
+    }
+    return '';
   }, { dataRow, imageCol });
+  assert(selectorPath, `Native cell selection API unavailable in ${table}`);
+  console.log(`CMS_MEDIA_SELECTION=${table}:${dataRow} api=${selectorPath}`);
   const button = page.locator('#js_btn_upload_image');
   assert(await button.count() === 1, `Native image button unavailable in ${table}`);
   await button.click();
@@ -143,7 +160,14 @@ try {
     }
 
     await page.goto(origin + '/wp-admin/admin.php?page=tablepress&action=edit&table_id=' + encodeURIComponent(table), { waitUntil:'domcontentloaded', timeout:45000 });
-    await page.waitForFunction(() => Boolean(window.tp?.editor?.options?.data && typeof window.tp.editor.selectCell === 'function'), null, { timeout:30000 });
+    await page.waitForFunction(() => Boolean(window.tp?.editor?.options?.data), null, { timeout:30000 });
+    const editorShape = await page.evaluate(() => ({
+      keys:Object.keys(window.tp?.editor || {}).slice(0,80),
+      nestedSelectors:Object.entries(window.tp?.editor || {}).flatMap(([key,value]) => value && typeof value === 'object'
+        ? Object.keys(value).filter(name => /select.*cell|cell.*select/i.test(name)).map(name => `${key}.${name}`)
+        : []),
+    }));
+    console.log('CMS_MEDIA_EDITOR_SHAPE=' + JSON.stringify(editorShape));
 
     for (const spec of pending) {
       await openPicker(table, spec.row, imageCol);
@@ -176,7 +200,10 @@ try {
       fileInputs: document.querySelectorAll('.media-modal input[type="file"]').length,
       selectButtons: document.querySelectorAll('.media-modal button.media-button-select').length,
       editorReady: Boolean(window.tp?.editor),
-      editorSelectCell: typeof window.tp?.editor?.selectCell,
+      editorKeys: Object.keys(window.tp?.editor || {}).slice(0,80),
+      nestedSelectors: Object.entries(window.tp?.editor || {}).flatMap(([key,value]) => value && typeof value === 'object'
+        ? Object.keys(value).filter(name => /select.*cell|cell.*select/i.test(name)).map(name => `${key}.${name}`)
+        : []),
     }));
     console.error('CMS_MEDIA_DIAGNOSTICS=' + JSON.stringify(diagnostics));
   } catch {}
