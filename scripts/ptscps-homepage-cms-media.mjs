@@ -90,14 +90,21 @@ async function openPicker(table, dataRow, imageCol) {
       cell.click();
       api = 'editor.getCellFromCoords+DOM';
     }
-    const selected = Boolean(editor.selectedCell || editor.selection || editor.highlighted);
+    const selected = window.tp?.helpers?.selection?.columns?.[0] === imageCol &&
+      window.tp?.helpers?.selection?.rows?.[0] === row;
     return { api, selected };
   }, { dataRow, imageCol });
   assert(selection.api && selection.selected, `Native cell selection failed in ${table}`);
   console.log(`CMS_MEDIA_SELECTION=${table}:${dataRow} api=${selection.api}`);
-  const button = page.locator('#js_btn_upload_image');
-  assert(await button.count() === 1, `Native image button unavailable in ${table}`);
-  await button.click();
+  // ESC Table's own Insert Image workflow registers the helper textarea and
+  // sends the WordPress media editor's inserted HTML back to the selected cell.
+  const nativeInsert = await page.evaluate(() => {
+    const open = window.tp?.callbacks?.insert_image?.open_dialog;
+    if (typeof open !== 'function') return false;
+    open();
+    return true;
+  });
+  assert(nativeInsert, `Native TablePress Insert Image unavailable in ${table}`);
   await page.locator('.media-modal').waitFor({ state:'visible', timeout:20000 });
 }
 
@@ -133,10 +140,11 @@ async function finishSelection(alt) {
     await altInput.waitFor({ state:'visible', timeout:10000 });
     await altInput.fill(alt);
   }
-  const select = page.locator('.media-modal button.media-button-select:visible').last();
-  assert(await select.count() > 0, 'WordPress media Select button unavailable');
-  await select.click();
+  const insert = page.locator('.media-modal button.media-button-insert:visible').last();
+  assert(await insert.count() > 0, 'WordPress native Insert into post button unavailable');
+  await insert.click();
   await page.locator('.media-modal').waitFor({ state:'hidden', timeout:20000 });
+  await page.waitForTimeout(200); // Wait for the native helper textarea change callback.
 }
 
 async function saveAndReadBack(table, expectedRows) {
