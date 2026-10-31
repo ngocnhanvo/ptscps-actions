@@ -134,21 +134,27 @@ async function uploadCurrent(file) {
   await modal.locator('.attachment.selected, .attachment.details').first().waitFor({ state:'visible', timeout:45000 });
 }
 
-async function finishSelection(alt) {
+async function finishSelection(alt, basename) {
   const altInput = page.locator('.media-modal input[data-setting="alt"], .media-modal textarea[data-setting="alt"]').last();
   if (await altInput.count()) {
     await altInput.waitFor({ state:'visible', timeout:10000 });
     await altInput.fill(alt);
   }
-  // Capture the selected, WordPress-owned attachment before the modal closes.
-  const attachment = await page.evaluate(() => {
-    const frame = window.wp?.media?.editor?.get?.('textarea-insert-helper');
-    const model = frame?.state?.()?.get?.('selection')?.first?.();
-    if (!model) return null;
-    return { id:model.id, url:model.get('url'), type:model.get('type') };
-  });
-  assert(attachment?.type === 'image' && typeof attachment.url === 'string',
-    'WordPress media picker has no selected image attachment');
+  // The media frame's insert state may have an empty selection model even when
+  // the visible attachment tile is selected. Verify the tile via WP's own REST.
+  const selected = page.locator('.media-modal .attachment.selected[data-id], .media-modal .attachment.details[data-id]').last();
+  const mediaId = await selected.getAttribute('data-id');
+  assert(mediaId && /^\d+$/.test(mediaId), 'No selected WP media attachment tile');
+  const response = await page.request.get(origin + '/wp-json/wp/v2/media/' + mediaId + '?_fields=id,source_url,mime_type', { timeout:20000 });
+  assert(response.ok(), 'Selected WordPress media record could not be verified');
+  const wpMedia = await response.json();
+  assert(wpMedia?.mime_type?.startsWith('image/') && typeof wpMedia.source_url === 'string', 'Selected WordPress media is not an image');
+  const uploaded = new URL(wpMedia.source_url);
+  const stem = basename.replace(/\.[^.]+$/, '').toLowerCase();
+  const filename = decodeURIComponent(uploaded.pathname.split('/').pop() || '').toLowerCase();
+  assert(uploaded.origin === origin && uploaded.pathname.startsWith('/wp-content/uploads/') && filename.startsWith(stem),
+    'Selected WordPress media does not match verified homepage source filename');
+  const attachment = { id:wpMedia.id, url:wpMedia.source_url, type:'image' };
   const insert = page.locator('.media-modal button.media-button-insert:visible').last();
   assert(await insert.count() > 0, 'WordPress native Insert into post button unavailable');
   await insert.click();
@@ -217,7 +223,7 @@ try {
       let reused = false;
       if (exact?.id) reused = await selectExisting(exact.id, spec.basename);
       if (!reused) await uploadCurrent(spec.file);
-      const attachment = await finishSelection(spec.alt);
+      const attachment = await finishSelection(spec.alt, spec.basename);
       // Use the native TablePress helper callback. If WordPress's asynchronous
       // send-to-editor response leaves it empty, rebuild the same image from the
       // selected WP library attachment (never from the legacy URL).
