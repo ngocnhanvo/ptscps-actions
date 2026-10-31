@@ -1,0 +1,45 @@
+name: PTSCPS native WordPress Header menu setup (guarded)
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'audit/ptscps-header-menu-setup.ready'
+permissions:
+  contents: read
+jobs:
+  native-header:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate isolated production origins
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os,re
+          from urllib.parse import urlsplit
+          raw=os.environ.get('ENV_FILE','')
+          vals=dict(re.findall(r'^\s*(?:export\s+)?(WC_URL|WC_URL_CLIENT)\s*=\s*(.+)\s*$',raw,re.M))
+          def normalize(name):
+              v=urlsplit(vals.get(name,'').strip().strip('"\''))
+              if v.scheme!='https' or not v.hostname or v.path not in ('','/') or v.query or v.fragment or v.username or v.password or v.port not in (None,443):raise SystemExit('INVALID_ORIGIN '+name)
+              return 'https://'+v.hostname
+          wp,front=normalize('WC_URL'),normalize('WC_URL_CLIENT')
+          if wp==front:raise SystemExit('ORIGINS_NOT_ISOLATED')
+          with open(os.environ['GITHUB_ENV'],'a') as f:f.write('WP_ORIGIN='+wp+'\nFRONT_ORIGIN='+front+'\n')
+          print('ORIGIN_VALIDATION=PASS')
+          PY
+      - name: Install Playwright Chromium
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Create only missing native Header.vi using verified live homepage
+        env:
+          WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
+          WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
+        run: node scripts/ptscps-header-menu-native-setup.mjs
