@@ -1,0 +1,55 @@
+name: PTSCPS post-deploy public HTTP diagnosis (read-only)
+on:
+  push:
+    branches: [main]
+    paths:
+      - audit/ptscps-public-http-probe.ready
+permissions:
+  contents: read
+jobs:
+  public-http-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Probe only configured public PTSCPS endpoints, never deploy
+        shell: bash
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: |
+          python3 - <<'PYCODE'
+          import os,re,ssl,time,urllib.error,urllib.request
+          from urllib.parse import urlsplit
+          vals={}
+          for line in os.environ.get('ENV_FILE','').splitlines():
+              m=re.match(r'^\s*(?:export\s+)?(WC_URL|WC_URL_CLIENT)\s*=\s*(.*)\s*$',line)
+              if m: vals[m[1]]=m[2].strip().strip('\"\'')
+          def parse(name):
+              p=urlsplit(vals.get(name,''))
+              if p.scheme!='https' or not p.hostname or p.path not in ('','/') or p.port not in (None,443) or p.query or p.fragment or p.username or p.password:
+                  raise RuntimeError('Invalid configured '+name)
+              return 'https://'+p.hostname
+          cms,front=parse('WC_URL'),parse('WC_URL_CLIENT')
+          if front==cms: raise RuntimeError('Overlapping WordPress and frontend origins')
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self,*args,**kwargs):return None
+          opener=urllib.request.build_opener(urllib.request.HTTPSHandler(context=ssl.create_default_context()), NoRedirect)
+          def check(origin,path):
+              req=urllib.request.Request(origin+path,headers={'User-Agent':'PTSCPS-public-smoke/1.0','Accept':'text/html,application/xml,*/*','Cache-Control':'no-cache'})
+              try:
+                  with opener.open(req,timeout=14) as res:
+                      code=res.status; headers=res.headers; body=res.read(2000)
+              except urllib.error.HTTPError as e:
+                  code=e.code; headers=e.headers; body=e.read(2000)
+              except Exception as e:
+                  print('PUBLIC_PROBE='+str({'path':path,'site':'front' if origin==front else 'cms','network_error_type':type(e).__name__}))
+                  return
+              title=re.search(rb'<title[^>]*>([^<]{0,140})</title>',body,re.I)
+              sample=(title.group(1).decode('utf-8','replace') if title else '')[:140]
+              print('PUBLIC_PROBE='+str({'site':'front' if origin==front else 'cms','path':path,'http':code,'content_type':headers.get('Content-Type','')[:75],'location':headers.get('Location','')[:200],'title':sample}))
+          for path in ('/','/trang-chu/','/index.html','/robots.txt','/sitemap.xml','/ptscps-staging-build.json','/client/index.html'):
+              check(front,path)
+          check(cms,'/wp-json/')
+          time.sleep(2)
+          check(front,'/')
+          print('PTSCPS_PUBLIC_HTTP_DIAG=COMPLETE_READ_ONLY')
+          PYCODE
