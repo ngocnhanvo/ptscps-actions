@@ -3,6 +3,22 @@
 Updated: 2026-10-31
 Code mode: `auto-build`
 
+## LATEST CHECKPOINT — Homepage 2026-10-31 (supersedes historical statuses below)
+
+- Astro source `ngocnhanvo/ptscps-astro@master` at `b79a88aac76fc4e7bb69f3078f836e99de9de3bd` has been deployed through **native WordPress Build Website**.
+- WordPress build trigger: `41214276700`; production deployment: **`41214333199` PASS**, including SSG smoke `/` and public homepage smoke.
+- 12/12 native ESC Table images were saved and read back (`41207578994` PASS). **Do not reimport/reupload these assets.**
+- Latest live-root desktop/mobile browser QA: `41211947416`, latest job `124576214653` PASS. Desktop 1440px: scrollWidth=1440, no overflow offenders, all 6 sections present, header CMS logo loaded. Mobile 390px: scrollWidth=390, no overflow offenders, all 6 sections present, logo loaded. Screenshots in latest workflow artifact (`13047292657`).
+- Fixed desktop header nav width to `calc(100% - 220px)` beside logo; desktop blank strip and news-section paint also corrected in previous source commits.
+- **Remaining homepage integration issue:** WordPress reports *no valid Header menu*. Build prints `WordPress chưa có menu Header hợp lệ, đang dùng src/data/menu.json fallback` and `0 WordPress Header menu`. The fallback array is empty; visible desktop navigation is therefore blank. This is a **WordPress CMS content/configuration issue**, not a CSS width regression. Do **not** hardcode navigation labels/links in Astro or seed unverified destinations. Map verified legacy navigation to migrated target pages with native WordPress Menu Manager when URLs/pages exist, then use the normal WP Build Website trigger.
+- Public `/` currently returns HTML 200. This does not prove private SSR/API runtime readiness; do not revive unsupported Node proxy experiments or count them as homepage blocker.
+
+### Next work (in order)
+
+1. Inspect WordPress Menu Manager and current valid page/permalink inventory; create/restore a native `Header` Vietnamese menu based on real migrated links, preserving hierarchy. Verify `esc-api/v1/menus` exposes valid `Header.vi` and use WordPress Build Website only if data changed. If target pages have not migrated, record missing dependencies instead of linking to nonexistent pages.
+2. Validate desktop navigation items, mobile hamburger interactions, key links, and visual parity with the approved design using PTSCPS Actions/Playwright, not repeated content/media imports.
+3. Continue remaining content migration and footer menu/policy links separately as their CMS targets become available. The historical status sections below describe **older runs**, before public root and SSG smoke were repaired.
+
 ## Current priority
 
 Keep WordPress-controlled Astro production deployment usable for SSG/static output while the frontend Node SSR runtime remains unavailable. Public SSR runtime verification is non-blocking so content migration and homepage implementation can continue.
