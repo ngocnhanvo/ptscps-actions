@@ -5,7 +5,7 @@ Code mode: `auto-build`
 
 ## Current priority
 
-Restore the WordPress-controlled Astro production deployment before continuing content migration or homepage implementation.
+Keep WordPress-controlled Astro production deployment usable for SSG/static output while the frontend Node SSR runtime remains unavailable. Public SSR runtime verification is non-blocking so content migration and homepage implementation can continue.
 
 ## Verified state
 
@@ -19,6 +19,7 @@ Restore the WordPress-controlled Astro production deployment before continuing c
 - Guarded Apache bridge test run `41190919885` successfully installed the managed proxy temporarily, but both `/` and `/api/agent/history` returned HTTP 503 five times. The workflow then verified and removed the newly-created `.htaccess` automatically.
 - Ephemeral runtime capability probe run `41191194251` completed successfully and removed its temporary PHP probe. The frontend vhost exposes PHP 8.4, but `node`, `pm2` and Passenger are not available there; `exec`, `shell_exec` and `proc_open` are disabled; port `127.0.0.1:4321` is closed.
 - Therefore the Astro compile/package/upload path is healthy. The remaining blocker is **hosting runtime provisioning**: this frontend vhost currently has no runnable Node/Passenger/PM2 process for `server/entry.mjs`.
+- Owner decision on 2026-10-31: missing public SSR runtime must be reported as a warning, not fail an otherwise successful SSG build/package/upload/activation. Static client verification remains blocking.
 
 ## Safety / rollback state
 
@@ -31,7 +32,7 @@ Restore the WordPress-controlled Astro production deployment before continuing c
 - Do not rerun the content inventory/migration dry-run that already passed.
 - Do not rebuild Astro merely to reproduce the same 403 until a Node-capable runtime is provisioned for the frontend domain.
 - Do not retry the localhost:4321 Apache bridge unless a process is first verified listening there.
-- Do not flatten `client/` into the document root or bypass the public smoke check just to make Actions green; the project contains `prerender = false` API/SSR routes and requires the Node standalone runtime contract.
+- Do not flatten `client/` into the document root. Compile/package/activation and deployed static-client checks remain blocking; only public SSR runtime availability is downgraded to a warning until hosting provides Node.
 - Do not direct-dispatch the production deploy workflow; production build remains WordPress **Build Website** controlled.
 
 ## Required external hosting prerequisite
@@ -40,7 +41,7 @@ Provision a Node-capable application for `ptscps.thegioihosting.io.vn` before th
 
 ## Next action
 
-1. Provision/enable the frontend Node runtime in the hosting control plane (or expose supported SSH/runtime access to the existing deployment automation).
-2. Verify `/`, a representative static asset, one SSR route and one API route against the live runtime.
-3. Trigger one fresh production build only through WordPress **Build Website**.
-4. Record the resulting Actions run ID and source SHA here, then resume the migration/homepage work from the previous checkpoint.
+1. Continue content migration/homepage implementation without waiting for Node runtime; SSG/static deployment remains usable and verified separately.
+2. Provision/enable the frontend Node runtime in the hosting control plane (or expose supported SSH/runtime access to the existing deployment automation) as a separate infrastructure task.
+3. After runtime exists, verify `/`, one SSR route and one API route against the live runtime; until then the production workflow records this as a warning only.
+4. Trigger a fresh production build only through WordPress **Build Website** when there is an actual source/content change requiring deployment, then record its run ID and source SHA here.
