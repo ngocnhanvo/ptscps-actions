@@ -1,0 +1,112 @@
+name: PTSCPS frontend runtime capability probe (ephemeral)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'audit/ptscps-runtime-capability.ready'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ptscps-runtime-capability-probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Probe frontend PHP host for Node runtime capabilities and clean up
+        shell: bash
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PYCODE'
+          import ftplib,json,os,re,secrets,ssl,time,urllib.error,urllib.request
+          from io import BytesIO
+          from urllib.parse import quote,urlsplit
+
+          values=re.findall(r'^\s*(?:export\s+)?WC_URL_CLIENT\s*=\s*(.*)$',os.environ.get('ENV_FILE',''),re.M)
+          if len(values)!=1: raise RuntimeError('Exactly one WC_URL_CLIENT is required')
+          site=urlsplit(values[0].strip().strip('"\''))
+          if (site.scheme!='https' or not site.hostname or site.path not in ('','/')
+              or site.query or site.fragment or site.username or site.password or site.port not in (None,443)):
+              raise RuntimeError('Invalid frontend HTTPS origin')
+          origin='https://'+site.hostname
+          root=f'/domains/{site.hostname}/public_html'
+
+          raw=os.environ['FTP_SERVER'].strip(); raw=raw if '://' in raw else 'ftp://'+raw
+          endpoint=urlsplit(raw)
+          if (endpoint.scheme not in ('ftp','ftps') or not endpoint.hostname or endpoint.username
+              or endpoint.password or endpoint.path.strip('/') or endpoint.port not in (None,21)):
+              raise RuntimeError('Invalid FTPS destination')
+
+          token=secrets.token_urlsafe(32)
+          filename=f'.ptscps-runtime-probe-{os.environ.get("GITHUB_RUN_ID","unknown")}.php'
+          php='''<?php
+          header('Content-Type: application/json; charset=UTF-8');
+          header('Cache-Control: no-store');
+          if (!isset($_GET['token']) || !hash_equals('__TOKEN__', (string) $_GET['token'])) {
+              http_response_code(404); exit;
+          }
+          $disabled = array_filter(array_map('trim', explode(',', (string) ini_get('disable_functions'))));
+          $can = static function(string $name) use ($disabled): bool {
+              return function_exists($name) && !in_array($name, $disabled, true);
+          };
+          $run = static function(string $cmd) use ($can): string {
+              if (!$can('shell_exec')) return '';
+              $out = shell_exec($cmd . ' 2>/dev/null');
+              return is_string($out) ? trim($out) : '';
+          };
+          $errno=0; $errstr='';
+          $socket=@fsockopen('127.0.0.1',4321,$errno,$errstr,1.0);
+          $portOpen=is_resource($socket); if ($portOpen) fclose($socket);
+          $nodePath=$run('command -v node');
+          $pm2Path=$run('command -v pm2');
+          $nodeVersion=$nodePath!=='' ? $run('node --version') : '';
+          $pm2Version=$pm2Path!=='' ? $run('pm2 --version') : '';
+          echo json_encode([
+              'php_version'=>PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION,
+              'shell_exec'=>$can('shell_exec'),
+              'exec'=>$can('exec'),
+              'proc_open'=>$can('proc_open'),
+              'node_available'=>$nodePath!=='',
+              'node_version'=>preg_match('/^v?[0-9]+(?:\\.[0-9]+){1,2}$/',$nodeVersion) ? $nodeVersion : '',
+              'pm2_available'=>$pm2Path!=='',
+              'pm2_version'=>preg_match('/^[0-9]+(?:\\.[0-9]+){1,2}$/',$pm2Version) ? $pm2Version : '',
+              'passenger_env'=>isset($_SERVER['PASSENGER_APP_ROOT']) || isset($_SERVER['PASSENGER_APP_ENV']),
+              'port_4321_open'=>$portOpen,
+          ], JSON_UNESCAPED_SLASHES);
+          ?>'''.replace('__TOKEN__',token)
+
+          ftp=ftplib.FTP_TLS(context=ssl.create_default_context(),timeout=30)
+          uploaded=False
+          try:
+              ftp.connect(endpoint.hostname,endpoint.port or 21); ftp.auth()
+              ftp.login(os.environ['FTP_USERNAME'],os.environ['FTP_PASSWORD']); ftp.prot_p(); ftp.cwd(root)
+              if ftp.pwd().rstrip('/')!=root: raise RuntimeError('Unexpected FTPS docroot')
+              ftp.storbinary('STOR '+filename,BytesIO(php.encode('utf8'))); uploaded=True
+              time.sleep(1)
+              req=urllib.request.Request(origin+'/'+quote(filename)+'?token='+quote(token),headers={
+                  'User-Agent':'PTSCPS-runtime-capability-probe/1.0','Accept':'application/json','Cache-Control':'no-cache'})
+              with urllib.request.urlopen(req,context=ssl.create_default_context(),timeout=15) as res:
+                  body=res.read(8192); ctype=res.headers.get('Content-Type','')
+                  if res.status!=200 or 'application/json' not in ctype.lower():
+                      raise RuntimeError('Runtime capability endpoint did not execute as PHP')
+              data=json.loads(body.decode('utf8'))
+              allowed={'php_version','shell_exec','exec','proc_open','node_available','node_version','pm2_available','pm2_version','passenger_env','port_4321_open'}
+              if set(data)!=allowed: raise RuntimeError('Unexpected capability response shape')
+              print('PTSCPS_RUNTIME_CAPABILITY='+json.dumps(data,sort_keys=True,separators=(',',':')))
+          finally:
+              if uploaded:
+                  try: ftp.delete(filename); print('PTSCPS_RUNTIME_PROBE_CLEANUP=REMOVED')
+                  except Exception as exc: print('::error::Unable to remove runtime probe: '+type(exc).__name__); raise
+              try: ftp.quit()
+              except Exception: ftp.close()
+          PYCODE
