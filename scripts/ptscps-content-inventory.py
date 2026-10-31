@@ -143,8 +143,10 @@ def main():
     for role, origin in (("source", source_url), ("target", target_url)):
         try:
             root, _, _ = wp_get(origin, "/wp-json/")
-            if not isinstance(root, dict) or "wp/v2" not in root.get("namespaces", []):
-                raise ValueError("WordPress wp/v2 namespace is missing")
+            if not isinstance(root, dict) or not isinstance(root.get("routes"), dict):
+                raise ValueError("Invalid WordPress REST API index")
+            # Some installations omit namespaces from the API index. Access to
+            # actual wp/v2 collections below is the authoritative capability test.
             manifest[role]["site_name"] = root.get("name", "")
             for collection in ROOT_COLLECTIONS:
                 try:
