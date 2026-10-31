@@ -120,6 +120,32 @@ jobs:
             await page.locator('body').waitFor({ state: 'visible', timeout: 15000 });
             await page.evaluate(async () => { if (document.fonts?.ready) await document.fonts.ready; });
             await page.waitForTimeout(2500);
+            // Homepage regression: verify all three CMS slides and the responsive
+            // image/icon overlap at mobile, tablet and desktop widths.
+            const device = viewport.width < 640 ? 'mobile' : 'desktop';
+            const slider = page.locator(`[data-pps-hero-slider][data-slider-device="${device}"]`);
+            const slides = slider.locator('[data-pps-slide]');
+            const slideCount = await slides.count();
+            if (slideCount !== 3) throw new Error(`${name}: expected 3 CMS banners, got ${slideCount}`);
+            if (!(await slides.first().evaluate(image => image.complete && image.naturalWidth > 0)))
+              throw new Error(`${name}: initial banner image not loaded`);
+            const controls = page.locator(`[data-pps-hero-controls][data-slider-device="${device}"]`);
+            await controls.locator('[data-pps-slide-next]').click();
+            await page.waitForTimeout(200);
+            const nextActive = await controls.locator('[data-pps-slide-dot="1"]').getAttribute('aria-current');
+            if (nextActive !== 'true') throw new Error(`${name}: next banner did not activate`);
+            await controls.locator('[data-pps-slide-prev]').click();
+            const overlap = await page.locator('[data-pps-section="services"] article').first().evaluate(card => {
+              const image = card.querySelector('img');
+              const badge = card.querySelector('div[aria-hidden="true"]');
+              if (!image || !badge) return null;
+              const i = image.getBoundingClientRect();
+              const b = badge.getBoundingClientRect();
+              return { imageBottom: Math.round(i.bottom), iconTop: Math.round(b.top), iconBottom: Math.round(b.bottom), cardWidth: Math.round(card.getBoundingClientRect().width) };
+            });
+            if (!overlap || !(overlap.iconTop < overlap.imageBottom && overlap.iconBottom > overlap.imageBottom))
+              throw new Error(`${name}: service badge does not overlap the image boundary: ${JSON.stringify(overlap)}`);
+            console.log('PTSCPS_RESPONSIVE_QA=' + JSON.stringify({name, device, slideCount, nextActive, overlap, status:'PASS'}));
             const initialHeight = await page.evaluate(() => document.documentElement.scrollHeight);
             const scrollStep = Math.max(320, Math.floor(viewport.height * 0.72));
             for (let y = 0; y < initialHeight; y += scrollStep) {
@@ -172,6 +198,7 @@ jobs:
 
           try {
             await capture('desktop', { width: 1440, height: 1000 }, false);
+            await capture('tablet', { width: 768, height: 1024 }, false);
             await capture('mobile', { width: 390, height: 844 }, true);
             await writeFile('preview/preview-meta.txt', [
               'PTSCPS homepage SSG preview',
