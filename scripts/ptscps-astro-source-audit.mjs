@@ -17,6 +17,7 @@ async function visit(dir) {
   }
 }
 await visit(root);
+await visit(path.join(projectRoot, 'scripts'));
 const ext = p => path.extname(p);
 const files = all.filter(p => ['.astro', '.ts', '.tsx', '.js', '.jsx', '.css', '.json'].includes(ext(p)));
 const allPaths = new Set(all.map(p => path.normalize(p)));
