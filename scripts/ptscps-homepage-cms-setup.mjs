@@ -138,7 +138,7 @@ try {
         });
       }
       const iframe = page.frameLocator('#TB_iframeContent');
-      const rowButton = iframe.locator(`a.insert-shortcode[title*="${spec.id}"]`);
+      const rowButton = iframe.locator(`input.insert-shortcode[title*="${spec.id}"]`);
       await rowButton.waitFor({state:'visible',timeout:20000});
       await rowButton.click();
       await page.waitForTimeout(600);
