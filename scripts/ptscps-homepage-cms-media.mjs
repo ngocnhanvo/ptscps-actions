@@ -140,11 +140,21 @@ async function finishSelection(alt) {
     await altInput.waitFor({ state:'visible', timeout:10000 });
     await altInput.fill(alt);
   }
+  // Capture the selected, WordPress-owned attachment before the modal closes.
+  const attachment = await page.evaluate(() => {
+    const frame = window.wp?.media?.editor?.get?.('textarea-insert-helper');
+    const model = frame?.state?.()?.get?.('selection')?.first?.();
+    if (!model) return null;
+    return { id:model.id, url:model.get('url'), type:model.get('type') };
+  });
+  assert(attachment?.type === 'image' && typeof attachment.url === 'string',
+    'WordPress media picker has no selected image attachment');
   const insert = page.locator('.media-modal button.media-button-insert:visible').last();
   assert(await insert.count() > 0, 'WordPress native Insert into post button unavailable');
   await insert.click();
   await page.locator('.media-modal').waitFor({ state:'hidden', timeout:20000 });
   await page.waitForTimeout(200); // Wait for the native helper textarea change callback.
+  return attachment;
 }
 
 async function saveAndReadBack(table, expectedRows) {
@@ -207,18 +217,31 @@ try {
       let reused = false;
       if (exact?.id) reused = await selectExisting(exact.id, spec.basename);
       if (!reused) await uploadCurrent(spec.file);
-      await finishSelection(spec.alt);
-      // WordPress inserts into the ESC Table hidden helper textarea. Its native
-      // change handler copies the generated media HTML into the selected cell.
-      const nativeBridge = await page.evaluate(() => {
+      const attachment = await finishSelection(spec.alt);
+      // Use the native TablePress helper callback. If WordPress's asynchronous
+      // send-to-editor response leaves it empty, rebuild the same image from the
+      // selected WP library attachment (never from the legacy URL).
+      const nativeBridge = await page.evaluate(({ attachment, alt, origin }) => {
         const helper = document.querySelector('#textarea-insert-helper');
-        const html = String(helper?.value || '');
-        const hasImage = /<img\b/i.test(html);
         const callback = window.tp?.helpers?.editor?.insert_from_helper_textarea;
-        if (hasImage && typeof callback === 'function') callback.call(helper);
-        return { helperLength:html.length, helperHasImage:hasImage,
-          nativeHandler:typeof callback === 'function' };
-      });
+        if (!helper || typeof callback !== 'function') throw new Error('Native TablePress image callback missing');
+        const imageUrl = new URL(attachment.url);
+        if (imageUrl.origin !== origin || !imageUrl.pathname.startsWith('/wp-content/uploads/'))
+          throw new Error('WordPress media URL is not in the verified destination uploads origin');
+        let html = String(helper.value || '');
+        const nativeHTML = /<img\b/i.test(html);
+        if (!nativeHTML) {
+          const img = document.createElement('img');
+          img.src = imageUrl.href;
+          img.alt = alt;
+          img.loading = 'lazy';
+          helper.value = img.outerHTML;
+          html = helper.value;
+        }
+        callback.call(helper);
+        return { helperLength:html.length, helperHasImage:/<img\b/i.test(html),
+          usedSelectedMediaFallback:!nativeHTML, nativeHandler:true };
+      }, { attachment, alt:spec.alt, origin });
       console.log('CMS_MEDIA_NATIVE_BRIDGE=' + JSON.stringify({ table, row:spec.row, ...nativeBridge }));
       // Read-only structural evidence from the native TablePress editor after Insert Image.
       // Never log cell content, authentication state or image URLs.
