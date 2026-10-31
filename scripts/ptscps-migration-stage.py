@@ -78,6 +78,12 @@ def reasons(record, source, target):
         errors.append('invalid_or_oversized_content')
     elif re.search(r'<(?:img|video|audio|iframe|source|script)\b|(?:src|srcset)\s*=|\[\w+[^]]*\]|(?:https?:)?//', html, re.I):
         errors.append('embedded_media_shortcodes_or_external_links_need_review')
+    # Legacy Elementor depends on its original widgets/styles. Even when it has
+    # no external links or media, raw Elementor HTML is not a safe native draft.
+    if isinstance(html, str) and re.search(
+            r'\bdata-elementor-(?:type|id|post-type)\b|\belementor-(?:section|column|widget|container)\b',
+            html, re.I):
+        errors.append('legacy_elementor_layout_requires_conversion')
     if kind == 'post' and not record.get('category_source_ids'):
         errors.append('post_category_missing')
     if record.get('source_url') and not str(record['source_url']).startswith(source + '/'):
