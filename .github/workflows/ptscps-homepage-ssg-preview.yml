@@ -110,10 +110,25 @@ jobs:
             await page.locator('body').waitFor({ state: 'visible', timeout: 15000 });
             await page.evaluate(async () => { if (document.fonts?.ready) await document.fonts.ready; });
             await page.waitForTimeout(2500);
+            const initialHeight = await page.evaluate(() => document.documentElement.scrollHeight);
+            const scrollStep = Math.max(320, Math.floor(viewport.height * 0.72));
+            for (let y = 0; y < initialHeight; y += scrollStep) {
+              await page.evaluate((top) => window.scrollTo({ top, behavior: 'instant' }), y);
+              await page.waitForTimeout(140);
+            }
+            await page.evaluate(() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' }));
+            await page.waitForTimeout(350);
+            await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
+            await page.waitForTimeout(250);
             const bodyText = (await page.locator('body').innerText()).trim();
             if (bodyText.length < 30) throw new Error('Preview has no meaningful visible content');
+            const dimensions = await page.evaluate(() => ({
+              clientWidth: document.documentElement.clientWidth,
+              scrollWidth: document.documentElement.scrollWidth,
+              scrollHeight: document.documentElement.scrollHeight,
+            }));
             await page.screenshot({ path: `preview/home-${name}.png`, fullPage: true });
-            notes.push(`${name}: title=${JSON.stringify(await page.title())}; body_chars=${bodyText.length}; failed_same_origin=${failed.slice(0,20).join(',') || 'none'}`);
+            notes.push(`${name}: title=${JSON.stringify(await page.title())}; body_chars=${bodyText.length}; client_width=${dimensions.clientWidth}; scroll_width=${dimensions.scrollWidth}; scroll_height=${dimensions.scrollHeight}; overflow_x=${dimensions.scrollWidth > dimensions.clientWidth ? 'yes' : 'no'}; failed_same_origin=${failed.slice(0,20).join(',') || 'none'}`);
             await context.close();
           }
 
