@@ -131,20 +131,31 @@ async function uploadCurrent(file) {
   const inputs = modal.locator('input[type="file"]');
   assert(await inputs.count() > 0, 'WordPress media file input unavailable');
   await inputs.last().setInputFiles(file);
-  await modal.locator('.attachment.selected, .attachment.details').first().waitFor({ state:'visible', timeout:45000 });
+  // Remember the newly uploaded Media ID immediately: the selected tile may
+  // vanish when WordPress redraws its modal after editing the ALT metadata.
+  const tile = modal.locator('.attachment.selected[data-id], .attachment.details[data-id]').first();
+  await tile.waitFor({ state:'visible', timeout:45000 });
+  const mediaId = await tile.getAttribute('data-id', { timeout:5000 });
+  assert(mediaId && /^\d+$/.test(mediaId), 'Uploaded WP media has no valid attachment ID');
+  return mediaId;
 }
 
-async function finishSelection(alt, basename) {
+async function finishSelection(alt, basename, mediaId) {
   const altInput = page.locator('.media-modal input[data-setting="alt"], .media-modal textarea[data-setting="alt"]').last();
   if (await altInput.count()) {
     await altInput.waitFor({ state:'visible', timeout:10000 });
     await altInput.fill(alt);
   }
-  // The media frame's insert state may have an empty selection model even when
-  // the visible attachment tile is selected. Verify the tile via WP's own REST.
-  const selected = page.locator('.media-modal .attachment.selected[data-id], .media-modal .attachment.details[data-id]').last();
-  const mediaId = await selected.getAttribute('data-id');
-  assert(mediaId && /^\d+$/.test(mediaId), 'No selected WP media attachment tile');
+  // Prefer the verified ID captured during upload/reuse. ALT edits and modal
+  // redraws can remove the selection CSS class before we submit the image.
+  if (!mediaId) {
+    mediaId = await page.evaluate(() => window.wp?.media?.frame?.state?.()?.get?.('selection')?.first?.()?.get?.('id') || null);
+  }
+  if (!mediaId) {
+    const tile = page.locator('.media-modal .attachment.selected[data-id], .media-modal .attachment.details[data-id]').last();
+    if (await tile.count()) mediaId = await tile.getAttribute('data-id', { timeout:3000 });
+  }
+  assert(mediaId && /^\d+$/.test(String(mediaId)), 'No verified selected WP media attachment ID');
   // CMS intermittently resets connections during media processing; retry only
   // this verified read, with bounded backoff. Never repeat an upload on retry.
   let response;
@@ -167,8 +178,18 @@ async function finishSelection(alt, basename) {
     'Selected WordPress media does not match verified homepage source filename');
   const attachment = { id:wpMedia.id, url:wpMedia.source_url, type:'image' };
   const insert = page.locator('.media-modal button.media-button-insert:visible').last();
-  assert(await insert.count() > 0, 'WordPress native Insert into post button unavailable');
-  await insert.click();
+  if (await insert.count() && await insert.isEnabled()) {
+    await insert.click();
+  } else {
+    // WordPress sometimes loses the modal selection on redraw. Close only
+    // after verifying the exact Media ID/URL; the native TablePress helper
+    // receives the verified attachment in the caller, never the legacy URL.
+    await page.evaluate(() => {
+      const frame = window.wp?.media?.frame;
+      if (!frame?.close) throw new Error('WordPress native media frame unavailable');
+      frame.close();
+    });
+  }
   await page.locator('.media-modal').waitFor({ state:'hidden', timeout:20000 });
   await page.waitForTimeout(200); // Wait for the native helper textarea change callback.
   return attachment;
@@ -241,8 +262,8 @@ try {
       });
       let reused = false;
       if (exact?.id) reused = await selectExisting(exact.id, spec.basename);
-      if (!reused) await uploadCurrent(spec.file);
-      const attachment = await finishSelection(spec.alt, path.basename(spec.file));
+      const mediaId = reused ? exact.id : await uploadCurrent(spec.file);
+      const attachment = await finishSelection(spec.alt, path.basename(spec.file), mediaId);
       // Use the native TablePress helper callback. If WordPress's asynchronous
       // send-to-editor response leaves it empty, rebuild the same image from the
       // selected WP library attachment (never from the legacy URL).
