@@ -18,7 +18,7 @@ Keep WordPress-controlled Astro production deployment usable for SSG/static outp
 - Read-only FTPS diagnosis run `41190602826` confirmed frontend docroot has `client/index.html`, `server/entry.mjs` and `pm2-reload.txt`, but no root `.htaccess`, root `index.html`, `ecosystem.config.cjs` or `.env`.
 - Guarded Apache bridge test run `41190919885` successfully installed the managed proxy temporarily, but both `/` and `/api/agent/history` returned HTTP 503 five times. The workflow then verified and removed the newly-created `.htaccess` automatically.
 - Ephemeral runtime capability probe run `41191194251` completed successfully and removed its temporary PHP probe. The frontend vhost exposes PHP 8.4, but `node`, `pm2` and Passenger are not available there; `exec`, `shell_exec` and `proc_open` are disabled; port `127.0.0.1:4321` is closed.
-- Therefore the Astro compile/package/upload path is healthy. The remaining blocker is **hosting runtime provisioning**: this frontend vhost currently has no runnable Node/Passenger/PM2 process for `server/entry.mjs`.
+- Therefore the Astro compile/package/upload path is healthy. Hosting runtime provisioning remains a blocker only for public SSR/API routes; it does not block SSG/static build/package/upload/activation.
 - Owner decision on 2026-10-31: missing public SSR runtime must be reported as a warning, not fail an otherwise successful SSG build/package/upload/activation. Static client verification remains blocking.
 
 ## Safety / rollback state
@@ -35,9 +35,9 @@ Keep WordPress-controlled Astro production deployment usable for SSG/static outp
 - Do not flatten `client/` into the document root. Compile/package/activation and deployed static-client checks remain blocking; only public SSR runtime availability is downgraded to a warning until hosting provides Node.
 - Do not direct-dispatch the production deploy workflow; production build remains WordPress **Build Website** controlled.
 
-## Required external hosting prerequisite
+## Separate SSR hosting prerequisite
 
-Provision a Node-capable application for `ptscps.thegioihosting.io.vn` before the next production build. Preferred contract: Node 24, application root at the frontend deployment root, startup file `server/entry.mjs`, production mode, and the hosting-assigned `PORT`/routing mechanism. If the hosting instead provides PM2/VPS access, run the standalone entry behind a verified reverse proxy; do not assume fixed port 4321 until it is actually listening.
+Provision a Node-capable application for `ptscps.thegioihosting.io.vn` before public SSR/API routes are expected to work. Preferred contract: Node 24, application root at the frontend deployment root, startup file `server/entry.mjs`, production mode, and the hosting-assigned `PORT`/routing mechanism. If the hosting instead provides PM2/VPS access, run the standalone entry behind a verified reverse proxy; do not assume fixed port 4321 until it is actually listening.
 
 ## Next action
 
