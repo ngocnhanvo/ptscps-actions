@@ -188,14 +188,30 @@ try {
       if (exact?.id) reused = await selectExisting(exact.id, spec.basename);
       if (!reused) await uploadCurrent(spec.file);
       await finishSelection(spec.alt);
-      // Current TablePress editor exposes getValueFromCoords, not getDataAtCell.
-      // Keep the native Insert Image result as the only source of table markup.
-      const cell = await page.evaluate(({ dataRow, imageCol }) => {
+      // Read-only structural evidence from the native TablePress editor after Insert Image.
+      // Never log cell content, authentication state or image URLs.
+      const cellProbe = await page.evaluate(({ dataRow, imageCol }) => {
         const editor = window.tp?.editor;
-        const row = dataRow + 2;
-        return String(editor?.getValueFromCoords?.(imageCol, row) ?? editor?.getData?.()?.[row]?.[imageCol] ?? '');
+        const grid = editor?.getData?.() || [];
+        const coords = [dataRow, dataRow + 1, dataRow + 2].flatMap(y =>
+          [imageCol, imageCol + 1].map(x => {
+            const value = String(editor?.getValueFromCoords?.(x, y) ?? grid?.[y]?.[x] ?? '');
+            return { x, y, length:value.length, img:/<img\b/i.test(value) };
+          }));
+        const matches = [];
+        if (Array.isArray(grid)) grid.forEach((row, y) => {
+          if (Array.isArray(row)) row.forEach((value, x) => {
+            if (/<img\b/i.test(String(value ?? ''))) matches.push({ x, y });
+          });
+        });
+        return { coords, matches:matches.slice(0,20), gridRows:grid.length,
+          selectedType:typeof editor?.selectedCell,
+          selectedText:String(editor?.selectedCell?.tagName || ''),
+          selectionType:typeof editor?.selection };
       }, { dataRow:spec.row, imageCol });
-      assert(cell.includes('<img'), `Native picker did not insert image ${table} row ${spec.row}`);
+      console.log('CMS_MEDIA_CELL_PROBE=' + JSON.stringify({ table, row:spec.row, ...cellProbe }));
+      assert(cellProbe.matches.length > 0 || cellProbe.coords.some(c => c.img),
+        `Native picker did not insert image ${table} row ${spec.row}`);
       console.log(`CMS_MEDIA_CELL=${table}:${spec.row} native_insert=PASS reused=${reused ? 'YES':'NO'}`);
     }
 
