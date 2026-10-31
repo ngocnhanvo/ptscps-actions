@@ -4,6 +4,7 @@ on:
     branches: [main]
     paths:
       - 'audit/ptscps-header-menu-setup.ready'
+      - 'audit/ptscps-header-menu-setup-retry-v2.ready'
 permissions:
   contents: read
 jobs:

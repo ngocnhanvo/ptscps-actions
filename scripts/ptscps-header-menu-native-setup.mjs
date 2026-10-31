@@ -56,9 +56,10 @@ try {
       await code.fill('Header');
       await lang.selectOption('vi');
       await page.locator('#esc-menu-type').selectOption('dropdown');
-      const create = page.locator('#save_menu_header');
-      if (!(await create.count())) throw Error('Cannot find native Create Menu button; no write');
-      await create.click();
+      const create = page.locator('input[name="save_menu"]:visible, button[name="save_menu"]:visible').first();
+      report('NATIVE_SAVE_CONTROLS', await page.locator('[name="save_menu"]').evaluateAll(nodes => nodes.map(n => ({ id:n.id, text:n.value || n.textContent, visible: !!n.getClientRects().length, disabled:n.disabled }))));
+      if (!(await create.count())) throw Error('Cannot find visible native Create Menu button; no write');
+      await create.click({timeout:12000});
       await page.waitForLoadState('domcontentloaded');
       await page.waitForTimeout(1200);
       report('NATIVE_MENU_CREATED','SUBMITTED');
@@ -101,9 +102,9 @@ try {
       await key.fill('home');
       const nativeUrl = item.locator(`[name="menu-item-url[${itemId}]"]`);
       if (await nativeUrl.count()) await nativeUrl.fill('/');
-      const save = page.locator('#save_menu_header');
+      const save = page.locator('input[name="save_menu"]:visible, button[name="save_menu"]:visible').first();
       if (!(await save.count())) throw Error('Native Save Menu button unavailable');
-      await save.click();
+      await save.click({timeout:12000});
       await page.waitForLoadState('domcontentloaded');
       report('NATIVE_ITEM_SAVED','SUBMITTED');
     }
