@@ -36,6 +36,9 @@ try{
   if(editorValue.trim()!==xml.trim())throw Error('PTSCPS_SEO_FIX=BLOCKED: UI form differs from public REST; refusing overwrite');
   await page.locator('input[name="sitemap_mode"][value="manual"]').check();
   await page.locator('#esc-seo-xml').fill(replacement);
+  // Required by WordPress when the first deployment has no published sitemap.
+  // This is safe only after verifying the single retired-host URL above.
+  await page.locator('#esc-seo-confirm-drop').check();
   const form=page.locator('form:has(input[name="action"][value="esc_seo_files_save"])');
   const submit=form.locator('input[type="submit"]');
   const navigation=page.waitForNavigation({waitUntil:'domcontentloaded',timeout:45000});
