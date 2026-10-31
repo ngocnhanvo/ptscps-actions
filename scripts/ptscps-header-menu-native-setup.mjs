@@ -10,11 +10,21 @@ const context = await browser.newContext({ viewport: { width: 1440, height: 900 
 const page = await context.newPage();
 const report = (key, val) => console.log(`HEADER_SETUP_${key}=${JSON.stringify(val)}`);
 const readMenu = async () => {
-  const response = await page.request.get(`${wp}/wp-json/esc-api/v1/menus?_esc_audit=${Date.now()}`, { timeout: 25000, headers: { 'Cache-Control': 'no-cache' } });
-  if (!response.ok()) throw Error(`Menu endpoint returned HTTP ${response.status()}`);
-  const data = await response.json();
-  if (data?.success !== true) throw Error('Unexpected menus API contract');
-  return data.menus?.Header?.vi || null;
+  // The WordPress REST connection can reset briefly after saving menu metadata.
+  // Retry only the read, never replaying a native menu create/save operation.
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    try {
+      const response = await page.request.get(`${wp}/wp-json/esc-api/v1/menus?_esc_audit=${Date.now()}`, { timeout: 25000, headers: { 'Cache-Control': 'no-cache' } });
+      if (!response.ok()) throw Error(`Menu endpoint returned HTTP ${response.status()}`);
+      const data = await response.json();
+      if (data?.success !== true) throw Error('Unexpected menus API contract');
+      return data.menus?.Header?.vi || null;
+    } catch (error) {
+      if (attempt === 4) throw error;
+      report('MENU_READ_RETRY', { attempt });
+      await page.waitForTimeout(1250 * attempt);
+    }
+  }
 };
 const snapshot = menu => menu && ({ id:menu.id, code:menu.code, lang:menu.lang, type:menu.type, item_count:menu.items?.length ?? -1, items:(menu.items || []).map(it => ({ label:it.label,key:it.key,slug:it.slug,href:it.href,linkMode:it.linkMode,linkType:it.linkType })) });
 try {
@@ -33,7 +43,7 @@ try {
     if (frontResponse.status() !== 200) throw Error('Verified frontend homepage URL stopped returning 200; no write');
     const existingMenus = await page.request.get(`${wp}/wp-json/esc-api/v1/menus`);
     const allMenus = (await existingMenus.json()).menus || {};
-    if (Object.keys(allMenus).some(k => k.toLowerCase() === 'header' && allMenus[k]?.vi)) throw Error('Unexpected Header.vi identity conflict');
+    if (!initial && Object.keys(allMenus).some(k => k.toLowerCase() === 'header' && allMenus[k]?.vi)) throw Error('Unexpected Header.vi identity conflict');
 
     await page.goto(`${wp}/wp-login.php`, { waitUntil:'domcontentloaded', timeout:50000 });
     await page.locator('#user_login').fill(username);
