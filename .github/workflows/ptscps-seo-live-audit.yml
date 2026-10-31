@@ -32,4 +32,5 @@ jobs:
           if urls[0]==urls[1]:raise SystemExit('Origins overlap')
           with open(os.environ['GITHUB_ENV'],'a') as f:f.write('WP_ORIGIN='+urls[0]+'\nCLIENT_ORIGIN='+urls[1]+'\n')
           PY
-          node scripts/ptscps-seo-live-audit.mjs
+      - name: Read canonical SEO data (read-only)
+        run: node scripts/ptscps-seo-live-audit.mjs
