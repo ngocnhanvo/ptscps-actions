@@ -83,6 +83,30 @@ try {
   await desktopLink.waitFor({ state: 'visible', timeout: 12000 });
   const desktopHref = await desktopLink.getAttribute('href');
   if (!desktopHref || new URL(desktopHref, front).pathname !== '/') throw Error('Desktop Header home link does not lead to /');
+  await desktop.evaluate(() => window.scrollTo({ top: 480, behavior: 'instant' }));
+  await desktop.waitForTimeout(350);
+  const stickyDesktop = await desktop.evaluate(() => {
+    const header = document.querySelector('#main-header');
+    const logo = document.querySelector('#header-brandbar a[aria-label="Về trang chủ"]');
+    const menu = document.querySelector('#header-navrow');
+    const bounds = element => element?.getBoundingClientRect();
+    return {
+      scrollY: window.scrollY,
+      headerTop: bounds(header)?.top,
+      logoTop: bounds(logo)?.top,
+      menuTop: bounds(menu)?.top,
+      logoWidth: bounds(logo)?.width,
+      menuWidth: bounds(menu)?.width,
+      headerPosition: header ? getComputedStyle(header).position : null,
+    };
+  });
+  if (stickyDesktop.scrollY < 200 || stickyDesktop.headerPosition !== 'sticky'
+      || Math.abs(stickyDesktop.headerTop) > 3 || stickyDesktop.logoTop < -3
+      || Math.abs(stickyDesktop.menuTop) > 3 || stickyDesktop.logoWidth < 40
+      || stickyDesktop.menuWidth < 40) {
+    throw Error(`Desktop header lost logo or menu on scroll: ${JSON.stringify(stickyDesktop)}`);
+  }
+  report('DESKTOP_STICKY_QA', stickyDesktop);
   await desktop.close();
 
   const mobile = await context.newPage();
@@ -91,6 +115,23 @@ try {
   if (mobileResponse?.status() !== 200) throw Error('Live mobile homepage did not return HTTP 200');
   const toggle = mobile.locator('#hamburger-btn');
   await toggle.waitFor({ state: 'visible', timeout: 12000 });
+  await mobile.evaluate(() => window.scrollTo({ top: 480, behavior: 'instant' }));
+  await mobile.waitForTimeout(350);
+  const stickyMobile = await mobile.evaluate(() => {
+    const logo = document.querySelector('#header-brandbar a[aria-label="Về trang chủ"]');
+    const menuButton = document.querySelector('#hamburger-btn');
+    return {
+      scrollY: window.scrollY,
+      logoTop: logo?.getBoundingClientRect().top,
+      buttonTop: menuButton?.getBoundingClientRect().top,
+      fixed: document.querySelector('#main-header')?.classList.contains('mobile-header-fixed'),
+    };
+  });
+  if (stickyMobile.scrollY < 200 || !stickyMobile.fixed || stickyMobile.logoTop < -3
+      || stickyMobile.logoTop > 8 || stickyMobile.buttonTop < -3 || stickyMobile.buttonTop > 72) {
+    throw Error(`Mobile header lost logo or menu button on scroll: ${JSON.stringify(stickyMobile)}`);
+  }
+  report('MOBILE_STICKY_QA', stickyMobile);
   await toggle.click();
   const mobileMenu = mobile.locator('#mobile-menu-container');
   await mobileMenu.waitFor({ state: 'visible', timeout: 12000 });
