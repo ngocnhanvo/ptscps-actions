@@ -1,0 +1,43 @@
+name: PTSCPS WordPress native SEO canonical repair and Build Website
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'audit/ptscps-seo-native-repair.ready'
+permissions:
+  contents: read
+jobs:
+  seo-native-repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate PTSCPS origins
+        shell: bash
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: |
+          python3 - <<'PY'
+          import os,re
+          from urllib.parse import urlsplit
+          vals=dict(re.findall(r'^\s*(WC_URL|WC_URL_CLIENT)\s*=\s*(.+)\s*$',os.environ.get('ENV_FILE',''),re.M))
+          urls=[]
+          for key in ('WC_URL','WC_URL_CLIENT'):
+            p=urlsplit(vals.get(key,'').strip().strip('"\''))
+            if p.scheme!='https' or not p.hostname or p.path not in ('','/') or p.query or p.fragment or p.username or p.password or p.port not in (None,443):raise SystemExit('Invalid '+key)
+            urls.append('https://'+p.hostname)
+          if urls[0]==urls[1]:raise SystemExit('Origins overlap')
+          with open(os.environ['GITHUB_ENV'],'a') as f:f.write('WP_ORIGIN='+urls[0]+'\nCLIENT_ORIGIN='+urls[1]+'\n')
+          PY
+      - name: Install Playwright Chromium
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Correct only verified old sitemap URL via WordPress editor then trigger native Build Website
+        env:
+          WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
+          WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
+        run: node scripts/ptscps-seo-native-repair.mjs
