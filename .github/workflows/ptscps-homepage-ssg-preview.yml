@@ -90,7 +90,8 @@ jobs:
                 !url.pathname.startsWith('/client/') &&
                 (url.pathname.startsWith('/_astro/') ||
                  url.pathname.startsWith('/images/') ||
-                 url.pathname.startsWith('/data/'))
+                 url.pathname.startsWith('/data/') ||
+                 url.pathname.startsWith('/fonts/'))
               ) {
                 mapped = origin + '/client' + url.pathname + url.search;
               }
