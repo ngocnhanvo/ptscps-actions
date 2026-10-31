@@ -1,0 +1,45 @@
+name: PTSCPS WordPress Build Website browser trigger (guarded)
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'audit/ptscps-wordpress-build-once.ready'
+permissions:
+  contents: read
+concurrency:
+  group: ptscps-wordpress-build-ui-trigger
+  cancel-in-progress: false
+jobs:
+  trigger-via-wordpress:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate WordPress target from configured ENV_FILE
+        shell: bash
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: |
+          python3 - <<'PY'
+          import os,re
+          from urllib.parse import urlsplit
+          vals=dict(re.findall(r'^\s*(WC_URL|WC_URL_CLIENT)\s*=\s*(.+)\s*$',os.environ.get('ENV_FILE',''),re.M))
+          wp=urlsplit(vals.get('WC_URL','').strip().strip('"\''))
+          front=urlsplit(vals.get('WC_URL_CLIENT','').strip().strip('"\''))
+          if wp.scheme!='https' or not wp.hostname or wp.hostname==front.hostname or wp.path not in ('','/') or wp.query or wp.fragment or wp.username or wp.password or wp.port not in (None,443):
+              raise SystemExit('WP_BUILD_BROWSER=BLOCKED: invalid WP origin')
+          with open(os.environ['GITHUB_ENV'],'a',encoding='utf8') as f:f.write('WP_ORIGIN=https://'+wp.hostname+'\n')
+          print('WP_BUILD_BROWSER_ORIGIN=PASS')
+          PY
+      - name: Install Playwright Chromium
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Trigger build only through native authenticated WordPress Build Website UI
+        env:
+          WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
+          WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
+        run: node scripts/ptscps-wordpress-build-verify.mjs
