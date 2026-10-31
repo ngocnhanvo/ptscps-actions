@@ -1,0 +1,37 @@
+name: PTSCPS Astro source static audit (no build)
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'audit/ptscps-astro-static-audit.ready'
+permissions:
+  contents: read
+jobs:
+  source-compile-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout audit scripts
+        uses: actions/checkout@v4
+        with:
+          path: actions-hub
+      - name: Checkout current Astro master (read only)
+        uses: actions/checkout@v4
+        with:
+          repository: ngocnhanvo/ptscps-astro
+          ref: master
+          token: ${{ secrets.SOURCE_REPO_PAT }}
+          path: source
+          persist-credentials: false
+      - name: Verify source branch and head
+        run: |
+          test "$(git -C source branch --show-current)" = master
+          echo "Static audit source: $(git -C source rev-parse HEAD)"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install standalone parsers only
+        working-directory: actions-hub
+        run: npm install --no-save --no-audit --no-fund @astrojs/compiler@2 typescript@5.8.3
+      - name: Parse all source, JSON and local imports (without Astro build)
+        run: node actions-hub/scripts/ptscps-astro-source-audit.mjs source
