@@ -307,20 +307,33 @@ jobs:
           python3 - <<'PY'
           import os,urllib.request,time
           origin=os.environ['PTSCPS_CLIENT_ORIGIN']
-          static_url=origin+'/client/index.html'
+          # Hosting can serve dist/client as the actual public document root.
+          # In that configuration /index.html is valid but /client/index.html
+          # returns 404. Both layouts must still pass a real homepage HTML test.
+          static_paths=('/index.html', '/', '/client/index.html')
           static_result=None
+          static_path=None
           for attempt in range(5):
-              try:
-                  with urllib.request.urlopen(urllib.request.Request(static_url,headers={'Cache-Control':'no-cache'}),timeout=18) as resp:
-                      static_result=(resp.status,resp.headers.get('Content-Type',''))
-                      if resp.status==200 and 'html' in static_result[1].lower():
-                          print('PTSCPS_PUBLIC_SSG_SMOKE=PASS')
-                          break
-              except Exception as exc:
-                  static_result=(type(exc).__name__,)
+              for candidate in static_paths:
+                  try:
+                      url=origin+candidate
+                      with urllib.request.urlopen(urllib.request.Request(url,headers={'Cache-Control':'no-cache'}),timeout=18) as resp:
+                          content_type=resp.headers.get('Content-Type','')
+                          content=resp.read(512_000).decode('utf-8','replace')
+                          static_result=(resp.status,content_type,candidate)
+                          if (resp.status==200 and 'html' in content_type.lower()
+                                  and 'id="main-content"' in content
+                                  and 'data-pps-section=' in content):
+                              static_path=candidate
+                              print('PTSCPS_PUBLIC_SSG_SMOKE=PASS path='+candidate)
+                              break
+                  except Exception as exc:
+                      static_result=(type(exc).__name__,candidate)
+              if static_path:
+                  break
               time.sleep(4)
-          else:
-              raise RuntimeError('Static client not verified after deployment: '+str(static_result))
+          if not static_path:
+              raise RuntimeError('Static homepage HTML not verified after deployment: '+str(static_result))
 
           # Runtime availability is a hosting capability, not a compile/deploy
           # failure. Keep it visible, but do not fail an otherwise healthy SSG
@@ -345,6 +358,6 @@ jobs:
               if summary:
                   with open(summary,'a',encoding='utf8') as out:
                       out.write('\n## Runtime warning\n\n')
-                      out.write('- SSG client: PASS (`/client/index.html`)\n')
+                      out.write('- SSG client: PASS (`'+static_path+'`)\n')
                       out.write('- Public SSR `/`: WARNING (hosting Node runtime not available)\n')
           PY
