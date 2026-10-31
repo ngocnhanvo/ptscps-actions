@@ -1,5 +1,6 @@
 import { chromium } from 'playwright';
-import { mkdir, readFileSync, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
 const origin = process.env.WP_ORIGIN;
