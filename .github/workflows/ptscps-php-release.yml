@@ -1,5 +1,8 @@
 name: PTSCPS PHP deployment (manual opt-in)
 on:
+  push:
+    branches: [main]
+    paths: [.ptscps-folders-count-release-request]
   workflow_dispatch:
     inputs:
       confirm:
@@ -13,7 +16,11 @@ concurrency:
   cancel-in-progress: false
 jobs:
   wordpress-php:
-    if: github.repository == 'ngocnhanvo/ptscps-actions' && inputs.confirm == 'DEPLOY_PHP'
+    if: >-
+      github.repository == 'ngocnhanvo/ptscps-actions'
+      && ((github.event_name == 'workflow_dispatch' && inputs.confirm == 'DEPLOY_PHP')
+          || (github.event_name == 'push' && github.ref == 'refs/heads/main'
+              && github.event.head_commit.message == 'deploy(ptscps): accurate Folders counts PHP only'))
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
@@ -33,6 +40,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            test "$(cat .ptscps-folders-count-release-request)" = 'PTSCPS_FOLDERS_COUNT_ONLY source=f37d41edbad9f0dd5e3cb259ca01b889ce283227'
+            test "$(git -C source-php rev-parse HEAD)" = 'f37d41edbad9f0dd5e3cb259ca01b889ce283227'
+          fi
+          php -l source-php/wp-content/mu-plugins/ptscps-folders-accurate-counts.php
+          php source-php/wp-content/mu-plugins/tests/ptscps-folders-accurate-counts-test.php
           php -l source-php/ptscps-unzip.php
           php -l source-php/wp-content/plugins/github-trigger/vcs-build-trigger.php
           php -l source-php/wp-content/mu-plugins/esc-github-trigger-config.php
@@ -45,6 +58,7 @@ jobs:
       - name: Release only PTSCPS WordPress PHP files with protected FTPS
         shell: bash
         env:
+          PTSCPS_FOLDERS_ONLY: ${{ github.event_name == 'push' && '1' || '0' }}
           ENV_FILE: ${{ secrets.ENV_FILE }}
           FTP_SERVER: ${{ secrets.FTP_SERVER }}
           FTP_USERNAME: ${{ secrets.FTP_USERNAME }}

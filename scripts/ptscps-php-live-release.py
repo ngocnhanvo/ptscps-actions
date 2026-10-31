@@ -17,7 +17,7 @@ import ssl
 from urllib.parse import urlsplit
 
 SOURCE = Path("source-php")
-FILES = (
+DEFAULT_FILES = (
     "ptscps-unzip.php",
     "ptscps-unzip-v2.ready",
     "wp-content/mu-plugins/esc-github-trigger-config.php",
@@ -25,6 +25,10 @@ FILES = (
     "wp-content/plugins/github-trigger/vcs-build-trigger.php",
     "wp-content/plugins/github-trigger/vcs-build-trigger.js",
 )
+FILES = (
+    "wp-content/mu-plugins/ptscps-folders-accurate-counts.php",
+) if os.environ.get("PTSCPS_FOLDERS_ONLY") == "1" else DEFAULT_FILES
+
 raw = os.environ.get("FTP_SERVER", "").strip()
 if "://" not in raw:
     raw = "ftp://" + raw
