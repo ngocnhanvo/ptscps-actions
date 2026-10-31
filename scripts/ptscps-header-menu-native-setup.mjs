@@ -104,7 +104,7 @@ try {
             const form=document.querySelector('form#update-nav-menu');
             const action=form.querySelector('input[name="action"]');
             if (!action) throw Error('Native action missing');
-            action.value='create';
+            action.value='update';
             const submitted=document.createElement('input');
             submitted.type='hidden';submitted.name='save_menu';submitted.value='Tạo menu';
             form.appendChild(submitted);
