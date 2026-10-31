@@ -46,5 +46,29 @@ try {
   await page.goto(`${wp}/wp-admin/nav-menus.php`,{waitUntil:'domcontentloaded',timeout:30000});
   const nativeMenus = await page.locator('#select-menu-to-edit option').evaluateAll(elements => elements.map(el=>({label:el.textContent.trim().slice(0,80),value:el.value}))).catch(()=>[]);
   report('NATIVE_MENU_MANAGER_OPTIONS',nativeMenus);
+  const nativeState = await page.evaluate(() => {
+    const sample = (q) => [...document.querySelectorAll(q)].slice(0,20).map(el => ({ id:el.id, name:el.getAttribute('name'), text:(el.value||el.textContent||'').trim().slice(0,100), form:el.form?.id||null, visible:!!el.getClientRects().length }));
+    return {
+      url:location.pathname+location.search,
+      title:document.title,
+      menuName:document.querySelector('#menu-name')?.value||'',
+      menuId:document.querySelector('input[name="menu"]')?.value||'',
+      forms:sample('form'),
+      selects:sample('select'),
+      saveButtons:sample('[name="save_menu"]'),
+      identity:sample('#esc-menu-code,#esc-menu-lang,#esc-menu-type'),
+      notices:sample('.notice,.error,.updated,.wrap > .message'),
+      navigationHeading:(document.querySelector('#menu-management')?.textContent||'').trim().slice(0,500),
+      wpApiNoncePresent:!!window.wpApiSettings?.nonce,
+    };
+  });
+  report('NATIVE_MENU_MANAGER_DIAGNOSTIC',nativeState);
+  const afterAuthNonce = await page.evaluate(()=>window.wpApiSettings?.nonce||'');
+  if (afterAuthNonce) {
+    const nativeResponse = await page.request.get(`${wp}/wp-json/wp/v2/menus?per_page=100`,{headers:{'X-WP-Nonce':afterAuthNonce},timeout:25000});
+    const responseBody = nativeResponse.ok() ? await nativeResponse.json().catch(()=>null) : null;
+    report('AUTH_NATIVE_REST_MENUS',{status:nativeResponse.status(),items:Array.isArray(responseBody)?responseBody.map(x=>({id:x.id,name:x.name,slug:x.slug,count:x.count})).slice(0,30):null});
+  }
+
   report('AUDIT_RESULT','PASS_READ_ONLY');
 } finally { await browser.close(); }

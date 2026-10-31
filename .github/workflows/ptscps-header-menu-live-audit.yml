@@ -4,6 +4,7 @@ on:
     branches: [main]
     paths:
       - 'audit/ptscps-header-menu-live.ready'
+      - 'audit/ptscps-header-menu-deep-inspection.ready'
 permissions:
   contents: read
 jobs:
