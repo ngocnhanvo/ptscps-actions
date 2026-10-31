@@ -1,0 +1,48 @@
+name: PTSCPS SEO Files PHP controlled hotfix release
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'audit/ptscps-seo-php-hotfix.ready'
+permissions:
+  contents: read
+concurrency:
+  group: ptscps-wp-php-release
+  cancel-in-progress: false
+jobs:
+  php-seo-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout existing PTSCPS FTPS release script
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Checkout pinned PHP master
+        uses: actions/checkout@v4
+        with:
+          repository: ngocnhanvo/ptscps-php
+          ref: master
+          token: ${{ secrets.SOURCE_REPO_PAT }}
+          path: source-php
+          persist-credentials: false
+      - name: Validate exact PHP source and existing release contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C source-php rev-parse HEAD)" = '2a418b0c3146a2198560adfba05f8d1a895604c1'
+          php -l source-php/wp-content/mu-plugins/esc-seo-files.php
+          php -l source-php/wp-content/plugins/github-trigger/vcs-build-trigger.php
+          php -l source-php/ptscps-unzip.php
+          python3 -m py_compile scripts/ptscps-php-live-release.py
+          test "$(cat source-php/ptscps-unzip-v2.ready)" = 'PTSCPS_ASTRO_UNZIP_PROTOCOL=2'
+      - name: Deploy existing allowlisted PHP files using validated FTPS and rollback
+        shell: bash
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ptscps-php-live-release.py
