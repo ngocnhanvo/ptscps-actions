@@ -93,6 +93,30 @@ jobs:
                       if str(e).startswith('550'): results[name]='absent'
                       else:raise
               print('PTSCPS_FTPS_DOCROOT_FILES='+str(results))
+              # Read only the small signed deployment provenance manifest to
+              # distinguish an activation timeout from a completed activation.
+              import json
+              try:
+                  size=ftp.size('ptscps-staging-build.json')
+                  if size is None or size>16384: raise RuntimeError('Invalid deployment manifest size')
+                  chunks=[]
+                  ftp.retrbinary('RETR ptscps-staging-build.json',chunks.append)
+                  raw_manifest=b''.join(chunks)
+                  if len(raw_manifest)>16384: raise RuntimeError('Oversized deployment manifest')
+                  manifest=json.loads(raw_manifest)
+                  commit=manifest.get('commit','')
+                  branch=manifest.get('branch','')
+                  target=manifest.get('target','')
+                  if not re.fullmatch(r'[a-f0-9]{40}',str(commit)) or branch!='master' or target!=p.hostname:
+                      raise RuntimeError('Invalid published deployment provenance')
+                  print('PTSCPS_FTPS_PUBLISHED_SOURCE='+str({'commit':commit,'branch':branch,'target_match':True}))
+              except ftplib.error_perm as exc:
+                  print('PTSCPS_FTPS_PUBLISHED_SOURCE='+str({'status':'missing' if str(exc).startswith('550') else 'ftp_error'}))
+              try:
+                  size=ftp.size('ptscps-astro.zip')
+                  print('PTSCPS_FTPS_STAGED_ZIP='+str({'present':size is not None,'bytes':size}))
+              except ftplib.error_perm as exc:
+                  print('PTSCPS_FTPS_STAGED_ZIP='+str({'present':False if str(exc).startswith('550') else 'unknown'}))
               if results['.htaccess']=='present':
                   parts=[]
                   ftp.retrbinary('RETR .htaccess',parts.append)
