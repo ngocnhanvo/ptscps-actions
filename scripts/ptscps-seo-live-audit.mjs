@@ -3,7 +3,7 @@ const clientOrigin=process.env.CLIENT_ORIGIN;
 if(!wpOrigin||!clientOrigin||!/^https:\/\/[^/]+$/.test(wpOrigin)||!/^https:\/\/[^/]+$/.test(clientOrigin))throw new Error('Missing/invalid SEO origins');
 const response=await fetch(wpOrigin+'/wp-json/esc-seo-files/v1/public',{headers:{Accept:'application/json','Cache-Control':'no-cache'},signal:AbortSignal.timeout(20000)});
 console.log('SEO_API_STATUS='+response.status);
-if(!response.ok())throw new Error('SEO API unavailable');
+if(!response.ok)throw new Error('SEO API unavailable');
 const data=await response.json();
 const arrays=['extra','exclude'];
 const result={site:data.site,expectedSite:clientOrigin,revision:data.sitemap?.revision,mode:data.sitemap?.mode,robotsSitemapReferences:[...String(data.robots||'').matchAll(/^Sitemap:\s*(.+)$/gmi)].map(x=>x[1]),llmsOriginMatches:String(data.llms||'').includes(']('+clientOrigin+'/')};
