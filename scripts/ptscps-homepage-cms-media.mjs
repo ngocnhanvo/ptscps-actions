@@ -188,7 +188,13 @@ try {
       if (exact?.id) reused = await selectExisting(exact.id, spec.basename);
       if (!reused) await uploadCurrent(spec.file);
       await finishSelection(spec.alt);
-      const cell = await page.evaluate(({ dataRow, imageCol }) => String(window.tp.editor.getDataAtCell(dataRow + 2, imageCol) || ''), { dataRow:spec.row, imageCol });
+      // Current TablePress editor exposes getValueFromCoords, not getDataAtCell.
+      // Keep the native Insert Image result as the only source of table markup.
+      const cell = await page.evaluate(({ dataRow, imageCol }) => {
+        const editor = window.tp?.editor;
+        const row = dataRow + 2;
+        return String(editor?.getValueFromCoords?.(imageCol, row) ?? editor?.getData?.()?.[row]?.[imageCol] ?? '');
+      }, { dataRow:spec.row, imageCol });
       assert(cell.includes('<img'), `Native picker did not insert image ${table} row ${spec.row}`);
       console.log(`CMS_MEDIA_CELL=${table}:${spec.row} native_insert=PASS reused=${reused ? 'YES':'NO'}`);
     }
