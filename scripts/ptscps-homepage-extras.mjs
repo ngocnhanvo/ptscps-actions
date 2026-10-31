@@ -123,15 +123,40 @@ async function ensurePageShortcodes() {
       if(!ed || ed.isHidden())throw Error('Native Visual Editor missing');
       ed.focus();ed.selection.select(ed.getBody(),true);ed.selection.collapse(false);
     });
-    const visualButton=page.locator('button[aria-label*="ESC Table"],button[title*="ESC Table"]').first();
-    if(await visualButton.count()&&await visualButton.isVisible())await visualButton.click();
-    else await page.evaluate(()=>{
-      if(typeof window.tablepress_open_shortcode_thickbox!=='function')throw Error('ESC Table Insert Code picker unavailable');
-      window.tablepress_open_shortcode_thickbox();
-    });
+    // Thickbox sometimes preserves the previous picker iframe after inserting a
+    // shortcode. Close it explicitly before opening the next native picker.
+    const resetPicker=async()=>{
+      await page.evaluate(()=>{if(document.querySelector('#TB_window')&&typeof window.tb_remove==='function')window.tb_remove();});
+      await page.waitForTimeout(250);
+    };
+    const openPicker=async()=>{
+      const quickTag=page.locator('#qt_content_tablepress_quicktags_button');
+      const visualButton=page.locator('button[aria-label*="ESC Table"],button[title*="ESC Table"]').first();
+      if(await visualButton.count()&&await visualButton.isVisible())await visualButton.click();
+      else if(await quickTag.count()&&await quickTag.isVisible())await quickTag.click();
+      else await page.evaluate(()=>{
+        if(typeof window.tablepress_open_shortcode_thickbox!=='function')throw Error('ESC Table Insert Code picker unavailable');
+        window.tablepress_open_shortcode_thickbox();
+      });
+    };
+    await resetPicker();
+    await openPicker();
     const picker=page.frameLocator('#TB_iframeContent');
     const choose=picker.locator(`input.insert-shortcode[title*="${name}"]`);
-    await choose.waitFor({state:'visible',timeout:25000});
+    try { await choose.waitFor({state:'visible',timeout:12000}); }
+    catch {
+      const diagnosis=await picker.locator('input.insert-shortcode').evaluateAll(
+        els=>els.slice(0,35).map(el=>el.getAttribute('title')).filter(Boolean)).catch(()=>[]);
+      console.log(`EXTRAS_PICKER_REOPEN=${name} existing=${JSON.stringify(diagnosis)}`);
+      await resetPicker();
+      // The native Thickbox entry point rebuilds the iframe even after a
+      // previous selection has changed TinyMCE focus or toolbar visibility.
+      await page.evaluate(()=>{
+        if(typeof window.tablepress_open_shortcode_thickbox!=='function')throw Error('Native picker reload unavailable');
+        window.tablepress_open_shortcode_thickbox();
+      });
+      await choose.waitFor({state:'visible',timeout:20000});
+    }
     await choose.click();
     let found=false;
     for(let n=0;n<8;n++){await page.waitForTimeout(500);if((await currentEditor()).includes(name)){found=true;break;}}
