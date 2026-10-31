@@ -1,0 +1,89 @@
+name: PTSCPS migration stage (dry-run and gated draft pilot)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'audit/ptscps-migration-stage-20261031.ready'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Dry-run or single-record draft pilot (never publish)'
+        required: true
+        type: choice
+        default: dry-run
+        options: [dry-run, pilot]
+      source_id:
+        description: 'Legacy WP ID, required only for pilot'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  stage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download verified source inventory artifact
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh run download 41176770289 --repo ngocnhanvo/ptscps-actions --name ptscps-content-inventory-41176770289 --dir inventory
+          test -s inventory/migration-draft-plan.json
+          test -s inventory/summary.json
+          python3 - <<'PY'
+          import json
+          s=json.load(open('inventory/summary.json',encoding='utf-8'))
+          assert not s['errors'], 'Inventory had errors'
+          assert s['counts']['source']['pages']==49 and s['counts']['source']['posts']==296
+          assert s['counts']['target']['pages']==0 and s['counts']['target']['posts']==0
+          print('VERIFIED_INVENTORY=41176770289')
+          PY
+      - name: Parse target environment and stage content
+        shell: bash
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+          WP_APPLICATION_USER: ${{ secrets.WP_APPLICATION_USER }}
+          WP_APPLICATION_PASSWORD: ${{ secrets.WP_APPLICATION_PASSWORD }}
+          PTSCPS_BACKUP_RESTORE_RECEIPT: ${{ secrets.PTSCPS_BACKUP_RESTORE_RECEIPT }}
+          MODE: ${{ inputs.mode || 'dry-run' }}
+          SOURCE_ID: ${{ inputs.source_id }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' > "$RUNNER_TEMP/ptscps-target"
+          import os,re
+          from urllib.parse import urlsplit
+          vals=dict((m.group(1),m.group(2).strip().strip('"\'')) for line in os.environ.get('ENV_FILE','').splitlines() if (m:=re.match(r'^\s*([A-Za-z_][\w]*)\s*=\s*(.*)$',line)))
+          url=urlsplit(vals.get('WC_URL',''))
+          assert url.scheme=='https' and url.hostname and url.path in ('','/') and not url.username and not url.password and url.port in (None,443), 'Invalid target'
+          print('https://'+url.hostname)
+          PY
+          args=(--inventory inventory/migration-draft-plan.json --target "$(cat "$RUNNER_TEMP/ptscps-target")" --report migration-stage-report.json --mode "$MODE")
+          if [[ "$MODE" == pilot ]]; then
+            [[ "$SOURCE_ID" =~ ^[1-9][0-9]*$ ]] || { echo '::error::Pilot needs source_id'; exit 1; }
+            [[ -n "$PTSCPS_BACKUP_RESTORE_RECEIPT" ]] || { echo '::error::Backup/restore receipt missing; import not authorized'; exit 1; }
+            printf '%s' "$PTSCPS_BACKUP_RESTORE_RECEIPT" > "$RUNNER_TEMP/ptscps-backup-receipt.json"
+            args+=(--source-id "$SOURCE_ID" --backup-receipt "$RUNNER_TEMP/ptscps-backup-receipt.json")
+          fi
+          python3 scripts/ptscps-migration-stage.py "${args[@]}"
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          r=json.load(open('migration-stage-report.json',encoding='utf8'))
+          print('## PTSCPS migration staging')
+          print(f"- Mode: {r['mode']}\n- Candidates: {r['candidates']}\n- Eligible: {r['ready_for_pilot']}\n- Imported drafts: {r['imported']}")
+          print('- No production Astro build/deploy triggered')
+          PY
+      - name: Upload sanitized classification and pilot verification
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ptscps-migration-stage-${{ github.run_id }}
+          path: migration-stage-report.json
+          if-no-files-found: ignore
+          retention-days: 14
