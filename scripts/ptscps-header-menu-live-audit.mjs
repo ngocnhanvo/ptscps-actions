@@ -70,5 +70,36 @@ try {
     report('AUTH_NATIVE_REST_MENUS',{status:nativeResponse.status(),items:Array.isArray(responseBody)?responseBody.map(x=>({id:x.id,name:x.name,slug:x.slug,count:x.count})).slice(0,30):null});
   }
 
+  // New validation scope: this release added the first real Header.vi menu item.
+  // Check the *deployed* desktop/mobile navigation, not historical homepage sections.
+  if (header?.id !== 1767 || header.items?.length !== 1 || header.items[0].label !== 'Trang chủ' || header.items[0].key !== 'home') {
+    throw Error('Live WordPress Header.vi no longer contains the verified single home item');
+  }
+  const desktop = await context.newPage();
+  await desktop.setViewportSize({ width: 1440, height: 900 });
+  const desktopResponse = await desktop.goto(`${front}/`, { waitUntil: 'load', timeout: 50000 });
+  if (desktopResponse?.status() !== 200) throw Error('Live desktop homepage did not return HTTP 200');
+  const desktopLink = desktop.locator('#desktop-menu a').filter({ hasText: 'Trang chủ' }).first();
+  await desktopLink.waitFor({ state: 'visible', timeout: 12000 });
+  const desktopHref = await desktopLink.getAttribute('href');
+  if (!desktopHref || new URL(desktopHref, front).pathname !== '/') throw Error('Desktop Header home link does not lead to /');
+  await desktop.close();
+
+  const mobile = await context.newPage();
+  await mobile.setViewportSize({ width: 390, height: 844 });
+  const mobileResponse = await mobile.goto(`${front}/`, { waitUntil: 'load', timeout: 50000 });
+  if (mobileResponse?.status() !== 200) throw Error('Live mobile homepage did not return HTTP 200');
+  const toggle = mobile.locator('#hamburger-btn');
+  await toggle.waitFor({ state: 'visible', timeout: 12000 });
+  await toggle.click();
+  const mobileMenu = mobile.locator('#mobile-menu-container');
+  await mobileMenu.waitFor({ state: 'visible', timeout: 12000 });
+  const mobileLink = mobileMenu.locator('a').filter({ hasText: 'Trang chủ' }).first();
+  await mobileLink.waitFor({ state: 'visible', timeout: 12000 });
+  const mobileHref = await mobileLink.getAttribute('href');
+  if (!mobileHref || new URL(mobileHref, front).pathname !== '/') throw Error('Mobile Header home link does not lead to /');
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') throw Error('Mobile hamburger aria-expanded not updated');
+  report('PUBLIC_NAV_QA', { desktop: 'PASS', mobile: 'PASS', label: 'Trang chủ', href: '/' });
+  await mobile.close();
   report('AUDIT_RESULT','PASS_READ_ONLY');
 } finally { await browser.close(); }
