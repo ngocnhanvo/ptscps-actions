@@ -79,7 +79,17 @@ jobs:
               } catch {}
             });
 
-            await page.route(origin + '/**', async route => {
+            // Render the live public SSG root when it is available. Only the
+            // legacy /client-only hosting layout needs temporary route mapping.
+            let liveRoot = false;
+            try {
+              const probe = await page.request.get(origin + '/', { timeout: 18000, failOnStatusCode: false });
+              liveRoot = probe.status() === 200 && (probe.headers()['content-type'] || '').toLowerCase().includes('html');
+            } catch (error) {
+              console.log('PTSCPS_PREVIEW_ROOT_PROBE_WARNING=' + (error?.name || 'network'));
+            }
+            console.log('PTSCPS_PREVIEW_RENDER_MODE=' + (liveRoot ? 'public-root' : 'client-fallback'));
+            if (!liveRoot) await page.route(origin + '/**', async route => {
               const request = route.request();
               const url = new URL(request.url());
               let mapped = null;
@@ -156,7 +166,7 @@ jobs:
             });
             console.log('PTSCPS_PREVIEW_INSPECTION=' + JSON.stringify({ name, ...inspection }));
             await page.screenshot({ path: `preview/home-${name}.png`, fullPage: true });
-            notes.push(`${name}: title=${JSON.stringify(await page.title())}; body_chars=${bodyText.length}; client_width=${dimensions.clientWidth}; scroll_width=${dimensions.scrollWidth}; scroll_height=${dimensions.scrollHeight}; overflow_x=${dimensions.scrollWidth > dimensions.clientWidth ? 'yes' : 'no'}; failed_same_origin=${failed.slice(0,20).join(',') || 'none'}`);
+            notes.push(`${name}: render_mode=${liveRoot ? 'public-root' : 'client-fallback'}; title=${JSON.stringify(await page.title())}; body_chars=${bodyText.length}; client_width=${dimensions.clientWidth}; scroll_width=${dimensions.scrollWidth}; scroll_height=${dimensions.scrollHeight}; overflow_x=${dimensions.scrollWidth > dimensions.clientWidth ? 'yes' : 'no'}; failed_same_origin=${failed.slice(0,20).join(',') || 'none'}`);
             await context.close();
           }
 
