@@ -1,0 +1,67 @@
+name: PTSCPS legacy WordPress content inventory (read-only)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'audit/ptscps-content-inventory-20261031.ready'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inventory public WordPress content, no login or writes
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' > "$RUNNER_TEMP/ptscps_target_origin"
+          import os, re, sys
+          from urllib.parse import urlsplit
+          raw = os.environ.get('ENV_FILE', '')
+          values = {}
+          for line in raw.splitlines():
+              m = re.match(r'^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$', line)
+              if m: values[m.group(1)] = m.group(2).strip().strip('"\'')
+          value = values.get('WC_URL','')
+          url = urlsplit(value)
+          if url.scheme != 'https' or not url.hostname or url.username or url.password or url.path not in ('','/') or url.port not in (None,443):
+              raise SystemExit('Invalid/missing WC_URL in ENV_FILE')
+          print('https://' + url.hostname)
+          PY
+          python3 scripts/ptscps-content-inventory.py \
+            --source 'https://ptscps.com.vn' \
+            --target "$(cat "$RUNNER_TEMP/ptscps_target_origin")" \
+            --output migration-output
+      - name: Upload manifest for migration review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ptscps-content-inventory-${{ github.run_id }}
+          path: migration-output/
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Report progress
+        if: always()
+        shell: bash
+        run: |
+          if [[ -f migration-output/summary.json ]]; then
+            python3 - <<'PY'
+          import json, os
+          s=json.load(open('migration-output/summary.json',encoding='utf8'))
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a',encoding='utf8') as f:
+              f.write('## PTSCPS content migration — read-only baseline\n\n')
+              f.write('| Collection | Source | Target |\n|---|---:|---:|\n')
+              for name, old in s['counts']['source'].items():
+                  f.write(f'| {name} | {old} | {s["counts"]["target"].get(name)} |\n')
+              f.write(f'\n**Candidates:** {s["candidates"]}. **Imported:** 0. **Status:** IMPORT_NOT_STARTED.\n')
+              for error in s.get('errors',[]): f.write('- Error: '+error.replace('|','/')+'\n')
+          PY
+          fi
