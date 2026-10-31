@@ -43,9 +43,17 @@ try {
     await page.goto(`${wp}/wp-admin/nav-menus.php`, { waitUntil:'domcontentloaded', timeout:40000 });
     const pageMenuOptions = await page.locator('#select-menu-to-edit option').evaluateAll(nodes => nodes.map(n => ({ id:n.value, text:n.textContent.trim() })));
     report('EXISTING_MENU_OPTIONS',pageMenuOptions);
-    if (!initial && pageMenuOptions.some(item => /^Header(?: vi| tiếng việt)?$/i.test(item.text))) throw Error('Ambiguous pre-existing native menu name; no write');
+    const named = pageMenuOptions.filter(item => item.text === 'Header Tiếng Việt' && /^\d+$/.test(item.id) && Number(item.id)>0);
+    if (named.length > 1) throw Error('Multiple native Header Tiếng Việt menus; no write');
+    const currentMenuId = Number(new URL(page.url()).searchParams.get('menu') || await page.locator('input[name="menu"]').first().inputValue().catch(()=>0) || 0);
+    const currentMenuName = await page.locator('#menu-name').inputValue().catch(()=> '');
+    if (!initial && named.length === 0 && currentMenuId > 0) {
+      if (currentMenuName.trim() !== 'Header Tiếng Việt') throw Error('Menu manager already edits an unrelated native menu; refusing to create duplicate');
+      named.push({id:String(currentMenuId),text:'Header Tiếng Việt'});
+    }
+    report('CURRENT_NATIVE_MENU',{id:currentMenuId,name:currentMenuName});
 
-    if (!initial) {
+    if (!initial && named.length === 0) {
       const menuName = page.locator('#menu-name');
       const code = page.locator('#esc-menu-code');
       const lang = page.locator('#esc-menu-lang');
@@ -57,17 +65,52 @@ try {
       await lang.selectOption('vi');
       await page.locator('#esc-menu-type').selectOption('dropdown');
       const create = page.locator('input[name="save_menu"]:visible, button[name="save_menu"]:visible').first();
-      report('NATIVE_SAVE_CONTROLS', await page.locator('[name="save_menu"]').evaluateAll(nodes => nodes.map(n => ({ id:n.id, text:n.value || n.textContent, visible: !!n.getClientRects().length, disabled:n.disabled }))));
       if (!(await create.count())) throw Error('Cannot find visible native Create Menu button; no write');
       await create.click({timeout:12000});
       await page.waitForLoadState('domcontentloaded');
-      await page.waitForTimeout(1200);
       report('NATIVE_MENU_CREATED','SUBMITTED');
+    } else if (named.length === 1) {
+      report('NATIVE_MENU_REUSED',named[0]);
+      await page.goto(`${wp}/wp-admin/nav-menus.php?menu=${named[0].id}`, {waitUntil:'domcontentloaded', timeout:40000});
     }
 
     let active = await readMenu();
-    // A newly created empty WordPress nav-menu must already have Header/vi metadata.
-    if (!active?.id || active.code !== 'Header' || active.lang !== 'vi') throw Error('Native Header.vi identity did not persist after menu create');
+    if (!active?.id) {
+      // Native Create Menu may not include theme-added identity controls on its first POST.
+      // On the edit form, submit those native fields through WordPress itself; never SQL/REST-write meta.
+      const menuId = Number(new URL(page.url()).searchParams.get('menu') || named[0]?.id || 0);
+      if (!menuId || !Number.isInteger(menuId)) throw Error('Cannot identify uniquely created native menu ID; no metadata write');
+      await page.goto(`${wp}/wp-admin/nav-menus.php?menu=${menuId}`, { waitUntil:'domcontentloaded', timeout:40000 });
+      const code = page.locator('#esc-menu-code');
+      const lang = page.locator('#esc-menu-lang');
+      const type = page.locator('#esc-menu-type');
+      if (!(await code.count()) || !(await lang.count()) || !(await type.count())) throw Error('Cannot edit native WordPress menu identity');
+      report('IDENTITY_FORM_STATUS',await page.evaluate(()=>({
+        form:document.querySelector('#update-nav-menu')?.id || null,
+        codeForm:document.querySelector('#esc-menu-code')?.form?.id || null,
+        langForm:document.querySelector('#esc-menu-lang')?.form?.id || null,
+        menuId:document.querySelector('input[name="menu"]')?.value || null
+      })));
+      const choices = await lang.locator('option').evaluateAll(nodes => nodes.map(n=>n.value));
+      if (!choices.includes('vi')) throw Error('Language vi not enabled; no metadata write');
+      // Ensure the injected controls participate in WordPress's own update-nav-menu POST.
+      await page.evaluate(()=>{
+        const form=document.querySelector('form#update-nav-menu');
+        const fields=document.querySelector('#esc-menu-identity-fields');
+        if(!form||!fields)throw Error('Native WordPress edit form or identity controls not found');
+        if(!form.contains(fields))form.appendChild(fields);
+      });
+      await code.fill('Header');
+      await lang.selectOption('vi');
+      await type.selectOption('dropdown');
+      const saveIdentity = page.locator('input[name="save_menu"]:visible, button[name="save_menu"]:visible').first();
+      if (!(await saveIdentity.count())) throw Error('Native menu save button missing');
+      await saveIdentity.click({timeout:12000});
+      await page.waitForLoadState('domcontentloaded');
+      report('NATIVE_MENU_IDENTITY_SAVED','SUBMITTED');
+      active = await readMenu();
+    }
+    if (!active?.id || active.code !== 'Header' || active.lang !== 'vi') throw Error('Native Header.vi identity did not persist after edit');
     if ((active.items || []).length) {
       report('RESULT','NOOP_EXISTING_ITEMS_PRESERVED');
     } else {

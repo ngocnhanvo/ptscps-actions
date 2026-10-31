@@ -5,6 +5,7 @@ on:
     paths:
       - 'audit/ptscps-header-menu-setup.ready'
       - 'audit/ptscps-header-menu-setup-retry-v2.ready'
+      - 'audit/ptscps-header-menu-setup-retry-v3.ready'
 permissions:
   contents: read
 jobs:
