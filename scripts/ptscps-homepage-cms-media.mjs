@@ -149,7 +149,7 @@ async function finishSelection(alt, basename) {
   assert(response.ok(), 'Selected WordPress media record could not be verified');
   const wpMedia = await response.json();
   assert(wpMedia?.mime_type?.startsWith('image/') && typeof wpMedia.source_url === 'string', 'Selected WordPress media is not an image');
-  const uploaded = new URL(wpMedia.source_url);
+  const uploaded = new URL(wpMedia.source_url, origin);
   const stem = basename.replace(/\.[^.]+$/, '').toLowerCase();
   const filename = decodeURIComponent(uploaded.pathname.split('/').pop() || '').toLowerCase();
   assert(uploaded.origin === origin && uploaded.pathname.startsWith('/wp-content/uploads/') && filename.startsWith(stem),
@@ -231,7 +231,7 @@ try {
         const helper = document.querySelector('#textarea-insert-helper');
         const callback = window.tp?.helpers?.editor?.insert_from_helper_textarea;
         if (!helper || typeof callback !== 'function') throw new Error('Native TablePress image callback missing');
-        const imageUrl = new URL(attachment.url);
+        const imageUrl = new URL(attachment.url, origin);
         if (imageUrl.origin !== origin || !imageUrl.pathname.startsWith('/wp-content/uploads/'))
           throw new Error('WordPress media URL is not in the verified destination uploads origin');
         let html = String(helper.value || '');
