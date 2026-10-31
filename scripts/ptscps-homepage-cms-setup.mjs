@@ -101,25 +101,41 @@ try {
     await key.locator('input[type="text"]').fill('home');
     await action.locator('input[type="text"]').fill('HomePage');
     // Native ESC Table picker is provided by the plugin in the Classic Editor.
-    const switchToText = page.locator('#content-html');
-    if(await switchToText.count()>0) await switchToText.click();
+    // The native Classic Editor toolbar has both a Text-mode Quicktag and
+    // a Visual-mode TinyMCE button. Select through the plugin's picker only.
+    const visualTab = page.locator('#content-tmce');
+    if (await visualTab.count()) await visualTab.click();
+    const currentEditorContent = async () => page.evaluate(() => {
+      const ed=window.tinymce?.get('content');
+      return (ed?.getContent?.() || '') + '\n' + (document.querySelector('#content')?.value || '');
+    });
     for (const spec of specs) {
+      await page.evaluate(() => {
+        const ed=window.tinymce?.get('content');
+        if(ed && !ed.isHidden()) { ed.focus(); ed.selection.select(ed.getBody(), true); ed.selection.collapse(false); }
+      });
+      const visualButton = page.locator('button[aria-label*="ESC Table"],button[title*="ESC Table"]').first();
       const quickTag = page.locator('#qt_content_tablepress_quicktags_button');
-      if (!await quickTag.count()) throw Error('Native ESC Table Insert Code button unavailable');
-      await page.locator('#content').focus();
-      await page.locator('#content').press('ControlOrMeta+End');
-      await quickTag.click();
+      if (await visualButton.count() && await visualButton.isVisible()) await visualButton.click();
+      else if (await quickTag.isVisible()) await quickTag.click();
+      else {
+        // Open the plugin's actual native Insert Code picker; no shortcode is injected.
+        await page.evaluate(() => {
+          if(typeof window.tablepress_open_shortcode_thickbox !== 'function') throw Error('Native ESC Table picker unavailable');
+          window.tablepress_open_shortcode_thickbox();
+        });
+      }
       const iframe = page.frameLocator('#TB_iframeContent');
       const rowButton = iframe.locator(`a.insert-shortcode[title*="${spec.id}"]`);
       await rowButton.waitFor({state:'visible',timeout:20000});
       await rowButton.click();
-      await page.waitForTimeout(450);
-      const content = await page.locator('#content').inputValue();
-      if (!content.includes(spec.id)) throw Error('Native Insert Code failed for '+spec.id);
-      await page.locator('#content').press('End');
-      await page.locator('#content').press('Enter');
+      await page.waitForTimeout(600);
+      if (!(await currentEditorContent()).includes(spec.id)) throw Error('Native Insert Code failed for '+spec.id);
       report(spec.id,'NATIVE_INSERT_CODE=PASS');
     }
+    // Switching via the native tab synchronizes TinyMCE content to the textarea.
+    const textTab = page.locator('#content-html');
+    if(await textTab.count()) await textTab.click();
     const content = await page.locator('#content').inputValue();
     for (const spec of specs) if (!content.includes(spec.id)) throw Error('Page missing section '+spec.id);
     await page.locator('#save-post').click(); // DRAFT, no public content publication.
