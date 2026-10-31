@@ -41,8 +41,8 @@ jobs:
         run: |
           set -euo pipefail
           if [[ "${{ github.event_name }}" == "push" ]]; then
-            test "$(cat .ptscps-folders-count-release-request)" = 'PTSCPS_FOLDERS_COUNT_ONLY source=f37d41edbad9f0dd5e3cb259ca01b889ce283227 retry=2'
-            test "$(git -C source-php rev-parse HEAD)" = 'f37d41edbad9f0dd5e3cb259ca01b889ce283227'
+            test "$(cat .ptscps-folders-count-release-request)" = 'PTSCPS_FOLDERS_COUNT_ONLY source=f009fff84a000ccde2e7171ea4c7285b92e7227d retry=3'
+            test "$(git -C source-php rev-parse HEAD)" = 'f009fff84a000ccde2e7171ea4c7285b92e7227d'
           fi
           php -l source-php/wp-content/mu-plugins/ptscps-folders-accurate-counts.php
           php source-php/wp-content/mu-plugins/tests/ptscps-folders-accurate-counts-test.php
