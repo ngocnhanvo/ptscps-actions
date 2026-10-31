@@ -81,7 +81,7 @@ try{
  const mediaURLs=[...new Set(items.map(x=>x.url))];
  for(const url of mediaURLs){
   const response=await fetch(url,{method:'HEAD',redirect:'follow',signal:AbortSignal.timeout(20000)});
-  if(!response.ok() || !String(response.headers.get('content-type')||'').startsWith('image/'))throw Error(`Invalid source image HTTP ${response.status} at ${new URL(url).pathname}`);
+  if(!response.ok || !String(response.headers.get('content-type')||'').startsWith('image/'))throw Error(`Invalid source image HTTP ${response.status} at ${new URL(url).pathname}`);
  }
  await writeFile(output,JSON.stringify(items,null,2),'utf8');
  console.log(`EXTRAS_SOURCE_PREFLIGHT=PASS logos=19 tiles=4 total=${items.length}`);
