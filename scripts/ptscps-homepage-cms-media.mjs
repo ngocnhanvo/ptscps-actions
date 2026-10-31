@@ -57,28 +57,32 @@ async function mediaCandidates(basename) {
 }
 
 async function openPicker(table, dataRow, imageCol) {
-  const selectorPath = await page.evaluate(({ dataRow, imageCol }) => {
+  const selection = await page.evaluate(({ dataRow, imageCol }) => {
     const editor = window.tp?.editor;
     if (!editor) throw new Error('TablePress editor unavailable');
     const row = dataRow + 2;
-    const candidates = [['editor', editor]];
-    for (const [key, value] of Object.entries(editor)) {
-      if (value && typeof value === 'object') candidates.push([`editor.${key}`, value]);
+    let api = '';
+    if (typeof editor.updateSelectionFromCoords === 'function') {
+      editor.updateSelectionFromCoords(imageCol, row, imageCol, row);
+      api = 'editor.updateSelectionFromCoords';
+    } else if (typeof editor.setSelectionFromCoords === 'function') {
+      editor.setSelectionFromCoords(imageCol, row, imageCol, row);
+      api = 'editor.setSelectionFromCoords';
+    } else {
+      const cell = typeof editor.getCellFromCoords === 'function'
+        ? editor.getCellFromCoords(imageCol, row)
+        : null;
+      if (!cell) return { api:'', selected:false };
+      cell.dispatchEvent(new MouseEvent('mousedown', { bubbles:true, cancelable:true, view:window }));
+      cell.dispatchEvent(new MouseEvent('mouseup', { bubbles:true, cancelable:true, view:window }));
+      cell.click();
+      api = 'editor.getCellFromCoords+DOM';
     }
-    for (const [name, candidate] of candidates) {
-      if (typeof candidate.selectCell === 'function') {
-        candidate.selectCell(row, imageCol);
-        return name + '.selectCell';
-      }
-      if (typeof candidate.selectCellByCoords === 'function') {
-        candidate.selectCellByCoords(imageCol, row);
-        return name + '.selectCellByCoords';
-      }
-    }
-    return '';
+    const selected = Boolean(editor.selectedCell || editor.selection || editor.highlighted);
+    return { api, selected };
   }, { dataRow, imageCol });
-  assert(selectorPath, `Native cell selection API unavailable in ${table}`);
-  console.log(`CMS_MEDIA_SELECTION=${table}:${dataRow} api=${selectorPath}`);
+  assert(selection.api && selection.selected, `Native cell selection failed in ${table}`);
+  console.log(`CMS_MEDIA_SELECTION=${table}:${dataRow} api=${selection.api}`);
   const button = page.locator('#js_btn_upload_image');
   assert(await button.count() === 1, `Native image button unavailable in ${table}`);
   await button.click();
