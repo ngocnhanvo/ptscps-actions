@@ -1,5 +1,5 @@
 import { chromium } from 'playwright';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFileSync, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 const origin = process.env.WP_ORIGIN;
@@ -9,7 +9,8 @@ if (!origin || !username || !password) throw new Error('WordPress configuration 
 
 // Reuse the existing native WordPress media-picker workflow in a targeted, idempotent banner-only mode.
 const bannerOnly = process.env.PTSCPS_BANNER_ONLY === '1';
-const specs = bannerOnly ? [
+const extraSpecs = process.env.PTSCPS_EXTRAS_MEDIA_JSON ? JSON.parse(readFileSync(process.env.PTSCPS_EXTRAS_MEDIA_JSON, 'utf8')) : null;
+const specs = extraSpecs || (bannerOnly ? [
   { table:'home_00', row:1, url:'https://ptscps.com.vn/wp-content/uploads/2019/10/banner2.jpg', alt:'Công trình xử lý dầu khí ngoài khơi - PTSC PPS' },
   { table:'home_00', row:2, url:'https://ptscps.com.vn/wp-content/uploads/2019/10/banner3.jpg', alt:'Nhân sự PTSC PPS trên công trình dầu khí' },
 ] : [
@@ -25,7 +26,7 @@ const specs = bannerOnly ? [
   { table:'home_05', row:0, url:'https://ptscps.com.vn/wp-content/uploads/2026/10/10-2026-001.jpg', alt:'Lan tỏa Văn Hóa Số tại PTSC PPS năm 2026' },
   { table:'home_05', row:1, url:'https://ptscps.com.vn/wp-content/uploads/2026/09/09-2026-041.jpg', alt:'Đêm hội Trung thu đoàn viên PTSC PPS 2026' },
   { table:'home_05', row:2, url:'https://ptscps.com.vn/wp-content/uploads/2026/09/09-2026-021.jpg', alt:'PTSC PPS chinh phục dự án năng lượng tái tạo Baltica 2' },
-];
+]);
 
 const assert = (value, message) => { if (!value) throw new Error(message); };
 const safeName = (url) => decodeURIComponent(new URL(url).pathname.split('/').pop() || '').replace(/[^A-Za-z0-9._-]/g, '_');

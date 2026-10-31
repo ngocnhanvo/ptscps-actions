@@ -1,0 +1,61 @@
+name: PTSCPS homepage quick links and customer carousel CMS setup
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - audit/ptscps-home-extras.ready
+
+permissions:
+  contents: read
+
+jobs:
+  configure-homepage-extras:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate isolated WordPress target origin
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os,re
+          from urllib.parse import urlsplit
+          vals=dict(re.findall(r'^\s*(WC_URL|WC_URL_CLIENT)\s*=\s*(.+)\s*$',os.environ.get('ENV_FILE',''),re.M))
+          wp=urlsplit(vals.get('WC_URL','').strip().strip('"\''))
+          front=urlsplit(vals.get('WC_URL_CLIENT','').strip().strip('"\''))
+          if wp.scheme!='https' or not wp.hostname or wp.hostname==front.hostname or wp.path not in ('','/') or wp.query or wp.fragment or wp.username or wp.password or wp.port not in (None,443):
+              raise SystemExit('Invalid WP origin; refusing write')
+          with open(os.environ['GITHUB_ENV'],'a') as f: f.write('WP_ORIGIN=https://'+wp.hostname+'\n')
+          print('WP_ORIGIN_VALIDATED=PASS')
+          PY
+      - name: Install Playwright Chromium
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Create only missing native ESC Tables and insert codes on existing homepage
+        env:
+          WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
+          WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
+        run: node scripts/ptscps-homepage-extras.mjs
+      - name: Discover and preflight exact legacy homepage images
+        env:
+          PTSCPS_EXTRAS_MEDIA_JSON: /tmp/ptscps-extras-media.json
+        run: node scripts/ptscps-homepage-extras-sources.mjs
+      - name: Import images with WordPress native media picker and verify all rows
+        env:
+          WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
+          WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
+          PTSCPS_EXTRAS_MEDIA_JSON: /tmp/ptscps-extras-media.json
+        run: node scripts/ptscps-homepage-cms-media.mjs
+      - name: Summary
+        run: |
+          echo 'CMS_EXTRAS_COMPLETED=PASS'
+          echo 'NOT_ASTRO_DEPLOYED=TRUE'
+          echo 'NEXT_STEP=Use WordPress Build Website and independently verify live page'
