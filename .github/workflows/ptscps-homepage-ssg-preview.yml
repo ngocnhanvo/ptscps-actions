@@ -127,6 +127,34 @@ jobs:
               scrollWidth: document.documentElement.scrollWidth,
               scrollHeight: document.documentElement.scrollHeight,
             }));
+            const inspection = await page.evaluate(() => {
+              const sections = Array.from(document.querySelectorAll('main section')).map((el) => {
+                const style = getComputedStyle(el);
+                const box = el.getBoundingClientRect();
+                return {
+                  type: el.getAttribute('data-pps-section') || 'other',
+                  reveal: el.classList.contains('is-scroll-reveal-visible'),
+                  opacity: style.opacity,
+                  display: style.display,
+                  y: Math.round(box.top + window.scrollY),
+                  height: Math.round(box.height),
+                };
+              });
+              const offenders = Array.from(document.body.querySelectorAll('*'))
+                .map(el => ({ el, box: el.getBoundingClientRect() }))
+                .filter(({ box }) => box.width > 0 && box.right > innerWidth + 2)
+                .sort((a, b) => b.box.right - a.box.right)
+                .slice(0, 12).map(({ el, box }) => ({
+                  tag: el.tagName,
+                  id: el.id || '',
+                  classes: String(el.className?.baseVal ?? el.className ?? '').slice(0, 70),
+                  right: Math.round(box.right),
+                  width: Math.round(box.width),
+                }));
+              const logo = document.querySelector('#header-brandbar a[aria-label="Về trang chủ"] img');
+              return { sections, offenders, logo: { present: !!logo, loaded: !!logo?.naturalWidth } };
+            });
+            console.log('PTSCPS_PREVIEW_INSPECTION=' + JSON.stringify({ name, ...inspection }));
             await page.screenshot({ path: `preview/home-${name}.png`, fullPage: true });
             notes.push(`${name}: title=${JSON.stringify(await page.title())}; body_chars=${bodyText.length}; client_width=${dimensions.clientWidth}; scroll_width=${dimensions.scrollWidth}; scroll_height=${dimensions.scrollHeight}; overflow_x=${dimensions.scrollWidth > dimensions.clientWidth ? 'yes' : 'no'}; failed_same_origin=${failed.slice(0,20).join(',') || 'none'}`);
             await context.close();
