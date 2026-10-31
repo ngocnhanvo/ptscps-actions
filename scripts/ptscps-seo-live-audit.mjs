@@ -5,6 +5,7 @@ const response=await fetch(wpOrigin+'/wp-json/esc-seo-files/v1/public',{headers:
 console.log('SEO_API_STATUS='+response.status);
 if(!response.ok)throw new Error('SEO API unavailable');
 const data=await response.json();
+console.log('SEO_LLMS_CURRENT='+JSON.stringify(String(data.llms||'').slice(0,6000)));
 const arrays=['extra','exclude'];
 const result={site:data.site,expectedSite:clientOrigin,revision:data.sitemap?.revision,mode:data.sitemap?.mode,robotsSitemapReferences:[...String(data.robots||'').matchAll(/^Sitemap:\s*(.+)$/gmi)].map(x=>x[1]),llmsOriginMatches:String(data.llms||'').includes(']('+clientOrigin+'/')};
 for(const p of arrays){const a=data.sitemap?.[p]||[];result[p]={count:a.length,offSite:a.filter(u=>{try{return new URL(u).origin!==clientOrigin}catch{return true}}).slice(0,20),sample:a.slice(0,6)};}
