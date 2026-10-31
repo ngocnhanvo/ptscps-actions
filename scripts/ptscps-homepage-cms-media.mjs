@@ -102,13 +102,17 @@ async function selectExisting(mediaId, basename) {
 }
 
 async function uploadCurrent(file) {
-  const uploadTab = page.getByText(/^(Upload files|Tải tệp lên)$/i).last();
+  // Scope the tab to the WordPress media modal: an admin sidebar link has
+  // the same Vietnamese label and cannot be clicked through the modal overlay.
+  const modal = page.locator('.media-modal:visible').last();
+  const uploadTab = modal.locator('#menu-item-upload, .media-menu-item').filter({
+    hasText: /^(Upload files|Tải tệp lên)$/i,
+  }).first();
   if (await uploadTab.count()) await uploadTab.click();
-  await page.waitForTimeout(300);
-  const inputs = page.locator('.media-modal input[type="file"]');
+  const inputs = modal.locator('input[type="file"]');
   assert(await inputs.count() > 0, 'WordPress media file input unavailable');
   await inputs.last().setInputFiles(file);
-  await page.locator('.media-modal .attachment.selected, .media-modal .attachment.details').first().waitFor({ state:'visible', timeout:45000 });
+  await modal.locator('.attachment.selected, .attachment.details').first().waitFor({ state:'visible', timeout:45000 });
 }
 
 async function finishSelection(alt) {
