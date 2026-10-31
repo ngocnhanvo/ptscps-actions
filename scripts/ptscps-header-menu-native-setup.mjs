@@ -84,6 +84,36 @@ try {
       await page.waitForLoadState('domcontentloaded');
       await page.waitForTimeout(450);
       report('NATIVE_CREATE_POST_REQUESTS',createPosts);
+      if (createPosts.length === 0) {
+        // WordPress JS sometimes intercepts the visible Create Menu button with menu=0
+        // without sending a request. Submit the original nonce-bearing WordPress form
+        // using its supported native create action, not an invented API or DB query.
+        const verified = await page.evaluate(() => {
+          const form = document.querySelector('form#update-nav-menu');
+          return !!form && form.querySelector('#menu-name')?.value === 'Header Tiếng Việt' &&
+            form.querySelector('#esc-menu-code')?.value === 'Header' &&
+            form.querySelector('#esc-menu-lang')?.value === 'vi' &&
+            form.querySelector('input[name="menu"]')?.value === '0' &&
+            [...form.elements].some(el => /nonce/i.test(el.name||''));
+        });
+        if (!verified) throw Error('Native WordPress Create Menu form failed safety checks; no direct form submit');
+        report('NATIVE_CREATE_FORM_FALLBACK','WORDPRESS_NONCE_FORM_SUBMIT');
+        await Promise.all([
+          page.waitForNavigation({waitUntil:'domcontentloaded',timeout:40000}),
+          page.evaluate(() => {
+            const form=document.querySelector('form#update-nav-menu');
+            const action=form.querySelector('input[name="action"]');
+            if (!action) throw Error('Native action missing');
+            action.value='create';
+            const submitted=document.createElement('input');
+            submitted.type='hidden';submitted.name='save_menu';submitted.value='Tạo menu';
+            form.appendChild(submitted);
+            HTMLFormElement.prototype.submit.call(form);
+          })
+        ]);
+        await page.waitForTimeout(700);
+        report('NATIVE_CREATE_POST_REQUESTS_AFTER_FALLBACK',createPosts);
+      }
       report('NATIVE_CREATE_FORM_AFTER',await page.evaluate(()=>({
         url:location.pathname+location.search,
         name:document.querySelector('#menu-name')?.value,
@@ -102,7 +132,11 @@ try {
     if (!active?.id) {
       // Native Create Menu may not include theme-added identity controls on its first POST.
       // On the edit form, submit those native fields through WordPress itself; never SQL/REST-write meta.
-      const menuId = Number(new URL(page.url()).searchParams.get('menu') || named[0]?.id || 0);
+      const afterFormMenuOptions = await page.locator('#select-menu-to-edit option').evaluateAll(nodes => nodes.map(n=>({id:n.value,text:n.textContent.trim()})));
+      report('NATIVE_MENU_OPTIONS_AFTER_CREATE',afterFormMenuOptions);
+      const afterNamed = afterFormMenuOptions.filter(x=>x.text==='Header Tiếng Việt' && /^\d+$/.test(x.id) && Number(x.id)>0);
+      if (afterNamed.length>1) throw Error('Duplicate menu detected after create; no further writes');
+      const menuId = Number(new URL(page.url()).searchParams.get('menu') || afterNamed[0]?.id || named[0]?.id || 0);
       if (!menuId || !Number.isInteger(menuId)) throw Error('Cannot identify uniquely created native menu ID; no metadata write');
       await page.goto(`${wp}/wp-admin/nav-menus.php?menu=${menuId}`, { waitUntil:'domcontentloaded', timeout:40000 });
       const code = page.locator('#esc-menu-code');
