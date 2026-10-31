@@ -120,6 +120,7 @@ try {
       const ed=window.tinymce?.get('content');
       return (ed?.getContent?.() || '') + '\n' + (document.querySelector('#content')?.value || '');
     });
+    await page.waitForFunction(() => Boolean(window.tinymce?.get('content')?.initialized && !window.tinymce?.get('content')?.isHidden()), null, {timeout:20000});
     for (const spec of specs) {
       if ((await currentEditorContent()).includes(spec.id)) { report(spec.id,'ALREADY_INSERTED'); continue; }
       await page.evaluate(() => {
@@ -141,8 +142,23 @@ try {
       const rowButton = iframe.locator(`input.insert-shortcode[title*="${spec.id}"]`);
       await rowButton.waitFor({state:'visible',timeout:20000});
       await rowButton.click();
-      await page.waitForTimeout(600);
-      if (!(await currentEditorContent()).includes(spec.id)) throw Error('Native Insert Code failed for '+spec.id);
+      let nativeInserted = false;
+      for (let attempt = 0; attempt < 8; attempt++) {
+        await page.waitForTimeout(600);
+        if ((await currentEditorContent()).includes(spec.id)) { nativeInserted = true; break; }
+      }
+      if (!nativeInserted) {
+        const diagnosis = await page.evaluate(() => ({
+          active: window.tinymce?.activeEditor?.id || '(none)',
+          content: String(window.tinymce?.get('content')?.getContent?.() || '').slice(0,350),
+          textarea: String(document.querySelector('#content')?.value || '').slice(0,350),
+          editors: (window.tinymce?.editors || []).map(e => ({id:e.id,initialized:e.initialized,hidden:e.isHidden?.(),contentLength:(e.getContent?.()||'').length,containsTable:(e.getContent?.()||'').includes('home_00')})),
+          thickboxVisible: Boolean(document.querySelector('#TB_window')?.offsetParent),
+          sendToEditor:typeof window.send_to_editor
+        }));
+        report(spec.id,'NATIVE_PICKER_DIAGNOSIS',diagnosis);
+        throw Error('Native Insert Code did not appear in Page content for '+spec.id);
+      }
       report(spec.id,'NATIVE_INSERT_CODE=PASS');
     }
     // Switching via the native tab synchronizes TinyMCE content to the textarea.
