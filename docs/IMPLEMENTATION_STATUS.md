@@ -1,9 +1,16 @@
 # PTSCPS implementation checkpoint
 
-Updated: 2026-10-31
+Updated: 2026-11-01
 Code mode: `auto-build`
 
-## LATEST CHECKPOINT — Header WordPress integrated and deployed 2026-10-31
+## CURRENT CHECKPOINT — Quick links, customers and footer (2026-11-01)
+
+- WordPress homepage Page ID `82467` retains prior six native ESC Table sections and has two more native Insert Code blocks: `home_14` four quick links and `home_15` nineteen customer logos. Both tables saved and read back without duplicates; 23 authentic old-site images imported via WordPress native media picker with ALT. Guarded CMS run [41232378867](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/41232378867) PASS. **Do not rerun source inventory, original 12 images or this 23-image import.**
+- Astro `master` implemented both responsive sections and original-company footer in `3edabd510a6283758f2aa4488c58d9a6cf7f93b1`; first native WordPress build trigger [41233080049](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/41233080049) and production deploy [41233136602](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/41233136602) PASS.
+- Live read-only Playwright [41233386886](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/41233386886) PASS on desktop 1440, tablet 768, mobile 390: eight sections rendered, no horizontal document overflow, no same-origin request failures. Artifact `13054691953` contains screenshots. Its initial inspection found footer incorrectly using the hosting domain and unverified Zalo fallback; this QA **predates** the next footer-only source correction.
+- Astro `master` footer-only fix `75b5edc04f183fa4bf93c918bdb82a55c483f0a7` commits verified official website display (`www.ptscps.com.vn`) instead of hosting domain and prevents guessing Zalo from the landline. **Next:** build this SHA only through the native WordPress Build Website UI, monitor production release and verify corrected footer visually. SSR hosting warning is non-blocking for SSG.
+
+## HISTORICAL CHECKPOINT — Header WordPress integrated and deployed 2026-10-31
 
 - This section **supersedes the older Homepage checkpoint below**; old claims about a missing Header menu are historical, not current blockers.
 - Native WordPress `Header.vi` now exists: menu ID `1767`, `code=Header`, `lang=vi`, type `dropdown`. Exactly one verified published destination: `Trang chủ`, native item ID `82514`, `key=home`, `href=/`, `linkType=internal`. Guarded setup run [`41219401043`](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/41219401043) **PASS**, no duplicate menu/item created.
