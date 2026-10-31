@@ -1,6 +1,10 @@
 name: PTSCPS shared Playwright (manual, read-only)
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'audit/ptscps-homepage-20261031.ready'
   workflow_dispatch:
     inputs:
       suite:
