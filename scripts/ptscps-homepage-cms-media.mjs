@@ -208,6 +208,18 @@ try {
       if (exact?.id) reused = await selectExisting(exact.id, spec.basename);
       if (!reused) await uploadCurrent(spec.file);
       await finishSelection(spec.alt);
+      // WordPress inserts into the ESC Table hidden helper textarea. Its native
+      // change handler copies the generated media HTML into the selected cell.
+      const nativeBridge = await page.evaluate(() => {
+        const helper = document.querySelector('#textarea-insert-helper');
+        const html = String(helper?.value || '');
+        const hasImage = /<img\b/i.test(html);
+        const callback = window.tp?.helpers?.editor?.insert_from_helper_textarea;
+        if (hasImage && typeof callback === 'function') callback.call(helper);
+        return { helperLength:html.length, helperHasImage:hasImage,
+          nativeHandler:typeof callback === 'function' };
+      });
+      console.log('CMS_MEDIA_NATIVE_BRIDGE=' + JSON.stringify({ table, row:spec.row, ...nativeBridge }));
       // Read-only structural evidence from the native TablePress editor after Insert Image.
       // Never log cell content, authentication state or image URLs.
       const cellProbe = await page.evaluate(({ dataRow, imageCol }) => {
