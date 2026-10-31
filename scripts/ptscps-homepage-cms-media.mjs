@@ -50,10 +50,22 @@ const page = await context.newPage();
 
 async function mediaCandidates(basename) {
   const stem = basename.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ');
-  const response = await page.request.get(origin + '/wp-json/wp/v2/media?per_page=50&search=' + encodeURIComponent(stem) + '&_fields=id,source_url,alt_text,slug');
-  if (!response.ok()) return [];
-  const items = await response.json();
-  return Array.isArray(items) ? items : [];
+  const url = origin + '/wp-json/wp/v2/media?per_page=50&search=' + encodeURIComponent(stem) + '&_fields=id,source_url,alt_text,slug';
+  // A temporary REST socket reset must not cause a duplicate media upload.
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const response = await page.request.get(url, { timeout:20000 });
+      if (!response.ok()) throw new Error('WordPress media REST HTTP ' + response.status());
+      const items = await response.json();
+      if (!Array.isArray(items)) throw new Error('Invalid WordPress media REST list');
+      return items;
+    } catch (error) {
+      console.warn('CMS_MEDIA_LOOKUP_RETRY=' + attempt + ' type=' + (error?.name || 'Error'));
+      if (attempt === 3) throw new Error('Media lookup unavailable after bounded retries');
+      await page.waitForTimeout(attempt * 1200);
+    }
+  }
+  return [];
 }
 
 async function openPicker(table, dataRow, imageCol) {
