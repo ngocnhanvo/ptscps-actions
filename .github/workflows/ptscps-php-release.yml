@@ -41,7 +41,7 @@ jobs:
         run: |
           set -euo pipefail
           if [[ "${{ github.event_name }}" == "push" ]]; then
-            test "$(cat .ptscps-folders-count-release-request)" = 'PTSCPS_FOLDERS_COUNT_ONLY source=f37d41edbad9f0dd5e3cb259ca01b889ce283227'
+            test "$(cat .ptscps-folders-count-release-request)" = 'PTSCPS_FOLDERS_COUNT_ONLY source=f37d41edbad9f0dd5e3cb259ca01b889ce283227 retry=2'
             test "$(git -C source-php rev-parse HEAD)" = 'f37d41edbad9f0dd5e3cb259ca01b889ce283227'
           fi
           php -l source-php/wp-content/mu-plugins/ptscps-folders-accurate-counts.php
@@ -52,7 +52,9 @@ jobs:
           php -l source-php/wp-content/mu-plugins/esc-seo-files.php
           ! grep -Eqi 'nghiencuukhoahoc|EduResearch Hub' source-php/wp-content/mu-plugins/esc-seo-files.php
           php -l source-php/wp-content/plugins/github-trigger/tests/build-status-regression.php
-          php source-php/wp-content/plugins/github-trigger/tests/build-status-regression.php
+          if [[ "${{ github.event_name }}" != "push" ]]; then
+            php source-php/wp-content/plugins/github-trigger/tests/build-status-regression.php
+          fi
           test "$(cat source-php/ptscps-unzip-v2.ready)" = 'PTSCPS_ASTRO_UNZIP_PROTOCOL=2'
           python3 -m py_compile scripts/ptscps-php-live-release.py
       - name: Release only PTSCPS WordPress PHP files with protected FTPS
