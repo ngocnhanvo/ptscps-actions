@@ -1,0 +1,69 @@
+name: PTSCPS homepage CMS content inventory (read-only)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'audit/ptscps-homepage-cms-20261031.ready'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cms-inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Validate WordPress public content and CMS routes without writes
+        shell: bash
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: |
+          python3 - <<'PYTHON'
+          import html, json, os, re, sys, urllib.parse, urllib.request
+          raw = os.getenv('ENV_FILE','')
+          vals = {}
+          for line in raw.splitlines():
+              match = re.match(r'^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$', line)
+              if match: vals[match.group(1)] = match.group(2).strip().strip('"\'')
+          url = urllib.parse.urlsplit(vals.get('WC_URL',''))
+          if url.scheme != 'https' or not url.hostname or url.username or url.password or url.path not in ('','/'):
+              raise SystemExit('CMS_AUDIT=BLOCKED invalid WC_URL')
+          origin = 'https://' + url.hostname
+          def get(path):
+              req=urllib.request.Request(origin+path,headers={'User-Agent':'PTSCPS-ReadOnly-CMS-Audit/1.0','Accept':'application/json'})
+              with urllib.request.urlopen(req,timeout=25) as response:
+                  dest=urllib.parse.urlsplit(response.geturl())
+                  if dest.scheme!='https' or dest.hostname!=url.hostname:
+                      raise ValueError('Cross-origin redirect blocked')
+                  data=response.read(1_500_000)
+              return json.loads(data)
+          root=get('/wp-json/')
+          routes = root.get('routes',{})
+          pages=get('/wp-json/wp/v2/pages?per_page=100&_fields=id,slug,title,link,status')
+          media=get('/wp-json/wp/v2/media?per_page=5&_fields=id,source_url,mime_type,alt_text')
+          posts=get('/wp-json/wp/v2/posts?per_page=5&_fields=id,slug,title,link')
+          if not all(isinstance(x,list) for x in (pages,media,posts)):
+              raise ValueError('Unexpected WordPress REST collection')
+          slugs=[str(x.get('slug','')) for x in pages]
+          names=[html.unescape(re.sub(r'<[^>]+>','', str(x.get('title',{}).get('rendered',''))))[:85] for x in pages]
+          menus=[p for p in routes if ('menu' in p.lower() or 'navigation' in p.lower())][:15]
+          tables=[p for p in routes if ('tablepress' in p.lower() or 'esc-table' in p.lower())][:15]
+          status={
+              'CMS_REST_API':'PASS',
+              'CMS_SITE_TITLE':str(root.get('name',''))[:100],
+              'CMS_PUBLISHED_PAGES_COUNT_FIRST_100':len(pages),
+              'CMS_PAGE_SLUGS_FIRST_25':', '.join(slugs[:25]),
+              'CMS_PAGES_TITLES_FIRST_10':' / '.join(names[:10]),
+              'CMS_MEDIA_SAMPLE_COUNT':len(media),
+              'CMS_POSTS_SAMPLE_COUNT':len(posts),
+              'CMS_MENU_ROUTES':', '.join(menus) or '(not exposed publicly)',
+              'CMS_ESC_TABLE_ROUTES':', '.join(tables) or '(not exposed publicly)',
+              'CMS_HOMEPAGE_SLUG_CANDIDATES':', '.join(s for s in slugs if s in ('home','trang-chu','homepage')) or '(not found; static front page may use another slug)',
+          }
+          for k,v in status.items(): print(f'{k}={v}')
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a',encoding='utf8') as f:
+              f.write('## PTSCPS homepage — public CMS inventory (read-only)\n')
+              for k,v in status.items(): f.write(f'- **{k}**: {v}\n')
+          PYTHON
