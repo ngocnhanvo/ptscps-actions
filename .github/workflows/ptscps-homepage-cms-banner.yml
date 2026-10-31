@@ -1,0 +1,44 @@
+name: PTSCPS homepage three-banner media setup
+on:
+  push:
+    branches: [main]
+    paths: ['audit/ptscps-homepage-cms-banner.ready']
+permissions:
+  contents: read
+jobs:
+  banner:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate WordPress origin
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        shell: bash
+        run: |
+          python3 - <<'PYCODE'
+          import os,re
+          from urllib.parse import urlsplit
+          env = os.environ.get('ENV_FILE','')
+          cfg=dict(re.findall(r'^\s*(WC_URL|WC_URL_CLIENT)\s*=\s*(.+)\s*$',env,re.M))
+          wp=urlsplit(cfg.get('WC_URL','').strip().strip('"\''))
+          front=urlsplit(cfg.get('WC_URL_CLIENT','').strip().strip('"\''))
+          if wp.scheme!='https' or not wp.hostname or wp.hostname == front.hostname or wp.path not in ('','/') or wp.query or wp.fragment or wp.username or wp.password or wp.port not in (None,443):
+              raise SystemExit('Invalid WordPress origin')
+          with open(os.environ['GITHUB_ENV'],'a') as f:
+              f.write('WP_ORIGIN=https://'+wp.hostname+'\n')
+          print('WP_ORIGIN_VALIDATED=PASS')
+          PYCODE
+      - name: Install browser
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Configure three Home_00 images and device audience via WordPress editor
+        env:
+          WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
+          WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
+          PTSCPS_BANNER_ONLY: '1'
+        run: node scripts/ptscps-homepage-cms-media.mjs

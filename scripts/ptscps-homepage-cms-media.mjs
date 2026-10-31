@@ -7,7 +7,12 @@ const username = process.env.WP_ADMIN_USERNAME;
 const password = process.env.WP_ADMIN_PASSWORD;
 if (!origin || !username || !password) throw new Error('WordPress configuration missing');
 
-const specs = [
+// Reuse the existing native WordPress media-picker workflow in a targeted, idempotent banner-only mode.
+const bannerOnly = process.env.PTSCPS_BANNER_ONLY === '1';
+const specs = bannerOnly ? [
+  { table:'home_00', row:1, url:'https://ptscps.com.vn/wp-content/uploads/2019/10/banner2.jpg', alt:'Công trình xử lý dầu khí ngoài khơi - PTSC PPS' },
+  { table:'home_00', row:2, url:'https://ptscps.com.vn/wp-content/uploads/2019/10/banner3.jpg', alt:'Nhân sự PTSC PPS trên công trình dầu khí' },
+] : [
   { table:'home_00', row:0, url:'https://ptscps.com.vn/wp-content/uploads/2019/10/ruby-banner.jpg', alt:'FPSO Ruby II hoạt động ngoài khơi - PTSC PPS' },
   { table:'home_01', row:0, url:'https://ptscps.com.vn/wp-content/uploads/2019/10/fpsohome.jpg', alt:'Vận hành và bảo dưỡng FPSO FSO MOPU - PTSC PPS' },
   { table:'home_01', row:1, url:'https://ptscps.com.vn/wp-content/uploads/2019/10/cungungkythuat.jpg', alt:'Đội ngũ nhân sự kỹ thuật PTSC PPS' },
@@ -240,6 +245,53 @@ try {
     }
     assert(beforeResponse?.ok(), `CMS table unavailable: ${table} (HTTP ${beforeResponse?.status() || 'network'})`);
     const before = await beforeResponse.json();
+    if (bannerOnly) {
+      assert(table === 'home_00', 'Banner-only mode cannot modify other tables');
+      assert((before.items || []).length >= 1, 'Preserved Ruby banner is missing');
+      const originalColumns = ['eyebrow','title','description','image','primary_label','primary_href','secondary_label','secondary_href'];
+      const keys = (before.fields || []).map(field => field?.key);
+      assert(originalColumns.every((key, index) => keys[index] === key), 'Unexpected homepage banner schema');
+      assert(keys.length === 8 || (keys.length === 9 && keys[8] === 'mobile'), 'Unexpected banner audience column');
+      const needsRows = (before.items || []).length < 3;
+      const needsAudience = keys.length === 8;
+      if (needsRows || needsAudience) {
+        await page.goto(origin + '/wp-admin/admin.php?page=tablepress&action=edit&table_id=home_00', {waitUntil:'domcontentloaded',timeout:45000});
+        await page.waitForFunction(() => Boolean(window.tp?.editor?.options?.data && window.tp?.callbacks?.append), null, {timeout:30000});
+        const result = await page.evaluate(({needsAudience}) => {
+          const ed = window.tp.editor;
+          const rows = ed.options.data.length;
+          const columns = ed.options.columns.length;
+          if (columns !== (needsAudience ? 8 : 9)) throw Error('Unexpected native TablePress columns');
+          if (rows < 3 || rows > 5) throw Error('Unexpected native banner grid shape');
+          if (needsAudience) {
+            window.tp.callbacks.append('columns', 1);
+            ed.setValueFromCoords(8, 0, 'mobile');
+            ed.setValueFromCoords(8, 1, 'Hiển thị: 0 Desktop | 1 Mobile | trống Cả hai');
+          }
+          if (rows < 5) window.tp.callbacks.append('rows', 5 - rows);
+          // Labels in the editor are internal and make empty image rows persist before Insert Image.
+          for (const [row, label] of [[3,'Ảnh banner 2'],[4,'Ảnh banner 3']]) {
+            if (!String(ed.getValueFromCoords(0,row) || '').trim()) ed.setValueFromCoords(0,row,label);
+          }
+          window.tp.helpers.unsaved_changes.set();
+          return { rows:ed.options.data.length, columns:ed.options.columns.length };
+        }, { needsAudience });
+        assert(result.rows >= 5 && result.columns === 9, 'Banner editor resize failed');
+        const save = page.getByRole('button',{name:/^(Save Changes|Lưu thay đổi)$/i});
+        assert(await save.count() > 0, 'Banner table native Save unavailable');
+        await save.last().click();
+        let saved = false;
+        for (let n = 0; n < 10; n++) {
+          await page.waitForTimeout(900);
+          const response = await page.request.get(api, {timeout:20000}).catch(() => null);
+          if (!response?.ok()) continue;
+          const data = await response.json();
+          if (data.fields?.[8]?.key === 'mobile' && data.items?.length >= 3) {saved = true;break;}
+        }
+        assert(saved, 'Banner audience and three rows not saved in native ESC Table');
+        console.log('CMS_BANNER_SCHEMA=PASS mobile_column=YES rows=3');
+      } else console.log('CMS_BANNER_SCHEMA=ALREADY_READY');
+    }
     const imageCol = (before.fields || []).findIndex(field => field?.key === 'image');
     assert(imageCol >= 0, `Image field missing ${table}`);
     const pending = tableSpecs.filter(spec => {
