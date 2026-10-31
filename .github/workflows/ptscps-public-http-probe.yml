@@ -117,6 +117,14 @@ jobs:
                   print('PTSCPS_FTPS_STAGED_ZIP='+str({'present':size is not None,'bytes':size}))
               except ftplib.error_perm as exc:
                   print('PTSCPS_FTPS_STAGED_ZIP='+str({'present':False if str(exc).startswith('550') else 'unknown'}))
+              # Listing only: do not fetch/delete unpublished staging or backup files.
+              try:
+                  entries=[os.path.basename(v.rstrip('/')) for v in ftp.nlst()]
+                  flags={kind:sum(name.startswith('.ptscps-unzip-'+kind+'-') for name in entries)
+                         for kind in ('stage','backup')}
+                  print('PTSCPS_FTPS_UNZIP_WORKDIR_COUNTS='+str(flags))
+              except ftplib.all_errors as exc:
+                  print('PTSCPS_FTPS_UNZIP_WORKDIR_COUNTS='+str({'warning_type':type(exc).__name__}))
               if results['.htaccess']=='present':
                   parts=[]
                   ftp.retrbinary('RETR .htaccess',parts.append)
