@@ -18,7 +18,7 @@ try {
   ]);
   await page.goto(`${origin}/wp-admin/admin.php?page=vcs-build-trigger`, { waitUntil: 'domcontentloaded', timeout: 45000 });
   await page.locator('#vcs-build-btn-main').waitFor({ state: 'attached', timeout: 30000 });
-  const initial = await page.evaluate(() => {
+  let initial = await page.evaluate(() => {
     const data = window.vcsBuild || {};
     return {
       configured: data.build_configured,
@@ -30,6 +30,30 @@ try {
   console.log('WP_BUILD_TOOL='+JSON.stringify(initial));
   if (!(initial.configured === true || initial.configured === '1' || initial.configured === 1)) {
     throw new Error('PTSCPS_WORDPRESS_BUILD=BLOCKED: WP Build Website is not configured');
+  }
+  if (initial.active) {
+    // Let the native WordPress status API reconcile its own completed GitHub
+    // run and release the build lock. Never delete a lock in browser automation.
+    const statusResponse = await page.waitForResponse(r =>
+      r.url().startsWith(`${origin}/wp-admin/admin-ajax.php`) &&
+      r.request().method() === 'POST' &&
+      String(r.request().postData() || '').includes('action=vcs_check_build_status'),
+      { timeout: 15000 }
+    ).catch(() => null);
+    if (statusResponse) {
+      const body = await statusResponse.json().catch(() => ({}));
+      console.log('WP_BUILD_NATIVE_STATUS='+JSON.stringify({
+        status: body?.data?.status,
+        build_active: body?.data?.build_active,
+      }));
+    }
+    await page.reload({ waitUntil: 'domcontentloaded', timeout: 45000 });
+    initial = await page.evaluate(() => ({
+      configured: window.vcsBuild?.build_configured,
+      active: window.vcsBuild?.initial_active,
+      pending: window.vcsBuild?.pending_count,
+    }));
+    console.log('WP_BUILD_AFTER_NATIVE_RECONCILE='+JSON.stringify(initial));
   }
   if (initial.active) {
     console.log('PTSCPS_WORDPRESS_BUILD=ALREADY_RUNNING; no duplicate build triggered');
