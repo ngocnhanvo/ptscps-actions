@@ -66,8 +66,32 @@ try {
       await page.locator('#esc-menu-type').selectOption('dropdown');
       const create = page.locator('input[name="save_menu"]:visible, button[name="save_menu"]:visible').first();
       if (!(await create.count())) throw Error('Cannot find visible native Create Menu button; no write');
+      report('NATIVE_CREATE_FORM_BEFORE', await page.evaluate(()=>({
+        url:location.pathname+location.search,
+        name:document.querySelector('#menu-name')?.value,
+        code:document.querySelector('#esc-menu-code')?.value,
+        lang:document.querySelector('#esc-menu-lang')?.value,
+        action:document.querySelector('form#update-nav-menu input[name="action"]')?.value,
+        form:document.querySelector('#save_menu_footer')?.form?.id,
+      })));
+      const createPosts = [];
+      page.on('request', req=>{
+        if (req.method()!=='POST' || !req.url().includes('/wp-admin/nav-menus.php')) return;
+        const params = new URLSearchParams(req.postData() || '');
+        createPosts.push({ path:new URL(req.url()).pathname, action:params.get('action'), menu:params.get('menu'), menuName:params.get('menu-name'), code:params.get('esc_menu_code'), lang:params.get('esc_menu_lang'), save:params.get('save_menu') });
+      });
       await create.click({timeout:12000});
       await page.waitForLoadState('domcontentloaded');
+      await page.waitForTimeout(450);
+      report('NATIVE_CREATE_POST_REQUESTS',createPosts);
+      report('NATIVE_CREATE_FORM_AFTER',await page.evaluate(()=>({
+        url:location.pathname+location.search,
+        name:document.querySelector('#menu-name')?.value,
+        notices:[...document.querySelectorAll('.notice,.error,.updated,#message')].map(n=>(n.innerText||'').trim().slice(0,240)).filter(Boolean).slice(0,15),
+        header:(document.querySelector('h1')?.innerText||'').trim(),
+        formAction:document.querySelector('#update-nav-menu input[name="action"]')?.value,
+        menuId:document.querySelector('#update-nav-menu input[name="menu"]')?.value,
+      })));
       report('NATIVE_MENU_CREATED','SUBMITTED');
     } else if (named.length === 1) {
       report('NATIVE_MENU_REUSED',named[0]);
