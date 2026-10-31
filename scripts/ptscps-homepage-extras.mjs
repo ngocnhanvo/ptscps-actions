@@ -171,8 +171,24 @@ async function ensurePageShortcodes() {
   const save=savedPublished?page.locator('#publish'):page.locator('#save-post');
   assert(await save.count()>0,`Native ${savedPublished?'Update':'Save Draft'} button missing`);
   await save.click();
-  await page.waitForTimeout(1800);
-  await page.goto(origin+'/wp-admin/post.php?post='+id+'&action=edit',{waitUntil:'domcontentloaded',timeout:45000});
+  // WordPress can still be redirecting from post.php after Update returns.
+  // A navigation during that redirect is aborted by Chromium despite a
+  // successful save. Retry only read-only navigation; never repeat the save.
+  await page.waitForTimeout(2200);
+  let reopened=false;
+  for(let attempt=0;attempt<4;attempt++) {
+    try {
+      await page.goto(origin+'/wp-admin/post.php?post='+id+'&action=edit',{waitUntil:'domcontentloaded',timeout:45000});
+      await page.locator('#content').waitFor({state:'attached',timeout:12000});
+      reopened=true;
+      break;
+    } catch(error) {
+      if(!String(error).includes('ERR_ABORTED') || attempt===3)throw error;
+      console.log(`EXTRAS_READBACK_NAV_RETRY=${attempt+1}`);
+      await page.waitForTimeout(1600);
+    }
+  }
+  assert(reopened,'Could not reopen native WordPress Page after save');
   const reread=await page.locator('#content').inputValue();
   assert(target.every(t=>reread.includes(t))&&['home_00','home_05'].every(t=>reread.includes(t)),`Read-after-save missing a homepage section`);
   console.log(`EXTRAS_PAGE_READBACK=PASS id=${id} publication_preserved=${savedPublished}`);
