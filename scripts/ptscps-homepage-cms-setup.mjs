@@ -15,6 +15,15 @@ const browser = await chromium.launch({headless:true});
 const page = await browser.newPage({viewport:{width:1420,height:960}});
 const uri = p => origin+p;
 const report = (...args)=>console.log('CMS_SETUP',...args);
+page.on('dialog', async dialog => {
+  if (dialog.type()==='confirm' && /table id|mã bảng/i.test(dialog.message())) {
+    report('NATIVE_TABLE_ID_CONFIRM=ACCEPTED');
+    await dialog.accept();
+  } else {
+    report('UNEXPECTED_DIALOG='+dialog.type());
+    await dialog.dismiss();
+  }
+});
 const existing = async id => {
   const r = await page.request.get(uri('/wp-json/tablepress/v1/table/'+id));
   if (r.status()===404) return false;
@@ -32,17 +41,27 @@ try {
   if (!initial.ok()) throw Error('Cannot read existing ESC Tables');
   const initialTables = await initial.json();
   report('EXISTING_TABLE_COUNT='+initialTables.length);
+  const allTables = await page.request.get(uri('/wp-json/tablepress/v1/tables/prefix/all?per_page=30&page=1'));
+  if (!allTables.ok()) throw Error('Cannot read ESC Table list');
+  const tableList = await allTables.json();
+  const originalIdByName = new Map(tableList.map(t=>[t.title,t.id]));
   for (const spec of specs) {
     if (await existing(spec.id)) { report(spec.id,'EXISTS'); continue; }
-    await page.goto(uri('/wp-admin/admin.php?page=tablepress&action=add'),{waitUntil:'domcontentloaded'});
-    await page.locator('input[name="table[name]"]').fill(spec.title);
-    await page.locator('textarea[name="table[description]"]').fill('Section quản trị độc lập cho trang chủ PTSC PPS, theo thiết kế duyệt 31/10/2026.');
-    await page.locator('input[name="table[rows]"]').fill('2');
-    await page.locator('input[name="table[columns]"]').fill(String(spec.columns));
-    await page.getByRole('button',{name:/^(Add Table|Thêm bảng)$/i}).click();
-    await page.waitForURL(/page=tablepress.*action=edit|action=edit.*page=tablepress/,{timeout:50000});
+    const existingOldId = originalIdByName.get(spec.title);
+    if (existingOldId) {
+      report(spec.id,'RECOVER_EXISTING_TABLE_ID='+existingOldId);
+      await page.goto(uri('/wp-admin/admin.php?page=tablepress&action=edit&table_id='+encodeURIComponent(existingOldId)),{waitUntil:'domcontentloaded'});
+    } else {
+      await page.goto(uri('/wp-admin/admin.php?page=tablepress&action=add'),{waitUntil:'domcontentloaded'});
+      await page.locator('input[name="table[name]"]').fill(spec.title);
+      await page.locator('textarea[name="table[description]"]').fill('Section quản trị độc lập cho trang chủ PTSC PPS, theo thiết kế duyệt 31/10/2026.');
+      await page.locator('input[name="table[rows]"]').fill('2');
+      await page.locator('input[name="table[columns]"]').fill(String(spec.columns));
+      await page.getByRole('button',{name:/^(Add Table|Thêm bảng)$/i}).click();
+      await page.waitForURL(/page=tablepress.*action=edit|action=edit.*page=tablepress/,{timeout:50000});
+    }
     const newId = await page.locator('#table-id').inputValue();
-    report(spec.id,'NEW_ID='+newId);
+    report(spec.id,'CURRENT_ID='+newId);
     await page.locator('#table-id').fill(spec.id);
     // The native ESC Table edit UI saves both the table ID and row layout.
     const save = page.getByRole('button',{name:/^(Save Changes|Lưu thay đổi)$/i});
@@ -50,9 +69,19 @@ try {
       report('EDIT_CONTROLS',await page.evaluate(()=>[...document.querySelectorAll('button')].map(e=>({id:e.id,text:e.textContent.trim().slice(0,60)})).filter(x=>x.text).slice(-30)));
       throw Error('Cannot identify native ESC Table Save Changes control');
     }
+    const ajaxResult = page.waitForResponse(r=>r.url().includes('admin-ajax.php') && (r.request().postData()||'').includes('tablepress_save_table'),{timeout:18000}).catch(()=>null);
     await save.last().click();
-    await page.waitForTimeout(1800);
-    if (!await existing(spec.id)) throw Error('Native save did not persist table ID '+spec.id);
+    const saveResponse = await ajaxResult;
+    if (saveResponse) {
+      const body = await saveResponse.json().catch(()=>null);
+      report(spec.id,'SAVE_RESPONSE',body?{success:body.success,message:body.message,table_id:body.table_id,error_details:body.error_details}:saveResponse.status());
+    }
+    let readBack=false;
+    for(let attempt=0;attempt<5;attempt++) {
+      await page.waitForTimeout(900);
+      if(await existing(spec.id)){readBack=true;break;}
+    }
+    if (!readBack) throw Error('Native save did not persist table ID '+spec.id);
     report(spec.id,'CREATED_AND_READBACK=PASS');
   }
   // The page must be authored through Classic Editor and native Insert Code;
