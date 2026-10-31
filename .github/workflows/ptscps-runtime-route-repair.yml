@@ -1,0 +1,193 @@
+name: PTSCPS frontend Node route repair (guarded)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'repair/ptscps-runtime-route-repair.ready'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ptscps-runtime-route-repair
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout guarded routing config
+        uses: actions/checkout@v4
+
+      - name: Install verified Apache to Astro standalone bridge over FTPS
+        id: install
+        shell: bash
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PYCODE'
+          import ftplib,hashlib,os,re,ssl
+          from pathlib import Path
+          from urllib.parse import urlsplit
+
+          config=os.environ.get('ENV_FILE','')
+          values=re.findall(r'^\s*(?:export\s+)?WC_URL_CLIENT\s*=\s*(.*)$',config,re.M)
+          if len(values)!=1:
+              raise RuntimeError('Exactly one WC_URL_CLIENT is required')
+          site=urlsplit(values[0].strip().strip('"\''))
+          if (site.scheme!='https' or not site.hostname or site.path not in ('','/')
+              or site.query or site.fragment or site.username or site.password
+              or site.port not in (None,443)):
+              raise RuntimeError('Invalid frontend HTTPS origin')
+          root=f'/domains/{site.hostname}/public_html'
+
+          raw=os.environ['FTP_SERVER'].strip()
+          if '://' not in raw:
+              raw='ftp://'+raw
+          endpoint=urlsplit(raw)
+          if (endpoint.scheme not in ('ftp','ftps') or not endpoint.hostname
+              or endpoint.username or endpoint.password or endpoint.path.strip('/')
+              or endpoint.port not in (None,21)):
+              raise RuntimeError('Invalid FTPS destination')
+
+          desired=Path('config/ptscps-frontend-proxy.htaccess').read_bytes()
+          desired_sha=hashlib.sha256(desired).hexdigest()
+          tmp=f'.ptscps-route-{os.environ.get("GITHUB_RUN_ID","unknown")}.tmp'
+          created=False
+
+          ftp=ftplib.FTP_TLS(context=ssl.create_default_context(),timeout=30)
+          try:
+              ftp.connect(endpoint.hostname,endpoint.port or 21)
+              ftp.auth(); ftp.login(os.environ['FTP_USERNAME'],os.environ['FTP_PASSWORD']); ftp.prot_p()
+              ftp.cwd(root)
+              if ftp.pwd().rstrip('/') != root:
+                  raise RuntimeError('Unexpected FTPS docroot')
+
+              current=None
+              try:
+                  parts=[]
+                  ftp.retrbinary('RETR .htaccess',parts.append)
+                  current=b''.join(parts)
+              except ftplib.error_perm as exc:
+                  if not str(exc).startswith('550'):
+                      raise
+
+              if current is not None:
+                  current_sha=hashlib.sha256(current).hexdigest()
+                  if current_sha != desired_sha:
+                      raise RuntimeError('Existing .htaccess is not the PTSCPS managed proxy; refusing overwrite')
+                  print('PTSCPS_ROUTE_INSTALL=ALREADY_PRESENT')
+              else:
+                  from io import BytesIO
+                  ftp.storbinary('STOR '+tmp,BytesIO(desired))
+                  verify=[]; ftp.retrbinary('RETR '+tmp,verify.append)
+                  if hashlib.sha256(b''.join(verify)).hexdigest()!=desired_sha:
+                      try: ftp.delete(tmp)
+                      except Exception: pass
+                      raise RuntimeError('Uploaded proxy checksum mismatch')
+                  ftp.rename(tmp,'.htaccess')
+                  created=True
+                  print('PTSCPS_ROUTE_INSTALL=CREATED')
+          finally:
+              try: ftp.quit()
+              except Exception: ftp.close()
+
+          with open(os.environ['GITHUB_OUTPUT'],'a',encoding='utf8') as out:
+              out.write(f'created={str(created).lower()}\n')
+              out.write(f'sha256={desired_sha}\n')
+          PYCODE
+
+      - name: Verify Apache reaches Astro Node runtime
+        shell: bash
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PYCODE'
+          import json,os,re,ssl,time,urllib.error,urllib.request
+          from urllib.parse import urlsplit
+
+          values=re.findall(r'^\s*(?:export\s+)?WC_URL_CLIENT\s*=\s*(.*)$',os.environ.get('ENV_FILE',''),re.M)
+          if len(values)!=1: raise RuntimeError('Exactly one WC_URL_CLIENT is required')
+          p=urlsplit(values[0].strip().strip('"\''))
+          if p.scheme!='https' or not p.hostname or p.path not in ('','/'):
+              raise RuntimeError('Invalid frontend origin')
+          origin='https://'+p.hostname
+          ctx=ssl.create_default_context()
+          last=[]
+          for attempt in range(1,6):
+              last=[]
+              ok=True
+              for path,kind in (('/', 'home'),('/api/agent/history','api')):
+                  req=urllib.request.Request(origin+path,headers={
+                      'User-Agent':'PTSCPS-runtime-route-repair/1.0',
+                      'Accept':'text/html,application/json,*/*',
+                      'Cache-Control':'no-cache',
+                  })
+                  try:
+                      with urllib.request.urlopen(req,context=ctx,timeout=15) as res:
+                          code=res.status
+                          body=res.read(8192)
+                          ctype=res.headers.get('Content-Type','')
+                  except urllib.error.HTTPError as exc:
+                      code=exc.code; body=exc.read(2048); ctype=exc.headers.get('Content-Type','')
+                  except Exception as exc:
+                      last.append((path,type(exc).__name__))
+                      ok=False
+                      continue
+                  last.append((path,code,ctype[:60]))
+                  if kind=='home':
+                      title=re.search(rb'<title[^>]*>([^<]*)</title>',body,re.I)
+                      if code!=200 or not title or title.group(1).decode('utf8','replace').strip()!='Trang chủ':
+                          ok=False
+                  else:
+                      if code!=200 or 'application/json' not in ctype.lower():
+                          ok=False
+                      else:
+                          try: json.loads(body.decode('utf8'))
+                          except Exception: ok=False
+              print(f'PTSCPS_RUNTIME_ROUTE_ATTEMPT_{attempt}={last}')
+              if ok:
+                  print('PTSCPS_RUNTIME_ROUTE_REPAIR=PASS')
+                  raise SystemExit(0)
+              time.sleep(2)
+          raise RuntimeError('Frontend proxy did not reach a healthy Astro standalone runtime')
+          PYCODE
+
+      - name: Roll back newly-created proxy when verification fails
+        if: ${{ failure() && steps.install.outputs.created == 'true' }}
+        shell: bash
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+          EXPECTED_SHA: ${{ steps.install.outputs.sha256 }}
+        run: |
+          python3 - <<'PYCODE'
+          import ftplib,hashlib,os,re,ssl
+          from urllib.parse import urlsplit
+          values=re.findall(r'^\s*(?:export\s+)?WC_URL_CLIENT\s*=\s*(.*)$',os.environ.get('ENV_FILE',''),re.M)
+          if len(values)!=1: raise RuntimeError('Invalid WC_URL_CLIENT')
+          site=urlsplit(values[0].strip().strip('"\'')); root=f'/domains/{site.hostname}/public_html'
+          raw=os.environ['FTP_SERVER'].strip(); raw=raw if '://' in raw else 'ftp://'+raw
+          endpoint=urlsplit(raw)
+          ftp=ftplib.FTP_TLS(context=ssl.create_default_context(),timeout=30)
+          try:
+              ftp.connect(endpoint.hostname,endpoint.port or 21); ftp.auth()
+              ftp.login(os.environ['FTP_USERNAME'],os.environ['FTP_PASSWORD']); ftp.prot_p(); ftp.cwd(root)
+              parts=[]; ftp.retrbinary('RETR .htaccess',parts.append)
+              if hashlib.sha256(b''.join(parts)).hexdigest()!=os.environ['EXPECTED_SHA']:
+                  raise RuntimeError('Refusing rollback: live .htaccess changed after install')
+              ftp.delete('.htaccess')
+              print('PTSCPS_RUNTIME_ROUTE_ROLLBACK=REMOVED_NEW_PROXY')
+          finally:
+              try: ftp.quit()
+              except Exception: ftp.close()
+          PYCODE

@@ -1,0 +1,9 @@
+# PTSCPS Astro standalone Node bridge.
+# The public Apache vhost terminates HTTPS; Astro standalone serves HTTP on localhost:4321.
+<IfModule mod_rewrite.c>
+RewriteEngine On
+# Keep ACME validation local to Apache/hosting.
+RewriteRule ^\.well-known/acme-challenge/ - [L]
+# Proxy every website request to the Astro standalone runtime.
+RewriteRule ^(.*)$ http://127.0.0.1:4321/$1 [P,L]
+</IfModule>
