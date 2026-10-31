@@ -4,6 +4,7 @@ on:
     branches: [main]
     paths:
       - audit/ptscps-public-http-probe.ready
+      - audit/ptscps-ftp-root-probe.ready
 permissions:
   contents: read
 jobs:
@@ -52,4 +53,56 @@ jobs:
           time.sleep(2)
           check(front,'/')
           print('PTSCPS_PUBLIC_HTTP_DIAG=COMPLETE_READ_ONLY')
+          PYCODE
+      - name: Inspect configured frontend FTP docroot without modifying files
+        shell: bash
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+        run: |
+          python3 - <<'PYCODE'
+          import ftplib,os,re,ssl
+          from urllib.parse import urlsplit
+          config=os.environ.get('ENV_FILE','')
+          m=re.findall(r'^\s*(?:export\s+)?WC_URL_CLIENT\s*=\s*(.*)$',config,re.M)
+          if len(m)!=1: raise RuntimeError('Invalid WC_URL_CLIENT count')
+          p=urlsplit(m[0].strip().strip('\"\''))
+          if p.scheme!='https' or not p.hostname or p.path not in ('','/') or p.query or p.fragment or p.username or p.password or p.port not in (None,443):
+              raise RuntimeError('Invalid frontend HTTPS origin')
+          root='/domains/'+p.hostname+'/public_html'
+          raw=os.environ['FTP_SERVER'].strip()
+          if '://' not in raw:raw='ftp://'+raw
+          address=urlsplit(raw)
+          if address.scheme not in ('ftp','ftps') or not address.hostname or address.username or address.password or address.path.strip('/') or address.port not in (None,21):
+              raise RuntimeError('Invalid FTPS destination')
+          ftp=ftplib.FTP_TLS(context=ssl.create_default_context(),timeout=24)
+          try:
+              ftp.connect(address.hostname,address.port or 21)
+              ftp.auth();ftp.login(os.environ['FTP_USERNAME'],os.environ['FTP_PASSWORD']);ftp.prot_p()
+              ftp.cwd(root)
+              if ftp.pwd().rstrip('/') != root: raise RuntimeError('Unexpected FTPS docroot')
+              ftp.voidcmd('TYPE I')
+              results={}
+              for name in ('.htaccess','index.html','client/index.html','server/entry.mjs','ecosystem.config.cjs','pm2-reload.txt','.env'):
+                  try:
+                      size=ftp.size(name)
+                      results[name]='present' if size is not None else 'unknown'
+                  except ftplib.error_perm as e:
+                      if str(e).startswith('550'): results[name]='absent'
+                      else:raise
+              print('PTSCPS_FTPS_DOCROOT_FILES='+str(results))
+              if results['.htaccess']=='present':
+                  parts=[]
+                  ftp.retrbinary('RETR .htaccess',parts.append)
+                  blob=b''.join(parts)
+                  if len(blob)>131072: raise RuntimeError('Oversized .htaccess')
+                  text=blob.decode('utf8','replace').lower()
+                  flags={key:bool(re.search(key,text)) for key in ('rewriteengine','rewriterule','directoryindex','proxy(pass|:|_)','passenger','sethandler','require all denied','options -indexes')}
+                  print('PTSCPS_FTPS_HTACCESS_FLAGS='+str(flags))
+              print('PTSCPS_FTPS_PROBE=PASS_READ_ONLY')
+          finally:
+              try:ftp.quit()
+              except Exception:ftp.close()
           PYCODE
