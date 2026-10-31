@@ -1,0 +1,41 @@
+name: PTSCPS homepage CMS native editor probe (read-only)
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'audit/ptscps-homepage-native-editor-probe.ready'
+permissions:
+  contents: read
+jobs:
+  inspect-admin:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Resolve configured WordPress origin
+        shell: bash
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: |
+          python3 - <<'PY'
+          import os,re
+          from urllib.parse import urlsplit
+          vals=dict(re.findall(r'^\s*(WC_URL|WC_URL_CLIENT)\s*=\s*(.+)\s*$',os.environ.get('ENV_FILE',''),re.M))
+          parsed=urlsplit(vals.get('WC_URL','').strip().strip('"\''))
+          frontend=urlsplit(vals.get('WC_URL_CLIENT','').strip().strip('"\''))
+          if parsed.scheme!='https' or not parsed.hostname or parsed.hostname==frontend.hostname or parsed.path not in ('','/') or parsed.query or parsed.fragment or parsed.username or parsed.password or parsed.port not in (None,443):
+            raise SystemExit('Invalid configured WordPress origin')
+          with open(os.environ['GITHUB_ENV'],'a') as f:f.write('WP_ORIGIN=https://'+parsed.hostname+'\n')
+          PY
+      - name: Set up read-only Playwright probe
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Inspect native ESC Table/Page editor controls without writing
+        env:
+          WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
+          WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
+        run: node scripts/ptscps-homepage-native-editor-probe.mjs
