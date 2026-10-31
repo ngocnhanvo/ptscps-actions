@@ -145,8 +145,19 @@ async function finishSelection(alt, basename) {
   const selected = page.locator('.media-modal .attachment.selected[data-id], .media-modal .attachment.details[data-id]').last();
   const mediaId = await selected.getAttribute('data-id');
   assert(mediaId && /^\d+$/.test(mediaId), 'No selected WP media attachment tile');
-  const response = await page.request.get(origin + '/wp-json/wp/v2/media/' + mediaId + '?_fields=id,source_url,mime_type', { timeout:20000 });
-  assert(response.ok(), 'Selected WordPress media record could not be verified');
+  // CMS intermittently resets connections during media processing; retry only
+  // this verified read, with bounded backoff. Never repeat an upload on retry.
+  let response;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      response = await page.request.get(origin + '/wp-json/wp/v2/media/' + mediaId + '?_fields=id,source_url,mime_type', { timeout:20000 });
+      if (response.ok() || (response.status() < 500 && response.status() !== 429)) break;
+    } catch (error) {
+      if (attempt === 3) throw error;
+    }
+    if (attempt < 3) await page.waitForTimeout(attempt * 1500);
+  }
+  assert(response?.ok(), 'Selected WordPress media record could not be verified');
   const wpMedia = await response.json();
   assert(wpMedia?.mime_type?.startsWith('image/') && typeof wpMedia.source_url === 'string', 'Selected WordPress media is not an image');
   const uploaded = new URL(wpMedia.source_url, origin);
@@ -169,7 +180,9 @@ async function saveAndReadBack(table, expectedRows) {
   await save.last().click();
   for (let i=0;i<10;i++) {
     await page.waitForTimeout(850);
-    const response = await page.request.get(origin + '/wp-json/tablepress/v1/table/' + table);
+    let response;
+    try { response = await page.request.get(origin + '/wp-json/tablepress/v1/table/' + table, { timeout:15000 }); }
+    catch { continue; }
     if (!response.ok()) continue;
     const data = await response.json();
     const rows = Array.isArray(data.items) ? data.items : [];
