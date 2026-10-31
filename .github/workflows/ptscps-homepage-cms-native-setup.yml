@@ -1,0 +1,41 @@
+name: PTSCPS homepage CMS native setup (guarded)
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'audit/ptscps-homepage-native-setup.ready'
+permissions:
+  contents: read
+jobs:
+  create-page-and-tables:
+    runs-on: ubuntu-latest
+    timeout-minutes: 22
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Resolve isolated WordPress origin
+        shell: bash
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: |
+          python3 - <<'PY'
+          import os,re
+          from urllib.parse import urlsplit
+          vals=dict(re.findall(r'^\s*(WC_URL|WC_URL_CLIENT)\s*=\s*(.+)\s*$',os.environ.get('ENV_FILE',''),re.M))
+          wp=urlsplit(vals.get('WC_URL','').strip().strip('"\''))
+          front=urlsplit(vals.get('WC_URL_CLIENT','').strip().strip('"\''))
+          if wp.scheme!='https' or not wp.hostname or wp.hostname==front.hostname or wp.path not in ('','/') or wp.query or wp.fragment or wp.username or wp.password or wp.port not in (None,443):raise SystemExit('Invalid WP origin')
+          with open(os.environ['GITHUB_ENV'],'a') as f:f.write('WP_ORIGIN=https://'+wp.hostname+'\n')
+          print('WP_ORIGIN_VALIDATED=PASS')
+          PY
+      - name: Install Playwright Chromium
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Create native ESC Tables and draft Page with Insert Code
+        env:
+          WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
+          WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
+        run: node scripts/ptscps-homepage-cms-setup.mjs
