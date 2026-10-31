@@ -223,8 +223,22 @@ try {
   for (const table of [...new Set(resolved.map(x => x.table))]) {
     const tableSpecs = resolved.filter(x => x.table === table);
     const api = origin + '/wp-json/tablepress/v1/table/' + table;
-    const beforeResponse = await page.request.get(api);
-    assert(beforeResponse.ok(), `Missing table ${table}`);
+    // A single 503/connection reset on the CMS must not restart already
+    // completed rows. Retry only this read-only lookup, never an image upload.
+    let beforeResponse;
+    for (let attempt = 1; attempt <= 4; attempt++) {
+      try {
+        beforeResponse = await page.request.get(api, { timeout:20000 });
+        if (beforeResponse.ok()) break;
+        console.warn(`CMS_MEDIA_TABLE_READ_RETRY=${table} attempt=${attempt} http=${beforeResponse.status()}`);
+        if (beforeResponse.status() >= 400 && beforeResponse.status() < 500 && beforeResponse.status() !== 429)
+          break;
+      } catch (error) {
+        console.warn(`CMS_MEDIA_TABLE_READ_RETRY=${table} attempt=${attempt} type=${error?.name || 'Error'}`);
+      }
+      if (attempt < 4) await page.waitForTimeout(attempt * 1500);
+    }
+    assert(beforeResponse?.ok(), `CMS table unavailable: ${table} (HTTP ${beforeResponse?.status() || 'network'})`);
     const before = await beforeResponse.json();
     const imageCol = (before.fields || []).findIndex(field => field?.key === 'image');
     assert(imageCol >= 0, `Image field missing ${table}`);
