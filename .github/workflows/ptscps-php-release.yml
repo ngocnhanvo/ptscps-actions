@@ -2,7 +2,7 @@ name: PTSCPS PHP deployment (manual opt-in)
 on:
   push:
     branches: [main]
-    paths: [.ptscps-folders-count-release-request, .ptscps-ml-prefill-release-request, .ptscps-preview-css-release-request, .ptscps-agent-locale-release-request]
+    paths: [.ptscps-folders-count-release-request, .ptscps-ml-prefill-release-request, .ptscps-preview-css-release-request, .ptscps-agent-locale-release-request, .ptscps-agent-history-locale-release-request]
   workflow_dispatch:
     inputs:
       confirm:
@@ -23,7 +23,8 @@ jobs:
               && (github.event.head_commit.message == 'deploy(ptscps): accurate Folders counts PHP only'
                   || github.event.head_commit.message == 'deploy(ptscps): English Page ACF prefill PHP only'
                   || github.event.head_commit.message == 'deploy(ptscps): TablePress preview CSS PHP only'
-                  || github.event.head_commit.message == 'deploy(ptscps): bilingual Agent PHP only')))
+                  || github.event.head_commit.message == 'deploy(ptscps): bilingual Agent PHP only'
+                  || github.event.head_commit.message == 'deploy(ptscps): language-scoped Agent PHP history only')))
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
@@ -61,6 +62,10 @@ jobs:
                 test "$(cat .ptscps-agent-locale-release-request)" = 'PTSCPS_AGENT_LOCALE_ONLY source=2a7417e1bec7f71474200137feace3221672c4ed'
                 test "$(git -C source-php rev-parse HEAD)" = '2a7417e1bec7f71474200137feace3221672c4ed'
                 ;;
+              'deploy(ptscps): language-scoped Agent PHP history only')
+                test "$(cat .ptscps-agent-history-locale-release-request)" = 'PTSCPS_AGENT_HISTORY_LOCALE_ONLY source=343eddeed714576ef2697f64b420b2999f6003a6'
+                test "$(git -C source-php rev-parse HEAD)" = '343eddeed714576ef2697f64b420b2999f6003a6'
+                ;;
               *) exit 1 ;;
             esac
           fi
@@ -86,6 +91,12 @@ jobs:
               php -l "source-php/$file"
             done
           fi
+          if [[ "${{ github.event_name }}" == 'push' && "${{ github.event.head_commit.message }}" == 'deploy(ptscps): language-scoped Agent PHP history only' ]]; then
+            for file in wp-content/mu-plugins/esc-agent.php wp-content/mu-plugins/esc-agent-admin-history.php wp-content/mu-plugins/esc-agent/src/Core/AgentLocale.php; do
+              php -l "source-php/$file"
+            done
+            php source-php/wp-content/mu-plugins/tests/esc-agent-locale-session-test.php
+          fi
       - name: Release only PTSCPS WordPress PHP files with protected FTPS
         shell: bash
         env:
@@ -97,6 +108,8 @@ jobs:
             ${{ github.event_name == 'push' && github.event.head_commit.message == 'deploy(ptscps): TablePress preview CSS PHP only' && '1' || '0' }}
           PTSCPS_AGENT_LOCALE_ONLY: >-
             ${{ github.event_name == 'push' && github.event.head_commit.message == 'deploy(ptscps): bilingual Agent PHP only' && '1' || '0' }}
+          PTSCPS_AGENT_HISTORY_LOCALE_ONLY: >-
+            ${{ github.event_name == 'push' && github.event.head_commit.message == 'deploy(ptscps): language-scoped Agent PHP history only' && '1' || '0' }}
           ENV_FILE: ${{ secrets.ENV_FILE }}
           FTP_SERVER: ${{ secrets.FTP_SERVER }}
           FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
