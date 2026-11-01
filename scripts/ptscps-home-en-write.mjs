@@ -93,11 +93,35 @@ async function ensurePage(){
   if(pageId)await page.goto(`${wp}/wp-admin/post.php?post=${pageId}&action=edit`,{waitUntil:'domcontentloaded',timeout:45000});
   else {
     await page.goto(`${wp}/wp-admin/edit.php?post_type=page&post_status=all&s=Home`,{waitUntil:'domcontentloaded',timeout:45000});
-    const candidates=await page.locator('a.row-title').allTextContents();
-    assert(!candidates.some(v=>/^home$/i.test(v.trim())),'Unpublished Home candidate exists; manual mapping required');
-    // Use the native multilingual Add English route to prefill ACF origin.
-    // No direct select/metadata manipulation or synthetic values.
-    await page.goto(`${wp}/wp-admin/post-new.php?post_type=page&esc_ml_origin=82467&esc_ml_lang=en`,{waitUntil:'domcontentloaded',timeout:45000});
+    const drafts=await page.locator('#the-list tr[id^="post-"]').evaluateAll(rows=>rows.map(row=>({
+      id:Number((row.id||'').replace(/^post-/,'')),title:(row.querySelector('a.row-title')?.textContent||'').trim()
+    })).filter(row=>row.title==='Home'&&row.id>0));
+    assert(drafts.length<=1,'Multiple Home drafts; cannot safely determine target');
+    if(drafts.length){
+      pageId=drafts[0].id;
+      await page.goto(`${wp}/wp-admin/post.php?post=${pageId}&action=edit`,{waitUntil:'domcontentloaded',timeout:45000});
+      const draft=await page.evaluate(()=>({
+        status:document.querySelector('#post_status')?.value,
+        title:document.querySelector('#title')?.value?.trim(),
+        lang:document.querySelector('[data-name="product_lang"] select')?.value,
+        key:document.querySelector('[data-name="key"] input')?.value,
+        action:document.querySelector('[data-name="action"] input')?.value,
+        origin:document.querySelector('[data-name="origin_page_id"] select')?.value,
+        content:document.querySelector('#content')?.value||''
+      }));
+      console.log('EN_PAGE_DRAFT_RECOVERY='+JSON.stringify({...draft,id:pageId,contentLength:draft.content.length,content:undefined}));
+      const knownIds=sources.map(v=>v+'_en');
+      assert(draft.status==='draft'&&draft.title==='Home'
+        &&['','vi','en'].includes(draft.lang||'')
+        &&(!draft.key||draft.key==='home')
+        &&(!draft.action||draft.action==='HomePage')
+        &&(!draft.origin||draft.origin==='82467')
+        &&(!draft.content.trim()||knownIds.some(v=>draft.content.includes(v))),
+        'Home draft does not match incomplete English homepage; refusing modification');
+    }else{
+      // Create only if neither a published page nor an existing draft exists.
+      await page.goto(`${wp}/wp-admin/post-new.php?post_type=page&esc_ml_origin=82467&esc_ml_lang=en`,{waitUntil:'domcontentloaded',timeout:45000});
+    }
   }
   const fields=await page.locator('.acf-field[data-name]').evaluateAll(els=>els.filter(el=>['key','action','product_lang','origin_page_id'].includes(el.dataset.name)).map(el=>({name:el.dataset.name,inputs:[...el.querySelectorAll('input,select')].map(i=>({type:i.type,name:i.name,value:i.value,id:i.id,options:i.tagName==='SELECT'?[...i.options].map(x=>({value:x.value,label:x.text})):undefined})).slice(0,10)})));
   console.log('EN_PAGE_ACF_UI='+JSON.stringify(fields));
@@ -115,8 +139,23 @@ async function ensurePage(){
     const select=parent.locator('select').first();
     const selected=await select.inputValue();
     if(selected==='82467')console.log('EN_PAGE_NATIVE_ORIGIN_PREFILL=PASS');
-    else if(await select.locator('option[value="82467"]').count())await select.selectOption('82467');
-    else throw Error('Native translation origin was not prefilled by WordPress multilingual workflow; no publication');
+    else {
+      // ACF's AJAX-backed Select2 does not include unloaded IDs in <option>.
+      // Use the native picker and verify the saved option's actual ID.
+      const picker=parent.locator('.select2-selection').first();
+      assert(await picker.count()===1,'Native ACF origin picker is unavailable');
+      await picker.click();
+      const search=page.locator('.select2-container--open input.select2-search__field').first();
+      await search.fill('Trang chủ');
+      const options=page.locator('.select2-container--open .select2-results__option[role="option"]');
+      await options.first().waitFor({state:'visible',timeout:15000});
+      console.log('EN_PAGE_ORIGIN_RESULTS='+JSON.stringify((await options.allTextContents()).slice(0,8)));
+      const result=options.filter({hasText:'Trang chủ'}).first();
+      assert(await result.count()>0,'WordPress did not offer the original Vietnamese homepage');
+      await result.click();
+      assert(await select.inputValue()==='82467','Selected translation origin is not the original homepage');
+      console.log('EN_PAGE_NATIVE_ORIGIN_SELECTED=PASS');
+    }
   }
   else throw Error('Unsupported origin_page_id ACF field, no publication');
   const content=await page.locator('#content').inputValue();
