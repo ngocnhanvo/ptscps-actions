@@ -79,6 +79,38 @@ for (const c of cases) {
   if (!pass) {
     throw new Error(`PTSCPS_AGENT_LOCALE_QA_FAIL locale=${c.language} status=${response.status} code=${String(body.code || 'unavailable').replace(/[^a-z_]/gi, '').slice(0,30)}`);
   }
+
+  // The user reported F5 restoring an old answer. Verify the same cookie's
+  // visible history, its POST soft-clear, and a fresh GET after the clear.
+  const sessionCookie = (response.headers.get('set-cookie') || '').split(';')[0];
+  if (!/^esc_agent_session=[a-f0-9-]+$/i.test(sessionCookie))
+    throw new Error('PTSCPS_CHAT_CLEAR_QA=FAIL missing server session cookie');
+  const readHistory = async () => {
+    const res = await fetch(`${front}/api/agent/history`, {
+      headers: { Cookie: sessionCookie, Accept: 'application/json' },
+      signal: AbortSignal.timeout(15000),
+    });
+    const history = await res.json().catch(() => null);
+    if (res.status !== 200 || !Array.isArray(history))
+      throw new Error(`PTSCPS_CHAT_CLEAR_QA=FAIL history_http_${res.status}`);
+    return history;
+  };
+  const before = await readHistory();
+  if (!before.some(item => item.sender === 'user' && item.message === c.question))
+    throw new Error('PTSCPS_CHAT_CLEAR_QA=FAIL pre-clear history missing seed question');
+  const clear = await fetch(`${front}/api/agent/history-clear`, {
+    method: 'POST',
+    headers: { Cookie: sessionCookie, Origin: front, 'Content-Type': 'application/json' },
+    body: '{}',
+    signal: AbortSignal.timeout(15000),
+  });
+  const clearData = await clear.json().catch(() => null);
+  if (clear.status !== 200 || clearData?.success !== true)
+    throw new Error(`PTSCPS_CHAT_CLEAR_QA=FAIL clear_http_${clear.status}`);
+  const after = await readHistory();
+  if (after.length !== 0) throw new Error('PTSCPS_CHAT_CLEAR_QA=FAIL old turns survived clear');
+  console.log(`PTSCPS_CHAT_CLEAR_QA=PASS pre_clear=${before.length > 0} post_clear_empty=true`);
+
   checked++;
   if (checked < cases.length) await new Promise(resolve => setTimeout(resolve, 5000));
 }
