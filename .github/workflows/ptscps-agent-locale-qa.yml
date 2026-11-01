@@ -1,0 +1,27 @@
+name: PTSCPS AI Agent VI EN live QA (one-off)
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'audit/ptscps-agent-locale-qa.ready'
+permissions:
+  contents: read
+concurrency:
+  group: ptscps-agent-locale-qa
+  cancel-in-progress: false
+jobs:
+  locale-qa:
+    if: "${{ github.event.head_commit.message == 'test(ptscps): verify VI EN Agent live once' }}"
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Check Agent locale QA source syntax
+        run: node --check scripts/ptscps-agent-locale-qa.mjs
+      - name: Verify two public Agent replies without logging conversations
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: node scripts/ptscps-agent-locale-qa.mjs
