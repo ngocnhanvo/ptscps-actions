@@ -1,0 +1,31 @@
+name: PTSCPS Agent EN Knowledge Refresh (one-off)
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'audit/ptscps-agent-knowledge-refresh.ready'
+permissions:
+  contents: read
+concurrency:
+  group: ptscps-agent-knowledge-refresh
+  cancel-in-progress: false
+jobs:
+  refresh-en:
+    if: "${{ github.event.head_commit.message == 'test(ptscps): refresh EN knowledge via WP Admin once' }}"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install Playwright Chromium
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Refresh existing EN knowledge through authenticated WordPress Admin
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+          WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
+          WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
+        run: node scripts/ptscps-agent-knowledge-refresh.mjs
