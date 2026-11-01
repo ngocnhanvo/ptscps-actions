@@ -50,6 +50,31 @@ for (const c of cases) {
   const reply = typeof body.reply === 'string' ? body.reply.trim() : '';
   const pass = response.status === 200 && reply.length >= 10 && languageEvidence(c.language, reply)
     && !/PetroVietnam Transportation Corporation/i.test(reply);
+  if (!pass && response.status === 503) {
+    // One bounded WordPress-only diagnostic call separates proxy failures from Planner failures.
+    const envValue = name => {
+      const line = config.split(/\r?\n/).find(l => new RegExp(`^\\s*(?:export\\s+)?${name}=`).test(l));
+      return line ? line.split('=').slice(1).join('=').trim().replace(/^(?:"(.*)"|'(.*)')$/, (_, a, b) => a ?? b) : '';
+    };
+    const secret = envValue('WOO_SECRET');
+    const key = envValue('WOO_KEY');
+    if (!secret) console.log('PTSCPS_AGENT_UPSTREAM_DIAG=BLOCKED missing Woo secret in Actions ENV_FILE');
+    else {
+      try {
+        const upstream = await fetch(`${getOrigin(values.WC_URL)}/wp-json/esc-agent/v1/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${secret}`, ...(key ? { 'X-ESC-Woo-Key': key } : {}) },
+          body: JSON.stringify({ message: c.question, language: c.language, sessionId: crypto.randomUUID() }),
+          signal: AbortSignal.timeout(35000),
+        });
+        const result = await upstream.json().catch(() => ({}));
+        const reason = typeof result.code === 'string' ? result.code.replace(/[^a-z_]/gi, '').slice(0,40) : 'none';
+        console.log(`PTSCPS_AGENT_UPSTREAM_DIAG status=${upstream.status} code=${reason} has_message=${typeof result.message === 'string'}`);
+      } catch (error) {
+        console.log(`PTSCPS_AGENT_UPSTREAM_DIAG network_error_type=${error instanceof Error ? error.name : 'unknown'}`);
+      }
+    }
+  }
   console.log(`PTSCPS_AGENT_LOCALE_QA locale=${c.language} status=${response.status} chars=${reply.length} language_evidence=${pass ? 'PASS' : 'FAIL'}`);
   if (!pass) {
     throw new Error(`PTSCPS_AGENT_LOCALE_QA_FAIL locale=${c.language} status=${response.status} code=${String(body.code || 'unavailable').replace(/[^a-z_]/gi, '').slice(0,30)}`);
