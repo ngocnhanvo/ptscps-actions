@@ -26,6 +26,10 @@ DEFAULT_FILES = (
     "wp-content/plugins/github-trigger/vcs-build-trigger.js",
 )
 FILES = (
+    "wp-content/themes/vibe-code-theme/functions.php",
+    "wp-content/themes/vibe-code-theme/inc/tablepress/wysiwyg.php",
+    "wp-content/themes/vibe-code-theme/mce.css",
+) if os.environ.get("PTSCPS_PREVIEW_CSS_ONLY") == "1" else (
     "wp-content/mu-plugins/esc-multilingual-admin.php",
 ) if os.environ.get("PTSCPS_ML_ONLY") == "1" else (
     "wp-content/mu-plugins/ptscps-folders-accurate-counts.php",

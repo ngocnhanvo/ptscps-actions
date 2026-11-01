@@ -2,7 +2,7 @@ name: PTSCPS PHP deployment (manual opt-in)
 on:
   push:
     branches: [main]
-    paths: [.ptscps-folders-count-release-request, .ptscps-ml-prefill-release-request]
+    paths: [.ptscps-folders-count-release-request, .ptscps-ml-prefill-release-request, .ptscps-preview-css-release-request]
   workflow_dispatch:
     inputs:
       confirm:
@@ -21,7 +21,8 @@ jobs:
       && ((github.event_name == 'workflow_dispatch' && inputs.confirm == 'DEPLOY_PHP')
           || (github.event_name == 'push' && github.ref == 'refs/heads/main'
               && (github.event.head_commit.message == 'deploy(ptscps): accurate Folders counts PHP only'
-                  || github.event.head_commit.message == 'deploy(ptscps): English Page ACF prefill PHP only')))
+                  || github.event.head_commit.message == 'deploy(ptscps): English Page ACF prefill PHP only'
+                  || github.event.head_commit.message == 'deploy(ptscps): TablePress preview CSS PHP only')))
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
@@ -51,6 +52,10 @@ jobs:
                 test "$(cat .ptscps-ml-prefill-release-request)" = 'PTSCPS_ML_PREFILL_ONLY source=fd6fc1326de58ae9b6f73922c2fa2381bc279b35'
                 test "$(git -C source-php rev-parse HEAD)" = 'fd6fc1326de58ae9b6f73922c2fa2381bc279b35'
                 ;;
+              'deploy(ptscps): TablePress preview CSS PHP only')
+                test "$(cat .ptscps-preview-css-release-request)" = 'PTSCPS_PREVIEW_CSS_ONLY source=539bd8ab8a7f266832304923a894fca9730a49d9'
+                test "$(git -C source-php rev-parse HEAD)" = '539bd8ab8a7f266832304923a894fca9730a49d9'
+                ;;
               *) exit 1 ;;
             esac
           fi
@@ -62,6 +67,8 @@ jobs:
           php -l source-php/wp-content/plugins/github-trigger/vcs-build-trigger.php
           php -l source-php/wp-content/mu-plugins/esc-github-trigger-config.php
           php -l source-php/wp-content/mu-plugins/esc-seo-files.php
+          php -l source-php/wp-content/themes/vibe-code-theme/functions.php
+          php -l source-php/wp-content/themes/vibe-code-theme/inc/tablepress/wysiwyg.php
           ! grep -Eqi 'nghiencuukhoahoc|EduResearch Hub' source-php/wp-content/mu-plugins/esc-seo-files.php
           php -l source-php/wp-content/plugins/github-trigger/tests/build-status-regression.php
           if [[ "${{ github.event_name }}" != "push" ]]; then
@@ -76,6 +83,8 @@ jobs:
             ${{ github.event_name == 'push' && github.event.head_commit.message == 'deploy(ptscps): accurate Folders counts PHP only' && '1' || '0' }}
           PTSCPS_ML_ONLY: >-
             ${{ github.event_name == 'push' && github.event.head_commit.message == 'deploy(ptscps): English Page ACF prefill PHP only' && '1' || '0' }}
+          PTSCPS_PREVIEW_CSS_ONLY: >-
+            ${{ github.event_name == 'push' && github.event.head_commit.message == 'deploy(ptscps): TablePress preview CSS PHP only' && '1' || '0' }}
           ENV_FILE: ${{ secrets.ENV_FILE }}
           FTP_SERVER: ${{ secrets.FTP_SERVER }}
           FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
