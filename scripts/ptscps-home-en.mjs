@@ -11,12 +11,21 @@ try{
   console.log('EN_AUDIT_AUTH=PASS');
   const pages=[];
   for(let pg=1;pg<=4;pg++){
-    const r=await page.request.get(`${origin}/wp-json/wp/v2/pages?context=edit&per_page=100&page=${pg}&_fields=id,slug,title,status,acf,content,parent,modified`,{timeout:30000});
+    let r=await page.request.get(`${origin}/wp-json/wp/v2/pages?context=edit&per_page=100&page=${pg}&_fields=id,slug,title,status,acf,content,parent,modified`,{timeout:30000});
+    if(r.status()===401||r.status()===403){
+      // WordPress cookie-authenticated REST edit context requires X-WP-Nonce.
+      // Public publish-only data is enough for the initial inventory; admin
+      // list separately confirms draft titles without any writes.
+      r=await page.request.get(`${origin}/wp-json/wp/v2/pages?per_page=100&page=${pg}&_fields=id,slug,title,status,acf,content,parent,modified`,{timeout:30000});
+      console.log('EN_AUDIT_PAGES_FALLBACK=public-published-only');
+    }
     if(r.status()===400)break;
     if(!r.ok())throw Error('Page inventory HTTP '+r.status());
     const data=await r.json();pages.push(...data);
     if(data.length<100)break;
   }
+  const adminList=await page.goto(origin+'/wp-admin/edit.php?post_type=page&post_status=all',{waitUntil:'domcontentloaded',timeout:45000});
+  console.log('EN_AUDIT_ADMIN_LIST='+JSON.stringify({status:adminList?.status(),relevant:await page.locator('#the-list tr').evaluateAll(rows=>rows.map(row=>({id:row.id,title:row.querySelector('.row-title')?.textContent?.trim(),status:row.querySelector('.post-state')?.textContent?.trim()})).filter(row=>/home|trang chủ|homepage|english/i.test(row.title||'')))}));
   const relevant=pages.filter(p=>{const acf=p.acf||{};const title=String(p.title?.raw||p.title?.rendered||'').toLowerCase();return acf.key==='home'||/home|trang chủ|homepage|english/i.test(title)||String(acf.product_lang||'').includes('en');});
   console.log('EN_AUDIT_PAGES='+JSON.stringify({total:pages.length,relevant:relevant.map(p=>({id:p.id,title:p.title?.raw||p.title?.rendered,status:p.status,slug:p.slug,acf:{key:p.acf?.key,action:p.acf?.action,lang:p.acf?.product_lang,origin_page_id:p.acf?.origin_page_id},shortcodes:[...String(p.content?.raw||'').matchAll(/\[table\s+id=([^\s\]]+)\s*\/\]/gi)].map(m=>m[1]),contentChars:String(p.content?.raw||'').length}))}));
   const tables=[];
