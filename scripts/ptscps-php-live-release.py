@@ -17,6 +17,20 @@ import ssl
 from urllib.parse import urlsplit
 
 SOURCE = Path("source-php")
+AGENT_LOCALE_FILES = (
+    "wp-content/mu-plugins/esc-agent.php",
+    "wp-content/mu-plugins/esc-agent/src/Core/Agent.php",
+    "wp-content/mu-plugins/esc-agent/src/Core/AgentLocale.php",
+    "wp-content/mu-plugins/esc-agent/src/Core/KnowledgeAwarePlanner.php",
+    "wp-content/mu-plugins/esc-agent/src/Core/Planner.php",
+    "wp-content/mu-plugins/esc-agent/src/Knowledge/ArticleKnowledgeRetriever.php",
+    "wp-content/mu-plugins/esc-agent/src/Knowledge/KnowledgeIndex.php",
+    "wp-content/mu-plugins/esc-agent/src/Knowledge/KnowledgeRetriever.php",
+    "wp-content/mu-plugins/esc-agent/src/Skills/CompanySkill.php",
+    "wp-content/mu-plugins/esc-agent/src/Skills/ContactSkill.php",
+    "wp-content/mu-plugins/esc-agent/src/Skills/KnowledgeSearchSkill.php",
+    "wp-content/mu-plugins/esc-agent/src/Skills/PolicySkill.php",
+)
 DEFAULT_FILES = (
     "ptscps-unzip.php",
     "ptscps-unzip-v2.ready",
@@ -25,7 +39,7 @@ DEFAULT_FILES = (
     "wp-content/plugins/github-trigger/vcs-build-trigger.php",
     "wp-content/plugins/github-trigger/vcs-build-trigger.js",
 )
-FILES = (
+FILES = AGENT_LOCALE_FILES if os.environ.get("PTSCPS_AGENT_LOCALE_ONLY") == "1" else (
     "wp-content/themes/vibe-code-theme/functions.php",
     "wp-content/themes/vibe-code-theme/inc/tablepress/wysiwyg.php",
     "wp-content/themes/vibe-code-theme/mce.css",

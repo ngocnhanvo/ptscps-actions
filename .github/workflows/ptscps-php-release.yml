@@ -2,7 +2,7 @@ name: PTSCPS PHP deployment (manual opt-in)
 on:
   push:
     branches: [main]
-    paths: [.ptscps-folders-count-release-request, .ptscps-ml-prefill-release-request, .ptscps-preview-css-release-request]
+    paths: [.ptscps-folders-count-release-request, .ptscps-ml-prefill-release-request, .ptscps-preview-css-release-request, .ptscps-agent-locale-release-request]
   workflow_dispatch:
     inputs:
       confirm:
@@ -22,7 +22,8 @@ jobs:
           || (github.event_name == 'push' && github.ref == 'refs/heads/main'
               && (github.event.head_commit.message == 'deploy(ptscps): accurate Folders counts PHP only'
                   || github.event.head_commit.message == 'deploy(ptscps): English Page ACF prefill PHP only'
-                  || github.event.head_commit.message == 'deploy(ptscps): TablePress preview CSS PHP only')))
+                  || github.event.head_commit.message == 'deploy(ptscps): TablePress preview CSS PHP only'
+                  || github.event.head_commit.message == 'deploy(ptscps): bilingual Agent PHP only')))
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
@@ -56,6 +57,10 @@ jobs:
                 test "$(cat .ptscps-preview-css-release-request)" = 'PTSCPS_PREVIEW_CSS_ONLY source=539bd8ab8a7f266832304923a894fca9730a49d9'
                 test "$(git -C source-php rev-parse HEAD)" = '539bd8ab8a7f266832304923a894fca9730a49d9'
                 ;;
+              'deploy(ptscps): bilingual Agent PHP only')
+                test "$(cat .ptscps-agent-locale-release-request)" = 'PTSCPS_AGENT_LOCALE_ONLY source=d6975fe0d86f6aa28d5f5d4d400303f55ce2d8fc'
+                test "$(git -C source-php rev-parse HEAD)" = 'd6975fe0d86f6aa28d5f5d4d400303f55ce2d8fc'
+                ;;
               *) exit 1 ;;
             esac
           fi
@@ -76,6 +81,11 @@ jobs:
           fi
           test "$(cat source-php/ptscps-unzip-v2.ready)" = 'PTSCPS_ASTRO_UNZIP_PROTOCOL=2'
           python3 -m py_compile scripts/ptscps-php-live-release.py
+          if [[ "${{ github.event_name }}" == 'push' && "${{ github.event.head_commit.message }}" == 'deploy(ptscps): bilingual Agent PHP only' ]]; then
+            for file in               wp-content/mu-plugins/esc-agent.php               wp-content/mu-plugins/esc-agent/src/Core/{Agent,AgentLocale,KnowledgeAwarePlanner,Planner}.php               wp-content/mu-plugins/esc-agent/src/Knowledge/{ArticleKnowledgeRetriever,KnowledgeIndex,KnowledgeRetriever}.php               wp-content/mu-plugins/esc-agent/src/Skills/{CompanySkill,ContactSkill,KnowledgeSearchSkill,PolicySkill}.php; do
+              php -l "source-php/$file"
+            done
+          fi
       - name: Release only PTSCPS WordPress PHP files with protected FTPS
         shell: bash
         env:
@@ -85,6 +95,8 @@ jobs:
             ${{ github.event_name == 'push' && github.event.head_commit.message == 'deploy(ptscps): English Page ACF prefill PHP only' && '1' || '0' }}
           PTSCPS_PREVIEW_CSS_ONLY: >-
             ${{ github.event_name == 'push' && github.event.head_commit.message == 'deploy(ptscps): TablePress preview CSS PHP only' && '1' || '0' }}
+          PTSCPS_AGENT_LOCALE_ONLY: >-
+            ${{ github.event_name == 'push' && github.event.head_commit.message == 'deploy(ptscps): bilingual Agent PHP only' && '1' || '0' }}
           ENV_FILE: ${{ secrets.ENV_FILE }}
           FTP_SERVER: ${{ secrets.FTP_SERVER }}
           FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
