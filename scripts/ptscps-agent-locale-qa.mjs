@@ -27,6 +27,7 @@ if (home.status !== 200 || htmlLocale !== 'en' || !widgetLocale)
 
 const cases = [
   { language: 'en', question: 'what is ptsc?' },
+  { language: 'vi', question: 'PTSC là gì?' },
 ];
 
 function languageEvidence(language, reply) {
@@ -38,10 +39,12 @@ function languageEvidence(language, reply) {
 }
 
 let checked = 0;
+let sharedSessionCookie = '';
 for (const c of cases) {
   const response = await fetch(`${front}/api/agent/chat`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Origin: front, Accept: 'application/json' },
+    headers: { 'Content-Type': 'application/json', Origin: front, Accept: 'application/json',
+      ...(sharedSessionCookie ? { Cookie: sharedSessionCookie } : {}) },
     body: JSON.stringify({ message: c.question, language: c.language }),
     redirect: 'manual',
     signal: AbortSignal.timeout(55_000),
@@ -82,11 +85,15 @@ for (const c of cases) {
 
   // The user reported F5 restoring an old answer. Verify the same cookie's
   // visible history, its POST soft-clear, and a fresh GET after the clear.
-  const sessionCookie = (response.headers.get('set-cookie') || '').split(';')[0];
+  const returnedCookie = (response.headers.get('set-cookie') || '').split(';')[0];
+  if (!sharedSessionCookie) sharedSessionCookie = returnedCookie;
+  if (returnedCookie && returnedCookie !== sharedSessionCookie)
+    throw new Error('PTSCPS_CHAT_CLEAR_QA=FAIL session changed while switching locale');
+  const sessionCookie = sharedSessionCookie;
   if (!/^esc_agent_session=[a-f0-9-]+$/i.test(sessionCookie))
     throw new Error('PTSCPS_CHAT_CLEAR_QA=FAIL missing server session cookie');
-  const readHistory = async () => {
-    const res = await fetch(`${front}/api/agent/history`, {
+  const readHistory = async (historyLanguage) => {
+    const res = await fetch(`${front}/api/agent/history?language=${historyLanguage}`, {
       headers: { Cookie: sessionCookie, Accept: 'application/json' },
       signal: AbortSignal.timeout(15000),
     });
@@ -95,23 +102,25 @@ for (const c of cases) {
       throw new Error(`PTSCPS_CHAT_CLEAR_QA=FAIL history_http_${res.status}`);
     return history;
   };
-  const before = await readHistory();
+  const before = await readHistory(c.language);
+  const other = await readHistory(c.language === 'en' ? 'vi' : 'en');
+  if (other.length !== 0) throw new Error('PTSCPS_CHAT_LOCALE_ISOLATION=FAIL cross-language history');
   if (!before.some(item => item.sender === 'user' && item.message === c.question))
     throw new Error('PTSCPS_CHAT_CLEAR_QA=FAIL pre-clear history missing seed question');
   const clear = await fetch(`${front}/api/agent/history-clear`, {
     method: 'POST',
     headers: { Cookie: sessionCookie, Origin: front, 'Content-Type': 'application/json' },
-    body: '{}',
+    body: JSON.stringify({ language: c.language }),
     signal: AbortSignal.timeout(15000),
   });
   const clearData = await clear.json().catch(() => null);
   if (clear.status !== 200 || clearData?.success !== true)
     throw new Error(`PTSCPS_CHAT_CLEAR_QA=FAIL clear_http_${clear.status}`);
-  const after = await readHistory();
+  const after = await readHistory(c.language);
   if (after.length !== 0) throw new Error('PTSCPS_CHAT_CLEAR_QA=FAIL old turns survived clear');
   console.log(`PTSCPS_CHAT_CLEAR_QA=PASS pre_clear=${before.length > 0} post_clear_empty=true`);
 
   checked++;
   if (checked < cases.length) await new Promise(resolve => setTimeout(resolve, 5000));
 }
-console.log('PTSCPS_AGENT_LOCALE_LIVE_QA=PASS cases=2');
+console.log('PTSCPS_AGENT_LOCALE_LIVE_QA=PASS cases=2, shared_session=true, isolated_history=true');
