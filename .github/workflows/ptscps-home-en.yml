@@ -38,14 +38,30 @@ jobs:
         run: |
           npm install --no-save --no-audit --no-fund playwright@1.56.1
           npx playwright install --with-deps chromium
+      - name: Determine guarded action from checked-out commit
+        id: change
+        shell: bash
+        run: |
+          set -euo pipefail
+          git show --pretty=format: --name-only HEAD | sed '/^$/d' > /tmp/ptscps-en-changed.txt
+          if grep -Fxq 'audit/ptscps-home-en-write.ready' /tmp/ptscps-en-changed.txt; then
+            echo 'write=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'write=false' >> "$GITHUB_OUTPUT"
+          fi
+          if grep -Fxq 'audit/ptscps-home-en-audit.ready' /tmp/ptscps-en-changed.txt; then
+            echo 'audit=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'audit=false' >> "$GITHUB_OUTPUT"
+          fi
       - name: Audit English homepage and reusable media (read-only)
-        if: contains(github.event.head_commit.added, 'audit/ptscps-home-en-audit.ready') || contains(github.event.head_commit.modified, 'audit/ptscps-home-en-audit.ready')
+        if: steps.change.outputs.audit == 'true'
         env:
           WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
           WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
         run: node scripts/ptscps-home-en.mjs
       - name: Populate English tables and publish localized homepage (guarded)
-        if: contains(github.event.head_commit.added, 'audit/ptscps-home-en-write.ready') || contains(github.event.head_commit.modified, 'audit/ptscps-home-en-write.ready')
+        if: steps.change.outputs.write == 'true'
         env:
           WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
           WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
