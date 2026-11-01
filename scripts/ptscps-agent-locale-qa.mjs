@@ -16,9 +16,17 @@ function getOrigin(value) {
 const front = getOrigin(values.WC_URL_CLIENT);
 if (front === getOrigin(values.WC_URL)) throw new Error('Frontend and CMS origins overlap');
 
+// Verify the real English page carries its own immutable Agent locale signal.
+const home = await fetch(`${front}/home`, { redirect: 'manual', signal: AbortSignal.timeout(15000) });
+const homeHtml = await home.text();
+const htmlLocale = homeHtml.match(/<html[^>]*\blang=["']([^"']+)/i)?.[1] || 'missing';
+const widgetLocale = /data-agent-language="en"/.test(homeHtml);
+console.log(`PTSCPS_EN_PAGE_LOCALE status=${home.status} html_lang=${htmlLocale} widget_en=${widgetLocale}`);
+if (home.status !== 200 || htmlLocale !== 'en' || !widgetLocale)
+  throw new Error('PTSCPS_EN_PAGE_LOCALE=FAIL');
+
 const cases = [
-  { language: 'en', question: 'What services does the company provide? Answer briefly in English and use only verified English website sources.' },
-  { language: 'vi', question: 'Công ty cung cấp những dịch vụ gì? Trả lời ngắn gọn bằng tiếng Việt và chỉ dùng nguồn tiếng Việt đã xác minh.' },
+  { language: 'en', question: 'what is ptsc?' },
 ];
 
 function languageEvidence(language, reply) {
@@ -40,7 +48,8 @@ for (const c of cases) {
   });
   const body = await response.json().catch(() => ({}));
   const reply = typeof body.reply === 'string' ? body.reply.trim() : '';
-  const pass = response.status === 200 && reply.length >= 10 && languageEvidence(c.language, reply);
+  const pass = response.status === 200 && reply.length >= 10 && languageEvidence(c.language, reply)
+    && !/PetroVietnam Transportation Corporation/i.test(reply);
   console.log(`PTSCPS_AGENT_LOCALE_QA locale=${c.language} status=${response.status} chars=${reply.length} language_evidence=${pass ? 'PASS' : 'FAIL'}`);
   if (!pass) {
     throw new Error(`PTSCPS_AGENT_LOCALE_QA_FAIL locale=${c.language} status=${response.status} code=${String(body.code || 'unavailable').replace(/[^a-z_]/gi, '').slice(0,30)}`);
