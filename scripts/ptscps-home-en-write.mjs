@@ -165,6 +165,8 @@ async function ensurePage(){
       await options.first().waitFor({state:'visible',timeout:15000});
       console.log('EN_PAGE_ORIGIN_RESULTS='+JSON.stringify((await options.allTextContents()).slice(0,8)));
       const result=options.filter({hasText:'Trang chủ'}).first();
+      await result.waitFor({state:'visible',timeout:22000});
+      console.log('EN_PAGE_ORIGIN_MATCH='+String(await result.textContent()).trim());
       assert(await result.count()>0,'WordPress did not offer the original Vietnamese homepage');
       await result.click();
       assert(await select.inputValue()==='82467','Selected translation origin is not the original homepage');
