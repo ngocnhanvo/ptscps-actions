@@ -39,7 +39,14 @@ jobs:
           npm install --no-save --no-audit --no-fund playwright@1.56.1
           npx playwright install --with-deps chromium
       - name: Audit English homepage and reusable media (read-only)
+        if: contains(github.event.head_commit.added, 'audit/ptscps-home-en-audit.ready') || contains(github.event.head_commit.modified, 'audit/ptscps-home-en-audit.ready')
         env:
           WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
           WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
         run: node scripts/ptscps-home-en.mjs
+      - name: Populate English tables and publish localized homepage (guarded)
+        if: contains(github.event.head_commit.added, 'audit/ptscps-home-en-write.ready') || contains(github.event.head_commit.modified, 'audit/ptscps-home-en-write.ready')
+        env:
+          WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
+          WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
+        run: node scripts/ptscps-home-en-write.mjs
