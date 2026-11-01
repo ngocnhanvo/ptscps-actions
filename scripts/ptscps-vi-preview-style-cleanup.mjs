@@ -57,6 +57,25 @@ const password=process.env.WP_ADMIN_PASSWORD;
 assert(origin && user && password,'Missing WordPress admin configuration');
 const browser=await chromium.launch({headless:true});
 const page=await browser.newPage({viewport:{width:1440,height:950}});
+// Classic Editor sometimes leaves #content hidden after the first tab click.
+// Re-activate the native Text mode before editing; never force-fill a hidden
+// field because TinyMCE could overwrite it when WordPress saves the post.
+async function ensureNativeTextMode() {
+  await page.locator('#content-html').click();
+  if (await page.locator('#content').isVisible()) return;
+  await page.evaluate(() => {
+    if (typeof window.switchEditors?.go === 'function') window.switchEditors.go('content','html');
+  });
+  await page.waitForTimeout(500);
+  if (await page.locator('#content').isVisible()) return;
+  const state=await page.evaluate(() => ({
+    wrap:document.querySelector('#wp-content-wrap')?.className,
+    textareaDisplay:document.querySelector('#content') ? getComputedStyle(document.querySelector('#content')).display : 'missing',
+    htmlTab:document.querySelector('#content-html')?.className,
+    visualTab:document.querySelector('#content-tmce')?.className
+  }));
+  throw new Error('Native Classic Editor Text mode not visible; no write: '+JSON.stringify(state));
+}
 try {
   await page.goto(`${origin}/wp-login.php`,{waitUntil:'domcontentloaded',timeout:45000});
   await page.locator('#user_login').fill(user);
@@ -81,7 +100,7 @@ try {
   assert.equal(meta.action,'HomePage');
   assert.equal(meta.lang,'vi');
   assert(!meta.origin || meta.origin==='0','Original VI page must not be linked as a translation');
-  await page.locator('#content-html').click();
+  await ensureNativeTextMode();
   const before=await page.locator('#content').inputValue();
   assert(before.length>1000,'Vietnamese home content is unexpectedly short');
   const {result,removed}=cleanContent(before);
@@ -109,7 +128,7 @@ try {
         await page.waitForTimeout(900);
       }
     }
-    await page.locator('#content-html').click();
+    await ensureNativeTextMode();
     const after=await page.locator('#content').inputValue();
     assert.equal(cleanContent(after).removed,0,'Inline styles remain after save');
     assert.equal(after.trim(),result.trim(),'WordPress changed content beyond the expected inline styles; inspect the backup');
