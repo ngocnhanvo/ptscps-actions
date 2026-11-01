@@ -95,7 +95,9 @@ async function ensurePage(){
     await page.goto(`${wp}/wp-admin/edit.php?post_type=page&post_status=all&s=Home`,{waitUntil:'domcontentloaded',timeout:45000});
     const candidates=await page.locator('a.row-title').allTextContents();
     assert(!candidates.some(v=>/^home$/i.test(v.trim())),'Unpublished Home candidate exists; manual mapping required');
-    await page.goto(`${wp}/wp-admin/post-new.php?post_type=page`,{waitUntil:'domcontentloaded',timeout:45000});
+    // Use the native multilingual Add English route to prefill ACF origin.
+    // No direct select/metadata manipulation or synthetic values.
+    await page.goto(`${wp}/wp-admin/post-new.php?post_type=page&esc_ml_origin=82467&esc_ml_lang=en`,{waitUntil:'domcontentloaded',timeout:45000});
   }
   const fields=await page.locator('.acf-field[data-name]').evaluateAll(els=>els.filter(el=>['key','action','product_lang','origin_page_id'].includes(el.dataset.name)).map(el=>({name:el.dataset.name,inputs:[...el.querySelectorAll('input,select')].map(i=>({type:i.type,name:i.name,value:i.value,id:i.id,options:i.tagName==='SELECT'?[...i.options].map(x=>({value:x.value,label:x.text})):undefined})).slice(0,10)})));
   console.log('EN_PAGE_ACF_UI='+JSON.stringify(fields));
@@ -109,7 +111,13 @@ async function ensurePage(){
   const parent=page.locator('[data-name="origin_page_id"]');assert(await parent.count()===1,'Missing translation parent field');
   if(await parent.locator('input[type="number"]').count())await parent.locator('input[type="number"]').first().fill('82467');
   else if(await parent.locator('input[type="text"]').count())await parent.locator('input[type="text"]').first().fill('82467');
-  else if(await parent.locator('select').count())await parent.locator('select').first().selectOption('82467');
+  else if(await parent.locator('select').count()){
+    const select=parent.locator('select').first();
+    const selected=await select.inputValue();
+    if(selected==='82467')console.log('EN_PAGE_NATIVE_ORIGIN_PREFILL=PASS');
+    else if(await select.locator('option[value="82467"]').count())await select.selectOption('82467');
+    else throw Error('Native translation origin was not prefilled by WordPress multilingual workflow; no publication');
+  }
   else throw Error('Unsupported origin_page_id ACF field, no publication');
   const content=await page.locator('#content').inputValue();
   const ids=sources.map(s=>s+'_en');assert(!content.trim()||ids.some(id=>content.includes(id)),'Existing English Page content not recognized; no overwrite');
