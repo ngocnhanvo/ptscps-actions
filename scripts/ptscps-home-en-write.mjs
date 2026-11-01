@@ -143,7 +143,21 @@ async function ensurePage(){
       // ACF's AJAX-backed Select2 does not include unloaded IDs in <option>.
       // Use the native picker and verify the saved option's actual ID.
       const picker=parent.locator('.select2-selection').first();
-      assert(await picker.count()===1,'Native ACF origin picker is unavailable');
+      await page.waitForLoadState('load');
+      await picker.waitFor({state:'visible',timeout:12000}).catch(()=>null);
+      const pickerReady=await picker.isVisible().catch(()=>false);
+      if(!pickerReady){
+        const debug=await parent.evaluate(el=>({
+          ui:el.querySelector('select')?.dataset.ui,
+          ajax:el.querySelector('select')?.dataset.ajax,
+          selectClass:el.querySelector('select')?.className,
+          acfAvailable:Boolean(window.acf),
+          readyState:document.readyState,
+          childClasses:[...el.querySelectorAll('[class]')].map(z=>z.className).filter(x=>typeof x==='string').slice(0,10)
+        }));
+        console.log('EN_PAGE_ACF_PICKER_NOT_READY='+JSON.stringify(debug));
+      }
+      assert(pickerReady,'Native ACF origin picker is unavailable after initialization');
       await picker.click();
       const search=page.locator('.select2-container--open input.select2-search__field').first();
       await search.fill('Trang chủ');
