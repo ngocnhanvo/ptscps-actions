@@ -181,7 +181,42 @@ async function ensurePage(){
   for(const id of ids){const current=await page.evaluate(()=>window.tinymce?.get('content')?.getContent?.()||document.querySelector('#content')?.value||'');if(current.includes(id)){console.log('EN_NATIVE_INSERT_SKIP='+id);continue;}
     await page.evaluate(()=>{const ed=window.tinymce.get('content');ed.focus();ed.selection.select(ed.getBody(),true);ed.selection.collapse(false);if(document.querySelector('#TB_window')&&window.tb_remove)window.tb_remove();});
     await page.evaluate(()=>{if(typeof window.tablepress_open_shortcode_thickbox!=='function')throw Error('Native Insert Code picker unavailable');window.tablepress_open_shortcode_thickbox();});
-    const picker=page.frameLocator('#TB_iframeContent');const choose=picker.locator(`input.insert-shortcode[title*="${id}"]`);await choose.waitFor({state:'visible',timeout:22000});await choose.click();
+    const picker=page.frameLocator('#TB_iframeContent');
+    await picker.locator('body').waitFor({state:'visible',timeout:15000});
+    const choose=picker.locator(`input.insert-shortcode[title*="${id}"]`);
+    await choose.waitFor({state:'visible',timeout:2500}).catch(()=>null);
+    if(!await choose.isVisible().catch(()=>false)){
+      // Use the native TablePress table-list search when its current page does not contain the ID.
+      const search=picker.locator('input[type="search"], #tablepress-search, #table-search-input, input[name="s"]').first();
+      if(await search.count()){
+        console.log('EN_NATIVE_PICKER_SEARCH='+id);
+        await search.fill(id);
+        await search.press('Enter');
+        await choose.waitFor({state:'visible',timeout:10000}).catch(()=>null);
+      }
+      if(!await choose.isVisible().catch(()=>false)){
+        if(await search.count()&&await search.inputValue().catch(()=>'')===id){
+          await search.fill('');await search.press('Enter');
+        }
+        // Native WordPress list-table pagination; never insert an unverified shortcode.
+        for(let n=0;n<16&&!await choose.isVisible().catch(()=>false);n++){
+          const next=picker.locator('a.next-page, button.next-page').first();
+          if(!await next.isVisible().catch(()=>false))break;
+          await next.click();
+          await choose.waitFor({state:'visible',timeout:1800}).catch(()=>null);
+        }
+      }
+    }
+    if(!await choose.isVisible().catch(()=>false)){
+      const snapshot=await picker.locator('body').evaluate(body=>({
+        choices:[...body.querySelectorAll('input.insert-shortcode')].map(x=>x.getAttribute('title')).slice(0,25),
+        inputs:[...body.querySelectorAll('input')].map(x=>({id:x.id,name:x.name,type:x.type,placeholder:x.placeholder})).slice(0,20),
+        links:[...body.querySelectorAll('a')].map(x=>({text:x.textContent?.trim(),className:x.className})).slice(0,15)
+      }));
+      console.log('EN_NATIVE_PICKER_MISSING='+JSON.stringify({id,...snapshot}));
+      throw Error('Native TablePress chooser cannot locate '+id+'; no publication');
+    }
+    await choose.click();
     let found=false;for(let tries=0;tries<8;tries++){await page.waitForTimeout(400);let body=await page.evaluate(()=>window.tinymce?.get('content')?.getContent?.()||'');if(body.includes(id)){found=true;break;}}assert(found,'Native shortcode was not inserted '+id);console.log('EN_NATIVE_INSERT='+id+' PASS');
   }
   await page.locator('#content-html').click();const savedContent=await page.locator('#content').inputValue();assert(ids.every(id=>savedContent.includes(id)),'English page incomplete; no publish');
