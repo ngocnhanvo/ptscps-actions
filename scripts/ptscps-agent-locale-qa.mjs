@@ -53,6 +53,10 @@ for (const c of cases) {
   const reply = typeof body.reply === 'string' ? body.reply.trim() : '';
   const pass = response.status === 200 && reply.length >= 10 && languageEvidence(c.language, reply)
     && !/PetroVietnam Transportation Corporation/i.test(reply);
+  const enSignals = (reply.match(/\b(?:the|website|company|services|information|available|currently|English|we|our|you|provides|provide|is|are|and|for|not|cannot|found|verified)\b/gi) || []).length;
+  const viSignals = (reply.match(/(?:^|\s)(?:công|ty|dịch|vụ|chúng|bạn|trang|thông|tin|hiện|chưa|có|và|của|là|được|các|nguồn|tiếng)(?=\s|[.,;:!?]|$)/giu) || []).length;
+  const forbiddenIdentity = /PetroVietnam Transportation Corporation/i.test(reply);
+  console.log(`PTSCPS_AGENT_LANGUAGE_DIAG locale=${c.language} en_signals=${enSignals} vi_signals=${viSignals} forbidden_identity=${forbiddenIdentity} accented_letters=${(reply.match(/[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/giu) || []).length}`);
   if (!pass && response.status === 503) {
     // One bounded WordPress-only diagnostic call separates proxy failures from Planner failures.
     const envValue = name => {
