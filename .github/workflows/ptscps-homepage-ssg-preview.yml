@@ -224,7 +224,7 @@ jobs:
                   const wpInfo = await infoRes.json();
                   const wpLogo = wpInfo?.acf?.logo?.url;
                   console.log('PTSCPS_LOGO_WP_URL=' + JSON.stringify({status:200,url:wpLogo || null,modified:wpInfo.modified}));
-                  if (wpLogo) console.log('PTSCPS_LOGO_WP_ALPHA=' + JSON.stringify(await inspectLogoUrl(wpLogo)));
+                  if (wpLogo) console.log('PTSCPS_LOGO_WP_ALPHA=' + JSON.stringify(await inspectLogoUrl(new URL(wpLogo, wpOrigin).href)));
                 } else console.log('PTSCPS_LOGO_WP_URL=' + JSON.stringify({status:infoRes.status()}));
               }
               const searchResponse = await page.request.get(origin + '/tim-kiem?q=PTSC', {timeout:20000});
