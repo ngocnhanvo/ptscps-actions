@@ -39,6 +39,14 @@ AGENT_HISTORY_LOCALE_FILES = (
     "wp-content/mu-plugins/esc-agent/src/Core/AgentLocale.php",
     "wp-content/mu-plugins/esc-agent-admin-history.php",
 )
+AGENT_KNOWLEDGE_FILES = (
+    "wp-content/mu-plugins/esc-agent/src/Knowledge/KnowledgeInventory.php",
+    "wp-content/mu-plugins/esc-agent/src/Knowledge/ProductKnowledgeSource.php",
+    "wp-content/mu-plugins/esc-agent/src/Knowledge/KnowledgeChunker.php",
+    "wp-content/mu-plugins/esc-agent/src/Core/AgentLocale.php",
+    "wp-content/mu-plugins/esc-agent/src/Knowledge/KnowledgeIndex.php",
+    "wp-content/mu-plugins/esc-agent.php",
+)
 DEFAULT_FILES = (
     "ptscps-unzip.php",
     "ptscps-unzip-v2.ready",
@@ -47,7 +55,7 @@ DEFAULT_FILES = (
     "wp-content/plugins/github-trigger/vcs-build-trigger.php",
     "wp-content/plugins/github-trigger/vcs-build-trigger.js",
 )
-FILES = AGENT_SYNTHESIS_FILES if os.environ.get("PTSCPS_AGENT_SYNTHESIS_ONLY") == "1" else AGENT_HISTORY_LOCALE_FILES if os.environ.get("PTSCPS_AGENT_HISTORY_LOCALE_ONLY") == "1" else AGENT_LOCALE_FILES if os.environ.get("PTSCPS_AGENT_LOCALE_ONLY") == "1" else (
+FILES = AGENT_KNOWLEDGE_FILES if os.environ.get("PTSCPS_AGENT_KNOWLEDGE_ONLY") == "1" else AGENT_SYNTHESIS_FILES if os.environ.get("PTSCPS_AGENT_SYNTHESIS_ONLY") == "1" else AGENT_HISTORY_LOCALE_FILES if os.environ.get("PTSCPS_AGENT_HISTORY_LOCALE_ONLY") == "1" else AGENT_LOCALE_FILES if os.environ.get("PTSCPS_AGENT_LOCALE_ONLY") == "1" else (
     "wp-content/themes/vibe-code-theme/functions.php",
     "wp-content/themes/vibe-code-theme/inc/tablepress/wysiwyg.php",
     "wp-content/themes/vibe-code-theme/mce.css",
