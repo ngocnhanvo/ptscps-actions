@@ -26,6 +26,8 @@ DEFAULT_FILES = (
     "wp-content/plugins/github-trigger/vcs-build-trigger.js",
 )
 FILES = (
+    "wp-content/mu-plugins/esc-multilingual-admin.php",
+) if os.environ.get("PTSCPS_ML_ONLY") == "1" else (
     "wp-content/mu-plugins/ptscps-folders-accurate-counts.php",
 ) if os.environ.get("PTSCPS_FOLDERS_ONLY") == "1" else DEFAULT_FILES
 
