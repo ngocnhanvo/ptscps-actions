@@ -152,6 +152,28 @@ jobs:
                 parentBackground: getComputedStyle(header).backgroundColor,
               };
             });
+            const glassDebug = await page.locator('#header-brandbar').evaluate(bar => {
+              const matches = [];
+              const inspect = rules => {
+                for (const rule of rules) {
+                  if (rule.selectorText?.includes('#header-brandbar'))
+                    matches.push({selector: rule.selectorText.slice(0, 180), css: rule.style?.cssText.slice(0, 450)});
+                  if (rule.cssRules) inspect(rule.cssRules);
+                }
+              };
+              for (const sheet of document.styleSheets) {
+                try { inspect(sheet.cssRules); } catch {}
+              }
+              const style = getComputedStyle(bar);
+              return {
+                supportsBlur: CSS.supports('backdrop-filter', 'blur(18px) saturate(145%)'),
+                prefixed: style.webkitBackdropFilter,
+                unprefixed: style.backdropFilter,
+                inline: bar.getAttribute('style'),
+                matchingRules: matches.slice(-16),
+              };
+            });
+            console.log('PTSCPS_GLASS_DIAGNOSTIC=' + JSON.stringify({name, ...glassDebug}));
             const glassAlpha = Number(headerAppearance.background.match(/rgba\([^,]+,[^,]+,[^,]+,\s*([\d.]+)\)/)?.[1] ?? 1);
             if (!headerAppearance.scrolled || !(glassAlpha > 0 && glassAlpha < 1) ||
                 !headerAppearance.filter.includes('blur(') ||
