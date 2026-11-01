@@ -1,1 +1,1 @@
-PTSCPS_VI_PREVIEW_CLEANUP=retry-2 page=82467 expected=8-blocks
+PTSCPS_VI_PREVIEW_CLEANUP=retry-3 page=82467 method=rest-nonce

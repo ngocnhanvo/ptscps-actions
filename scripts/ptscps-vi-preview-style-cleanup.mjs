@@ -57,25 +57,6 @@ const password=process.env.WP_ADMIN_PASSWORD;
 assert(origin && user && password,'Missing WordPress admin configuration');
 const browser=await chromium.launch({headless:true});
 const page=await browser.newPage({viewport:{width:1440,height:950}});
-// Classic Editor sometimes leaves #content hidden after the first tab click.
-// Re-activate the native Text mode before editing; never force-fill a hidden
-// field because TinyMCE could overwrite it when WordPress saves the post.
-async function ensureNativeTextMode() {
-  await page.locator('#content-html').click();
-  if (await page.locator('#content').isVisible()) return;
-  await page.evaluate(() => {
-    if (typeof window.switchEditors?.go === 'function') window.switchEditors.go('content','html');
-  });
-  await page.waitForTimeout(500);
-  if (await page.locator('#content').isVisible()) return;
-  const state=await page.evaluate(() => ({
-    wrap:document.querySelector('#wp-content-wrap')?.className,
-    textareaDisplay:document.querySelector('#content') ? getComputedStyle(document.querySelector('#content')).display : 'missing',
-    htmlTab:document.querySelector('#content-html')?.className,
-    visualTab:document.querySelector('#content-tmce')?.className
-  }));
-  throw new Error('Native Classic Editor Text mode not visible; no write: '+JSON.stringify(state));
-}
 try {
   await page.goto(`${origin}/wp-login.php`,{waitUntil:'domcontentloaded',timeout:45000});
   await page.locator('#user_login').fill(user);
@@ -100,8 +81,30 @@ try {
   assert.equal(meta.action,'HomePage');
   assert.equal(meta.lang,'vi');
   assert(!meta.origin || meta.origin==='0','Original VI page must not be linked as a translation');
-  await ensureNativeTextMode();
-  const before=await page.locator('#content').inputValue();
+  // Use the WordPress core cookie-authenticated REST nonce, not the broken
+  // Classic Editor tab switch. Never send credentials in request URLs/logs.
+  const nonceResponse=await page.request.get(`${origin}/wp-admin/admin-ajax.php?action=rest-nonce`,{timeout:30000});
+  assert.equal(nonceResponse.status(),200,'Unable to obtain WP REST nonce');
+  const nonce=(await nonceResponse.text()).trim();
+  assert(/^[0-9a-f]{10}$/.test(nonce),'WordPress REST nonce is missing or malformed');
+  const apiUrl=`${origin}/wp-json/wp/v2/pages/${PAGE_ID}`;
+  async function readCurrent() {
+    const response=await page.request.get(`${apiUrl}?context=edit&_fields=id,slug,status,title,content,acf,modified_gmt`,{
+      headers:{'X-WP-Nonce':nonce,'Cache-Control':'no-store'},timeout:30000
+    });
+    assert.equal(response.status(),200,`REST edit context unavailable HTTP ${response.status()}`);
+    const data=await response.json();
+    assert.equal(data.id,PAGE_ID);
+    assert.equal(data.status,'publish');
+    assert.equal(data.slug,'trang-chu');
+    assert.equal(data.acf?.key,'home');
+    assert.equal(data.acf?.action,'HomePage');
+    assert.equal(data.acf?.product_lang?.value||data.acf?.product_lang,'vi');
+    assert.equal(typeof data.content?.raw,'string','REST edit response missing raw content');
+    return data;
+  }
+  const record=await readCurrent();
+  const before=record.content.raw;
   assert(before.length>1000,'Vietnamese home content is unexpectedly short');
   const {result,removed}=cleanContent(before);
   mkdirSync('artifacts',{recursive:true});
@@ -111,27 +114,20 @@ try {
     console.log('VI_PREVIEW_CLEANUP=PASS already_clean=yes cms_writes=0');
   } else {
     assert.equal(removed,16,'Partial legacy formatting detected; inspect before rewriting');
-    await page.locator('#content').fill(result);
-    assert.equal(await page.locator('#content').inputValue(),result,'Textarea mismatch before save');
-    await page.locator('#publish').click();
-    await page.waitForTimeout(1000);
-    // WordPress may already be navigating after Update: do not start
-    // another navigation until the first one settles. Never click Update twice.
-    let loaded=false;
-    for (let attempt=0;attempt<3&&!loaded;attempt++) {
-      try {
-        const r=await page.goto(editUrl,{waitUntil:'domcontentloaded',timeout:45000});
-        assert.equal(r?.status(),200,'Reloaded editor did not return HTTP 200');
-        loaded=true;
-      } catch (error) {
-        if (attempt===2 || !String(error).includes('ERR_ABORTED')) throw error;
-        await page.waitForTimeout(900);
-      }
-    }
-    await ensureNativeTextMode();
-    const after=await page.locator('#content').inputValue();
+    // Recheck current content before the update so a concurrent CMS edit
+    // cannot be overwritten with the backup snapshot.
+    const latest=await readCurrent();
+    assert.equal(latest.content.raw,before,'Page changed after snapshot; refusing overwrite');
+    assert.equal(latest.modified_gmt,record.modified_gmt,'Page revision changed; refusing overwrite');
+    const update=await page.request.post(apiUrl,{
+      headers:{'X-WP-Nonce':nonce,'Content-Type':'application/json'},
+      data:{content:result},timeout:30000
+    });
+    assert.equal(update.status(),200,`Authenticated REST content update failed HTTP ${update.status()}`);
+    const afterRecord=await readCurrent();
+    const after=afterRecord.content.raw;
     assert.equal(cleanContent(after).removed,0,'Inline styles remain after save');
-    assert.equal(after.trim(),result.trim(),'WordPress changed content beyond the expected inline styles; inspect the backup');
+    assert.equal(after,result,'WordPress changed content beyond the expected inline styles; inspect backup before continuing');
     console.log(`VI_PREVIEW_CLEANUP=PASS page=${PAGE_ID} removed=${removed} blocks=${IDS.length} after_sha256=${sha(after)} preserved_exact_content=yes`);
   }
 } finally {await browser.close();}
