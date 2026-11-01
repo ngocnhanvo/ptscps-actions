@@ -58,8 +58,8 @@ jobs:
                 test "$(git -C source-php rev-parse HEAD)" = '539bd8ab8a7f266832304923a894fca9730a49d9'
                 ;;
               'deploy(ptscps): bilingual Agent PHP only')
-                test "$(cat .ptscps-agent-locale-release-request)" = 'PTSCPS_AGENT_LOCALE_ONLY source=d6975fe0d86f6aa28d5f5d4d400303f55ce2d8fc'
-                test "$(git -C source-php rev-parse HEAD)" = 'd6975fe0d86f6aa28d5f5d4d400303f55ce2d8fc'
+                test "$(cat .ptscps-agent-locale-release-request)" = 'PTSCPS_AGENT_LOCALE_ONLY source=9c21840d596801cef4976d832530e036323360ba'
+                test "$(git -C source-php rev-parse HEAD)" = '9c21840d596801cef4976d832530e036323360ba'
                 ;;
               *) exit 1 ;;
             esac
