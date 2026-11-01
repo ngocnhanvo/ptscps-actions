@@ -34,6 +34,7 @@ const translation={
 const sources=Object.keys(translation);
 const browser=await chromium.launch({headless:true});
 const page=await browser.newPage({viewport:{width:1440,height:950}});
+page.on('dialog', async dialog => { if(dialog.type()==='confirm' && /table|bảng|id|mã/i.test(dialog.message())){ console.log('EN_TABLE_ID_CONFIRM=ACCEPTED'); await dialog.accept(); }else {console.log('EN_UNEXPECTED_DIALOG='+dialog.type()); await dialog.dismiss();} });
 async function readTable(id){const r=await page.request.get(`${wp}/wp-json/tablepress/v1/table/${id}`,{timeout:25000});if(r.status()===404)return null;assert(r.ok(),`Unable to fetch table ${id}: ${r.status()}`);return r.json();}
 async function verifyTable(id,source,translated){const rows=translated.items||[];assert(translated?.id===id,`English table ID mismatch ${id}`);assert(rows.length===source.items.length,`Row count mismatch ${id}`);
   for(let i=0;i<rows.length;i++){for(const f of source.fields){const key=f.key;if(key==='image'){assert(String(rows[i][key]||'')===String(source.items[i][key]||''),`Media changed ${id} item ${i}`);}else{const wanted=translation[id.replace(/_en$/,'')].rows[i]?.[key]??source.items[i][key];assert(String(rows[i][key]||'')===String(wanted??''),`Translation mismatch ${id} item ${i}.${key}`);}}}}
@@ -42,17 +43,33 @@ async function ensureTable(sourceId){const targetId=sourceId+'_en', source=await
   let existing=await readTable(targetId);
   if(existing?.items?.length){await verifyTable(targetId,source,existing);console.log(`EN_TABLE_ALREADY_COMPLETE=${targetId} items=${existing.items.length}`);return;}
   if(!existing){
-    await page.goto(`${wp}/wp-admin/admin.php?page=tablepress&action=add`,{waitUntil:'domcontentloaded',timeout:45000});
-    await page.locator('input[name="table[name]"]').fill(spec.title);
-    await page.locator('textarea[name="table[description]"]').fill(spec.description);
-    await page.locator('input[name="table[rows]"]').fill('2');
-    await page.locator('input[name="table[columns]"]').fill(String(source.fields.length));
-    await page.getByRole('button',{name:/^(Add Table|Thêm bảng)$/i}).click();
-    await page.waitForURL(/page=tablepress.*action=edit|action=edit.*page=tablepress/,{timeout:40000});
+    // Recover the native table draft created by a previous interrupted run.
+    // Never create another table with the same EN title.
+    const allResponse=await page.request.get(`${wp}/wp-json/tablepress/v1/tables/prefix/all?per_page=100&page=1`,{timeout:25000});
+    assert(allResponse.ok(),'Cannot list tables before EN create');
+    const all=await allResponse.json();
+    const copies=all.filter(t=>t.title===spec.title);
+    assert(copies.length<=1,`Duplicate English table titles ${spec.title}; cannot safely continue`);
+    if(copies.length){
+      console.log(`EN_TABLE_RECOVER_EXISTING=${targetId} old=${copies[0].id}`);
+      await page.goto(`${wp}/wp-admin/admin.php?page=tablepress&action=edit&table_id=${encodeURIComponent(copies[0].id)}`,{waitUntil:'domcontentloaded',timeout:45000});
+    }else{
+      await page.goto(`${wp}/wp-admin/admin.php?page=tablepress&action=add`,{waitUntil:'domcontentloaded',timeout:45000});
+      await page.locator('input[name="table[name]"]').fill(spec.title);
+      await page.locator('textarea[name="table[description]"]').fill(spec.description);
+      await page.locator('input[name="table[rows]"]').fill('2');
+      await page.locator('input[name="table[columns]"]').fill(String(source.fields.length));
+      await page.getByRole('button',{name:/^(Add Table|Thêm bảng)$/i}).click();
+      await page.waitForURL(/page=tablepress.*action=edit|action=edit.*page=tablepress/,{timeout:40000});
+    }
     await page.locator('#table-id').fill(targetId);
-    const save=page.getByRole('button',{name:/^(Save Changes|Lưu thay đổi)$/i});await save.last().click();
-    for(let k=0;k<10;k++){await page.waitForTimeout(850);existing=await readTable(targetId).catch(()=>null);if(existing)break;}
-    assert(existing,`Native table create failed ${targetId}`);
+    const save=page.getByRole('button',{name:/^(Save Changes|Lưu thay đổi)$/i});
+    assert(await save.count()>0,'Native Save Changes missing');
+    const ajax=page.waitForResponse(r=>r.url().includes('admin-ajax.php')&&(r.request().postData()||'').includes('tablepress_save_table'),{timeout:16000}).catch(()=>null);
+    await save.last().click();
+    const savedResponse=await ajax;console.log('EN_TABLE_ID_SAVE_RESPONSE='+JSON.stringify({id:targetId,status:savedResponse?.status()||null,body:(await savedResponse?.text().catch(()=>''))?.slice(0,360)}));
+    for(let k=0;k<12;k++){await page.waitForTimeout(900);existing=await readTable(targetId).catch(()=>null);if(existing)break;}
+    assert(existing,`Native table create failed ${targetId}; inspect edit dialog/save response`);
     console.log(`EN_TABLE_CREATED=${targetId}`);
   }
   assert(!existing.items?.length,`Existing EN table has data: ${targetId}; refusing overwrite`);
