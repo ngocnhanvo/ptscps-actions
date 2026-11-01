@@ -1,7 +1,16 @@
 # PTSCPS implementation checkpoint
 
-Updated: 2026-11-01
+Updated: 2026-11-02
 Code mode: `auto-build`
+
+## CURRENT CHECKPOINT — VI/EN AI Agent live regression PASS (2026-11-02)
+
+- Source verified: Astro `master` `385ad53970d6574b9c34dcf02cf6348fded900eb` (active-page-locale chat, history and clear); PHP `master` `d023836e52c5a03ae5694f15044cf437c07225dc` (English-only synthesis instructions, existing VI preserved).
+- Existing PHP history locale release [41331571290](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/41331571290), WordPress Build Website [41331695187](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/41331695187) and Astro deploy [41331739032](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/41331739032) PASS. **Do not rerun these builds.**
+- New focused PHP-only release [41333821863](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/41333821863) PASS; it uploaded only `AgentSynthesisPrompt.php`, with pinned source SHA, PHP lint and locale regression test. No Astro rebuild was needed.
+- Post-release real-site live QA [41333951883](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/41333951883) **PASS**: EN page `lang=en` and Agent language flag; EN answer English (16 EN signals, 0 VI signals); VI answer Vietnamese; shared cookie and language-isolated history; POST clear verified by fresh GET in both languages. Do not rerun QA without a new regression.
+- Agent English-language error cause: the prior synthesis system prompt was entirely Vietnamese; a trailing locale instruction did not reliably prevent Vietnamese replies. EN now receives separate English-only synthesis instructions, with the same evidence-only constraints. VI prompt unchanged.
+- Remaining unrelated migration/visual tasks are tracked in historical checkpoints. Keep build activation routed only through WordPress Build Website; do not trigger production Actions directly.
 
 ## CURRENT CHECKPOINT — Quick links, customers and footer (2026-11-01)
 
