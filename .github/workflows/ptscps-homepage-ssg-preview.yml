@@ -142,13 +142,22 @@ jobs:
               throw new Error(`${name}: Escape did not close language switcher`);
             await page.evaluate(() => window.scrollTo({top: 250, behavior: 'instant'}));
             await page.waitForTimeout(350);
-            const headerAppearance = await page.locator('#main-header').evaluate(header => ({
-              scrolled: header.classList.contains('header-scrolled'),
-              background: getComputedStyle(header.querySelector('#header-brandbar')).backgroundImage,
-            }));
-            if (!headerAppearance.scrolled || !headerAppearance.background.includes('linear-gradient'))
-              throw new Error(`${name}: sticky gradient missing: ${JSON.stringify(headerAppearance)}`);
-            console.log('PTSCPS_HEADER_TOOLS_QA=' + JSON.stringify({name, scope:toolsScope, ...headerAppearance, status:'PASS'}));
+            const headerAppearance = await page.locator('#main-header').evaluate(header => {
+              const bar = header.querySelector('#header-brandbar');
+              const barStyle = getComputedStyle(bar);
+              return {
+                scrolled: header.classList.contains('header-scrolled'),
+                background: barStyle.backgroundColor,
+                filter: barStyle.backdropFilter || barStyle.webkitBackdropFilter,
+                parentBackground: getComputedStyle(header).backgroundColor,
+              };
+            });
+            const glassAlpha = Number(headerAppearance.background.match(/rgba\([^,]+,[^,]+,[^,]+,\s*([\d.]+)\)/)?.[1] ?? 1);
+            if (!headerAppearance.scrolled || !(glassAlpha > 0 && glassAlpha < 1) ||
+                !headerAppearance.filter.includes('blur(') ||
+                headerAppearance.parentBackground !== 'rgba(0, 0, 0, 0)')
+              throw new Error(`${name}: dynamic frosted header missing: ${JSON.stringify(headerAppearance)}`);
+            console.log('PTSCPS_HEADER_TOOLS_QA=' + JSON.stringify({name, scope:toolsScope, ...headerAppearance, glassAlpha, status:'PASS'}));
             if (name === 'desktop') {
               const searchResponse = await page.request.get(origin + '/tim-kiem?q=PTSC', {timeout:20000});
               if (searchResponse.status() !== 200 || !(await searchResponse.text()).includes('site-search-index'))
