@@ -181,6 +181,52 @@ jobs:
               throw new Error(`${name}: dynamic frosted header missing: ${JSON.stringify(headerAppearance)}`);
             console.log('PTSCPS_HEADER_TOOLS_QA=' + JSON.stringify({name, scope:toolsScope, ...headerAppearance, glassAlpha, status:'PASS'}));
             if (name === 'desktop') {
+              // Read-only logo provenance audit: detect opaque pixels in CMS and deployed logo.
+              const logoInfo = await page.locator('#header-brandbar a[aria-label="Về trang chủ"] img').evaluate(img => ({
+                src: img.getAttribute('src'), currentSrc: img.currentSrc, srcset: img.getAttribute('srcset'),
+                naturalWidth: img.naturalWidth, naturalHeight: img.naturalHeight,
+                background: getComputedStyle(img).backgroundColor,
+                parentBackground: getComputedStyle(img.parentElement).backgroundColor,
+              }));
+              const inspectLogoUrl = async (url) => {
+                const res = await page.request.get(new URL(url, origin).href, {timeout:25000, failOnStatusCode:false});
+                if (res.status() !== 200) return {status:res.status(),url};
+                const mime = (res.headers()['content-type'] || 'image/png').split(';')[0];
+                const binary = await res.body();
+                const stats = await page.evaluate(async ({mime, base64}) => {
+                  const img = new Image();
+                  img.src = `data:${mime};base64,${base64}`;
+                  await img.decode();
+                  const cv = document.createElement('canvas');
+                  cv.width = img.naturalWidth; cv.height = img.naturalHeight;
+                  const ctx = cv.getContext('2d', {willReadFrequently: true});
+                  ctx.drawImage(img, 0, 0);
+                  const px = ctx.getImageData(0, 0, cv.width, cv.height).data;
+                  let transparent=0,partial=0,opaque=0,whiteOpaque=0;
+                  for(let i=0;i<px.length;i+=4) {
+                    const a=px[i+3];
+                    if(a===0)transparent++;
+                    else if(a<255)partial++;
+                    else {opaque++; if(px[i]>242 && px[i+1]>242 && px[i+2]>242)whiteOpaque++;}
+                  }
+                  return {width:cv.width,height:cv.height,transparent,partial,opaque,whiteOpaque,
+                          topLeft:[...px.slice(0,4)],topRight:[...px.slice((cv.width-1)*4,cv.width*4)]};
+                }, {mime,base64:binary.toString('base64')});
+                return {status:res.status(),mime,url,bytes:binary.length,...stats};
+              };
+              console.log('PTSCPS_LOGO_RENDER=' + JSON.stringify(logoInfo));
+              console.log('PTSCPS_LOGO_DEPLOYED_ALPHA=' + JSON.stringify(await inspectLogoUrl(logoInfo.currentSrc)));
+              const wpMatch = (process.env.ENV_FILE || '').match(/^\s*WC_URL\s*=\s*(.+)\s*$/m);
+              if (wpMatch) {
+                const wpOrigin = wpMatch[1].trim().replace(/^['"]|['"]$/g,'').replace(/\/$/,'');
+                const infoRes = await page.request.get(`${wpOrigin}/wp-json/wp/v2/thong-tin-chung/62`, {timeout:20000,failOnStatusCode:false});
+                if (infoRes.status() === 200) {
+                  const wpInfo = await infoRes.json();
+                  const wpLogo = wpInfo?.acf?.logo?.url;
+                  console.log('PTSCPS_LOGO_WP_URL=' + JSON.stringify({status:200,url:wpLogo || null,modified:wpInfo.modified}));
+                  if (wpLogo) console.log('PTSCPS_LOGO_WP_ALPHA=' + JSON.stringify(await inspectLogoUrl(wpLogo)));
+                } else console.log('PTSCPS_LOGO_WP_URL=' + JSON.stringify({status:infoRes.status()}));
+              }
               const searchResponse = await page.request.get(origin + '/tim-kiem?q=PTSC', {timeout:20000});
               if (searchResponse.status() !== 200 || !(await searchResponse.text()).includes('site-search-index'))
                 throw new Error('Static search results route missing');
