@@ -120,6 +120,42 @@ jobs:
             await page.locator('body').waitFor({ state: 'visible', timeout: 15000 });
             await page.evaluate(async () => { if (document.fonts?.ready) await document.fonts.ready; });
             await page.waitForTimeout(2500);
+            // PTSCPS header regression: accessible search and language controls,
+            // scroll background and fixed alignment across device breakpoints.
+            const toolsScope = viewport.width >= 900 ? 'desktop' : 'mobile';
+            const headerTools = page.locator(`[data-header-tools-scope="${toolsScope}"]`);
+            if (await headerTools.count() !== 1) throw new Error(`${name}: Header tools missing`);
+            const toggle = headerTools.locator('[data-header-search-toggle]');
+            await toggle.click();
+            if (await toggle.getAttribute('aria-expanded') !== 'true' ||
+                !(await headerTools.locator('[data-header-search-panel] input[name="q"]').isVisible()))
+              throw new Error(`${name}: header Search did not open`);
+            await page.keyboard.press('Escape');
+            if (await toggle.getAttribute('aria-expanded') !== 'false')
+              throw new Error(`${name}: Escape did not close header Search`);
+            const language = headerTools.locator('[data-header-language]');
+            await language.locator('summary').click();
+            if (!(await language.evaluate(element => element.open)))
+              throw new Error(`${name}: language switcher did not open`);
+            await page.keyboard.press('Escape');
+            if (await language.evaluate(element => element.open))
+              throw new Error(`${name}: Escape did not close language switcher`);
+            await page.evaluate(() => window.scrollTo({top: 250, behavior: 'instant'}));
+            await page.waitForTimeout(350);
+            const headerAppearance = await page.locator('#main-header').evaluate(header => ({
+              scrolled: header.classList.contains('header-scrolled'),
+              background: getComputedStyle(header.querySelector('#header-brandbar')).backgroundImage,
+            }));
+            if (!headerAppearance.scrolled || !headerAppearance.background.includes('linear-gradient'))
+              throw new Error(`${name}: sticky gradient missing: ${JSON.stringify(headerAppearance)}`);
+            console.log('PTSCPS_HEADER_TOOLS_QA=' + JSON.stringify({name, scope:toolsScope, ...headerAppearance, status:'PASS'}));
+            if (name === 'desktop') {
+              const searchResponse = await page.request.get(origin + '/tim-kiem?q=PTSC', {timeout:20000});
+              if (searchResponse.status() !== 200 || !(await searchResponse.text()).includes('site-search-index'))
+                throw new Error('Static search results route missing');
+              console.log('PTSCPS_STATIC_SEARCH_ROUTE=PASS');
+            }
+            await page.evaluate(() => window.scrollTo({top: 0, behavior: 'instant'}));
             // Homepage regression: verify all three CMS slides and the responsive
             // image/icon overlap at mobile, tablet and desktop widths.
             const device = viewport.width < 640 ? 'mobile' : 'desktop';
