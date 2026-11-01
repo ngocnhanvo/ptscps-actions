@@ -31,6 +31,9 @@ AGENT_LOCALE_FILES = (
     "wp-content/mu-plugins/esc-agent/src/Skills/KnowledgeSearchSkill.php",
     "wp-content/mu-plugins/esc-agent/src/Skills/PolicySkill.php",
 )
+AGENT_SYNTHESIS_FILES = (
+    "wp-content/mu-plugins/esc-agent/src/Core/AgentSynthesisPrompt.php",
+)
 AGENT_HISTORY_LOCALE_FILES = (
     "wp-content/mu-plugins/esc-agent.php",
     "wp-content/mu-plugins/esc-agent/src/Core/AgentLocale.php",
@@ -44,7 +47,7 @@ DEFAULT_FILES = (
     "wp-content/plugins/github-trigger/vcs-build-trigger.php",
     "wp-content/plugins/github-trigger/vcs-build-trigger.js",
 )
-FILES = AGENT_HISTORY_LOCALE_FILES if os.environ.get("PTSCPS_AGENT_HISTORY_LOCALE_ONLY") == "1" else AGENT_LOCALE_FILES if os.environ.get("PTSCPS_AGENT_LOCALE_ONLY") == "1" else (
+FILES = AGENT_SYNTHESIS_FILES if os.environ.get("PTSCPS_AGENT_SYNTHESIS_ONLY") == "1" else AGENT_HISTORY_LOCALE_FILES if os.environ.get("PTSCPS_AGENT_HISTORY_LOCALE_ONLY") == "1" else AGENT_LOCALE_FILES if os.environ.get("PTSCPS_AGENT_LOCALE_ONLY") == "1" else (
     "wp-content/themes/vibe-code-theme/functions.php",
     "wp-content/themes/vibe-code-theme/inc/tablepress/wysiwyg.php",
     "wp-content/themes/vibe-code-theme/mce.css",
