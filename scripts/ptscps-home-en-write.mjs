@@ -180,9 +180,22 @@ async function ensurePage(){
   await page.waitForFunction(()=>Boolean(window.tinymce?.get('content')?.initialized&&!window.tinymce?.get('content')?.isHidden()),null,{timeout:22000});
   for(const id of ids){const current=await page.evaluate(()=>window.tinymce?.get('content')?.getContent?.()||document.querySelector('#content')?.value||'');if(current.includes(id)){console.log('EN_NATIVE_INSERT_SKIP='+id);continue;}
     await page.evaluate(()=>{const ed=window.tinymce.get('content');ed.focus();ed.selection.select(ed.getBody(),true);ed.selection.collapse(false);if(document.querySelector('#TB_window')&&window.tb_remove)window.tb_remove();});
-    await page.evaluate(()=>{if(typeof window.tablepress_open_shortcode_thickbox!=='function')throw Error('Native Insert Code picker unavailable');window.tablepress_open_shortcode_thickbox();});
+    // WordPress Thickbox removes its iframe asynchronously. Opening another
+    // before removal can leave a blank frame after a successful insertion.
+    await page.locator('#TB_iframeContent').waitFor({state:'detached',timeout:12000});
     const picker=page.frameLocator('#TB_iframeContent');
-    await picker.locator('body').waitFor({state:'visible',timeout:15000});
+    let pickerReady=false;
+    for(let attempt=1;attempt<=3&&!pickerReady;attempt++){
+      await page.evaluate(()=>{if(typeof window.tablepress_open_shortcode_thickbox!=='function')throw Error('Native Insert Code picker unavailable');window.tablepress_open_shortcode_thickbox();});
+      pickerReady=await picker.locator('input.insert-shortcode').first().waitFor({state:'visible',timeout:12000}).then(()=>true).catch(()=>false);
+      if(!pickerReady){
+        console.log('EN_NATIVE_PICKER_OPEN_RETRY='+JSON.stringify({id,attempt}));
+        await page.evaluate(()=>{if(typeof window.tb_remove==='function')window.tb_remove();});
+        await page.locator('#TB_iframeContent').waitFor({state:'detached',timeout:10000});
+        await page.waitForTimeout(500);
+      }
+    }
+    assert(pickerReady,'Native TablePress chooser iframe failed to initialize '+id);
     const choose=picker.locator(`input.insert-shortcode[title*="${id}"]`);
     await choose.waitFor({state:'visible',timeout:2500}).catch(()=>null);
     if(!await choose.isVisible().catch(()=>false)){
@@ -217,7 +230,14 @@ async function ensurePage(){
       throw Error('Native TablePress chooser cannot locate '+id+'; no publication');
     }
     await choose.click();
-    let found=false;for(let tries=0;tries<8;tries++){await page.waitForTimeout(400);let body=await page.evaluate(()=>window.tinymce?.get('content')?.getContent?.()||'');if(body.includes(id)){found=true;break;}}assert(found,'Native shortcode was not inserted '+id);console.log('EN_NATIVE_INSERT='+id+' PASS');
+    let found=false;for(let tries=0;tries<8;tries++){await page.waitForTimeout(400);let body=await page.evaluate(()=>window.tinymce?.get('content')?.getContent?.()||'');if(body.includes(id)){found=true;break;}}assert(found,'Native shortcode was not inserted '+id);
+    // Do not reopen Thickbox until the previous picker has finished closing.
+    if(await page.locator('#TB_iframeContent').count()){
+      console.log('EN_NATIVE_PICKER_CLOSE_FALLBACK='+id);
+      await page.evaluate(()=>{if(typeof window.tb_remove==='function')window.tb_remove();});
+      await page.locator('#TB_iframeContent').waitFor({state:'detached',timeout:10000});
+    }
+    console.log('EN_NATIVE_INSERT='+id+' PASS');
   }
   await page.locator('#content-html').click();const savedContent=await page.locator('#content').inputValue();assert(ids.every(id=>savedContent.includes(id)),'English page incomplete; no publish');
   const isPublished=await page.locator('#post_status').inputValue().then(x=>x==='publish').catch(()=>false);
