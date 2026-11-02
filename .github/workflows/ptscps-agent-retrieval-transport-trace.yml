@@ -24,7 +24,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(cat audit/ptscps-agent-retrieval-transport-trace.ready)" = 'PTSCPS_AGENT_TRACE_ONLY php_sha=3144e27804baa79f00b94fd64342a8b75a39a3b5 backfill_run=41381347856 attempt=2'
+          test "$(cat audit/ptscps-agent-retrieval-transport-trace.ready)" = 'PTSCPS_AGENT_TRACE_ONLY php_sha=3144e27804baa79f00b94fd64342a8b75a39a3b5 backfill_run=41381347856 attempt=3'
       - name: Read-only production comparisons and protected regression log metadata
         env:
           ENV_FILE: ${{ secrets.ENV_FILE }}
