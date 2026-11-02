@@ -1,15 +1,15 @@
-name: PTSCPS VI clients read-only evidence trace v2
+name: PTSCPS VI clients read-only evidence trace v3
 on:
   push:
     branches: [main]
-    paths: [audit/ptscps-agent-vi-clients-trace-v2.ready]
+    paths: [audit/ptscps-agent-vi-clients-trace-v3.ready]
 permissions:
   contents: read
 jobs:
   inspect:
     if: >-
       github.repository == 'ngocnhanvo/ptscps-actions'
-      && github.event.head_commit.message == 'audit(ptscps): inspect VI client evidence v2'
+      && github.event.head_commit.message == 'audit(ptscps): inspect VI client evidence v3'
     runs-on: ubuntu-latest
     timeout-minutes: 7
     steps:
@@ -24,6 +24,7 @@ jobs:
           python3 - <<'PY'
           import os,json,ftplib,ssl,io,re,uuid
           from urllib.request import Request,urlopen
+          from urllib.error import HTTPError
           from urllib.parse import urlsplit
           c={}
           for line in os.environ['ENV_FILE'].splitlines():
@@ -31,8 +32,14 @@ jobs:
                   k,v=line.strip().removeprefix('export ').split('=',1);c[k]=v.strip().strip('"\'')
           w=urlsplit(c['WC_URL']);f=urlsplit(c['WC_URL_CLIENT'])
           assert w.scheme==f.scheme=='https' and w.hostname=='admin-ptscps.thegioihosting.io.vn' and f.hostname=='ptscps.thegioihosting.io.vn'
-          for id in ['home_01','home_03','home_14','home_15']:
-              with urlopen(w.geturl().rstrip('/')+'/wp-json/tablepress/v1/table/'+id,timeout=22) as res: t=json.load(res)
+          for i in range(21):
+              id=f'home_{i:02d}'
+              try:
+                  with urlopen(w.geturl().rstrip('/')+'/wp-json/tablepress/v1/table/'+id,timeout=22) as res: t=json.load(res)
+              except HTTPError as e:
+                  if e.code == 404: continue
+                  raise
+              if not isinstance(t,dict) or t.get('success') is not True: continue
               print('SOURCE_META',json.dumps({'id':id,'title':t.get('title'),'description':t.get('description'),'rows':len(t.get('items',[]))},ensure_ascii=False))
           rid='trace'+os.environ['GITHUB_RUN_ID'];cid='vi-clients-frontend'
           h={'Content-Type':'application/json','X-ESC-Debug':'regression','X-ESC-Run-Id':rid,'X-ESC-Test-Case':cid,'X-ESC-Test-Turn':'1'}
@@ -49,6 +56,10 @@ jobs:
                   try: t=json.loads(line)
                   except ValueError:continue
                   if t.get('event') in ('skill_start','skill_result','skill_error','plan_validated','planner_failed'):
-                      print('SAFE_TRACE',json.dumps({k:t[k] for k in ('event','skill','action','result_type','result_count','status') if k in t},ensure_ascii=False))
+                      safe={k:t[k] for k in ('event','skill','action','result_type','result_count','status') if k in t}
+                      if t.get('event') == 'skill_start' and t.get('skill') == 'knowledge':
+                          p=t.get('params') if isinstance(t.get('params'),dict) else {}
+                          safe.update({'mode':p.get('mode'), 'has_source_scope':bool(p.get('source_type') and p.get('source_id')), 'keyword_chars':len(str(p.get('keyword','')))})
+                      print('SAFE_TRACE',json.dumps(safe,ensure_ascii=False))
           x.quit()
           PY
