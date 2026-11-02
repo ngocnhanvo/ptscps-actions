@@ -74,5 +74,20 @@ jobs:
                   'rows':len(items),'fields':fieldnames[:12],'image_only_rows':image_only,
                   'rows_with_any_query_term':overlap,'max_row_term_matches':max(coverage,default=0),
                   'query_tokens':terms,'present_tokens_anywhere':allterms},ensure_ascii=False))
+           for table_id in ('home_00_en','home_01_en','home_02_en','home_03_en',
+                            'home_04_en','home_05_en','home_14_en','home_15_en'):
+               url=u.geturl().rstrip('/')+'/wp-json/tablepress/v1/table/'+quote(table_id)
+               with urlopen(Request(url,headers={'Accept':'application/json'}),timeout=28) as rsp:
+                   table=json.loads(rsp.read(700000))
+               assert table.get('success') is True and table.get('id')==table_id
+               metadata=norm(str(table.get('title',''))+' '+str(table.get('description','')))
+               terms=('service','areas')
+               matched=[t for t in terms if t in metadata]
+               coverage=len(matched)/len(terms)
+               distinct=any(len(t)>=6 for t in matched)
+               score=(round(coverage*100)+len(matched)*15) if coverage>=0.4 and (len(matched)>=2 or distinct) else 0
+               print('PTSCPS_EN_SERVICE_METADATA_RANK '+json.dumps({'source':table_id,
+                   'title':str(table.get('title',''))[:110], 'description':str(table.get('description',''))[:110],
+                   'matched_terms':matched,'score':score},ensure_ascii=False))
           print('PTSCPS_RETRIEVAL_EVIDENCE_READ_ONLY=PASS')
           PYCODE
