@@ -33,13 +33,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(cat audit/ptscps-agent-retrieval-context-release.ready)" = 'PTSCPS_AGENT_RETRIEVAL_CONTEXT_RELEASE source=a95818f104d3bc56b3ae7a60e8a35a7fbb3c6f53 mode=php-only'
-          test "$(git -C source-php rev-parse HEAD)" = 'a95818f104d3bc56b3ae7a60e8a35a7fbb3c6f53'
+          test "$(cat audit/ptscps-agent-retrieval-context-release.ready)" = 'PTSCPS_AGENT_RETRIEVAL_CONTEXT_RELEASE source=bfee57bdbe0fbe9d1199a8ab33927cf029a86d79 mode=php-only'
+          test "$(git -C source-php rev-parse HEAD)" = 'bfee57bdbe0fbe9d1199a8ab33927cf029a86d79'
           php -l source-php/wp-content/mu-plugins/esc-agent/src/Knowledge/KnowledgeIndex.php
           php -l source-php/wp-content/mu-plugins/tests/esc-agent-retrieval-context-test.php
           php -l source-php/wp-content/mu-plugins/tests/esc-agent-published-collection-test.php
+          php -l source-php/wp-content/mu-plugins/tests/esc-agent-collection-source-registry-test.php
           php source-php/wp-content/mu-plugins/tests/esc-agent-retrieval-context-test.php
           php source-php/wp-content/mu-plugins/tests/esc-agent-published-collection-test.php
+          php source-php/wp-content/mu-plugins/tests/esc-agent-collection-source-registry-test.php
           php source-php/wp-content/mu-plugins/tests/esc-agent-published-routing-test.php
           python3 -m py_compile scripts/ptscps-php-live-release.py
           grep -Fq 'PTSCPS_AGENT_RETRIEVAL_CONTEXT_ONLY' scripts/ptscps-php-live-release.py
