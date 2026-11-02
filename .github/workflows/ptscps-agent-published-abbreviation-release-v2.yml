@@ -4,6 +4,7 @@ on:
     branches: [main]
     paths:
       - audit/ptscps-agent-published-abbreviation-release-v2.ready
+      - .github/workflows/ptscps-agent-published-abbreviation-release-v2.yml
 permissions:
   contents: read
 concurrency:
@@ -13,7 +14,7 @@ jobs:
   release:
     if: >-
       github.repository == 'ngocnhanvo/ptscps-actions'
-      && github.event.head_commit.message == 'deploy(ptscps): guarded grounded acronym PHP'
+      && github.event.head_commit.message == 'deploy(ptscps): guarded grounded acronym PHP v2'
     runs-on: ubuntu-latest
     timeout-minutes: 16
     steps:
