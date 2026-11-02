@@ -1,0 +1,99 @@
+name: PTSCPS Agent LLM fail-closed protected PHP release
+on:
+  push:
+    branches: [main]
+    paths:
+      - audit/ptscps-agent-llm-failclosed-release.ready
+permissions:
+  contents: read
+concurrency:
+  group: ptscps-wp-php-release
+  cancel-in-progress: false
+jobs:
+  release:
+    if: >-
+      github.repository == 'ngocnhanvo/ptscps-actions'
+      && github.event.head_commit.message == 'deploy(ptscps): strict LLM fail-closed PHP only'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout PTSCPS protected release scripts
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Checkout exact approved PHP SHA
+        uses: actions/checkout@v4
+        with:
+          repository: ngocnhanvo/ptscps-php
+          ref: 0d9080acae3a2059ca79ddd84c37025b76b5b619
+          token: ${{ secrets.SOURCE_REPO_PAT }}
+          path: source-php
+          persist-credentials: false
+      - name: Check source, protected scope and LLM-only regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(cat audit/ptscps-agent-llm-failclosed-release.ready)" = 'PTSCPS_LLM_FAILCLOSED source=0d9080acae3a2059ca79ddd84c37025b76b5b619 mode=php-only'
+          test "$(git -C source-php rev-parse HEAD)" = '0d9080acae3a2059ca79ddd84c37025b76b5b619'
+          grep -Fq 'PTSCPS_AGENT_FAILCLOSED_ONLY' scripts/ptscps-php-live-release.py
+          for f in \
+            wp-content/mu-plugins/esc-agent.php \
+            wp-content/mu-plugins/esc-agent/src/Core/Agent.php \
+            wp-content/mu-plugins/esc-agent/src/Core/LlmOnlyPlanner.php \
+            wp-content/mu-plugins/esc-agent/src/Core/PlanValidator.php \
+            wp-content/mu-plugins/esc-agent/src/Core/TelemetryPlanner.php; do
+            php -l "source-php/$f"
+          done
+          php source-php/wp-content/mu-plugins/tests/esc-agent-llm-fail-closed-test.php
+          php source-php/wp-content/mu-plugins/tests/esc-agent-complete-collection-summary-test.php
+          python3 -m py_compile scripts/ptscps-php-live-release.py
+      - name: Atomic protected FTPS of five Agent PHP files only
+        shell: bash
+        env:
+          PTSCPS_AGENT_FAILCLOSED_ONLY: '1'
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+        run: python3 scripts/ptscps-php-live-release.py
+      - name: Inspect production VI/EN answer-versus-error transparency
+        shell: bash
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: |
+          python3 - <<'PYCODE'
+          import json,os,uuid
+          from urllib.parse import urlsplit
+          from urllib.request import Request,urlopen
+          from urllib.error import HTTPError
+          lines=[s.strip().removeprefix('export ') for s in os.environ['ENV_FILE'].splitlines()]
+          vals=[s.split('=',1)[1].strip().strip('"\'') for s in lines if s.startswith('WC_URL_CLIENT=')]
+          assert len(vals)==1
+          p=urlsplit(vals[0]);assert p.scheme=='https' and p.hostname=='ptscps.thegioihosting.io.vn' and p.path in ('','/')
+          url=p.scheme+'://'+p.netloc+'/api/agent/chat'
+          cases=[('vi_activities','vi','LĨNH VỰC HOẠT ĐỘNG là gì'),
+                 ('vi_services','vi','Những dịch vụ hoạt động chính của PTSC là gì?'),
+                 ('en_activities','en','What are PTSC main areas of operation?'),
+                 ('en_services','en','Which service areas does PTSC provide?')]
+          passed=0;errors=[]
+          for case,lang,msg in cases:
+              raw=json.dumps({'message':msg,'language':lang,'sessionId':str(uuid.uuid4())},ensure_ascii=False).encode()
+              req=Request(url,data=raw,headers={'Content-Type':'application/json','Accept':'application/json'},method='POST')
+              try:
+                  with urlopen(req,timeout=90) as r:
+                      status=r.status;body=r.read(262144)
+              except HTTPError as e:
+                  status=e.code;body=e.read(8192)
+              try: data=json.loads(body)
+              except ValueError: data={}
+              answer=data.get('reply','') if isinstance(data,dict) else ''
+              is_answer=status==200 and isinstance(answer,str) and len(answer.strip())>=30
+              leak=is_answer and any(t in answer.lower() for t in ['\n- tiêu đề\n','\n- title\n'])
+              is_error=status in (502,503) and isinstance(data,dict) and bool(data.get('error'))
+              print('PTSCPS_LLM_LIVE_QA '+json.dumps({'case':case,'status':status,'answer_ok':is_answer and not leak,'error_visible':is_error,'code':data.get('code') or (data.get('error') or {}).get('code') if isinstance(data.get('error'),dict) else data.get('code')}))
+              if is_answer and not leak: passed+=1
+              elif is_error: errors.append(case)
+              else: raise SystemExit('Invalid or silently masked Agent response')
+          print('PTSCPS_LLM_LIVE_QA answered='+str(passed)+'/'+str(len(cases))+' explicit_errors='+str(len(errors)))
+          if errors: raise SystemExit('Live model availability or proxy transparency still FAIL; do not mark full QA PASS')
+          PYCODE

@@ -89,6 +89,16 @@ if os.environ.get("PTSCPS_AGENT_LLM_SYNTHESIS_ONLY") == "1":
         "wp-content/mu-plugins/esc-agent/src/Skills/KnowledgeSearchSkill.php",
     )
 
+# Strict scope for the LLM fail-closed release; no other runtime files or CMS data.
+if os.environ.get("PTSCPS_AGENT_FAILCLOSED_ONLY") == "1":
+    FILES = (
+        "wp-content/mu-plugins/esc-agent.php",
+        "wp-content/mu-plugins/esc-agent/src/Core/Agent.php",
+        "wp-content/mu-plugins/esc-agent/src/Core/LlmOnlyPlanner.php",
+        "wp-content/mu-plugins/esc-agent/src/Core/PlanValidator.php",
+        "wp-content/mu-plugins/esc-agent/src/Core/TelemetryPlanner.php",
+    )
+
 raw = os.environ.get("FTP_SERVER", "").strip()
 if "://" not in raw:
     raw = "ftp://" + raw
