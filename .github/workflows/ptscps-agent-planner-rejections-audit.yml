@@ -1,0 +1,75 @@
+name: PTSCPS Agent Planner schema rejections (existing logs only)
+on:
+  push:
+    branches: [main]
+    paths: [audit/ptscps-agent-planner-rejections-audit.ready]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    if: >-
+      github.repository == 'ngocnhanvo/ptscps-actions'
+      && github.event.head_commit.message == 'audit(ptscps): inspect existing Planner rejection details'
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check exact regression reference
+        run: |
+          set -euo pipefail
+          test "$(cat audit/ptscps-agent-planner-rejections-audit.ready)" = 'PTSCPS_PLANNER_REJECTIONS existing_run=41386673369 php_sha=3144e27804baa79f00b94fd64342a8b75a39a3b5'
+      - name: Read protected existing log metadata (no new Agent requests)
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+        run: |
+          python3 - <<'PY'
+          import ftplib, io, json, os, re, ssl
+          from pathlib import Path
+          from urllib.parse import urlsplit
+          rows = [v.strip() for v in os.environ['ENV_FILE'].splitlines()]
+          wc = [v.split('=', 1)[1].strip(' "\'') for v in rows if v.startswith('WC_URL=')]
+          assert len(wc) == 1
+          u = urlsplit(wc[0]); assert u.scheme == 'https' and u.hostname == 'admin-ptscps.thegioihosting.io.vn'
+          f = urlsplit(os.environ['FTP_SERVER'] if '://' in os.environ['FTP_SERVER'] else 'ftp://' + os.environ['FTP_SERVER'])
+          assert f.hostname and f.scheme in ('ftp', 'ftps') and not f.path.strip('/')
+          ftp = ftplib.FTP_TLS(context=ssl.create_default_context(), timeout=25)
+          ftp.connect(f.hostname, f.port or 21); ftp.auth()
+          ftp.login(os.environ['FTP_USERNAME'], os.environ['FTP_PASSWORD']); ftp.prot_p()
+          root = '/domains/admin-ptscps.thegioihosting.io.vn/public_html/wp-content/esc-agent-debug/regression/trace41386673369'
+          out = {'schema': 1, 'read_only': True, 'source_run': 41386673369, 'cases': {}}
+          for case in ('vi_services-frontend', 'en_services-frontend', 'en_services-wordpress', 'vi_clients-frontend', 'en_clients-frontend', 'en_clients-wordpress'):
+              result = []
+              try:
+                  ftp.cwd(root + '/' + case)
+                  for name in ftp.nlst():
+                      filename = name.split('/')[-1]
+                      if not re.fullmatch(r'turn-01_req_[0-9a-f]{24}\.jsonl', filename): continue
+                      buffer = io.BytesIO(); ftp.retrbinary('RETR ' + filename, buffer.write)
+                      if len(buffer.getvalue()) > 256000: continue
+                      for raw in buffer.getvalue().splitlines():
+                          try: event = json.loads(raw)
+                          except ValueError: continue
+                          if event.get('event') != 'plan_rejected': continue
+                          detail = str(event.get('detail', ''))[:80]
+                          if not re.fullmatch(r'[a-zA-Z0-9_:.-]{1,80}', detail): detail = 'redacted'
+                          result.append({'reason': event.get('reason'), 'detail': detail,
+                                         'provider': event.get('provider'), 'attempt': event.get('attempt')})
+                  out['cases'][case] = {'rejections': result}
+              except ftplib.all_errors as e:
+                  out['cases'][case] = {'status': 'not_available', 'error_type': type(e).__name__}
+          ftp.quit()
+          Path('audit/ptscps-agent-planner-rejections-audit-result.json').write_text(json.dumps(out, indent=2) + '\n')
+          print('PTSCPS_PLANNER_REJECTIONS=EXPORTED case_count=' + str(len(out['cases'])))
+          PY
+      - name: Save sanitized rejection metadata
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ptscps-agent-planner-rejections
+          path: audit/ptscps-agent-planner-rejections-audit-result.json
+          retention-days: 14
