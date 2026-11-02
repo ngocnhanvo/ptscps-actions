@@ -1,0 +1,69 @@
+name: PTSCPS Agent metadata contextual VI EN PHP-only production acceptance v2
+on:
+  push:
+    branches: [main]
+    paths: [audit/ptscps-agent-metadata-context-release-v2.ready]
+permissions:
+  contents: read
+concurrency:
+  group: ptscps-wp-php-release
+  cancel-in-progress: false
+jobs:
+  release:
+    if: >-
+      github.repository == 'ngocnhanvo/ptscps-actions'
+      && github.event.head_commit.message == 'deploy(ptscps): guarded metadata context PHP and bilingual QA v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 19
+    steps:
+      - name: Checkout release scripts
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Checkout exact pinned PHP source
+        uses: actions/checkout@v4
+        with:
+          repository: ngocnhanvo/ptscps-php
+          ref: master
+          token: ${{ secrets.SOURCE_REPO_PAT }}
+          path: source-php
+          persist-credentials: false
+      - name: Verify source, bilingual metadata and unchanged regression suites
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(cat audit/ptscps-agent-metadata-context-release-v2.ready)" = 'PTSCPS_AGENT_METADATA_CONTEXT_RELEASE_V2 source=2d45d1eba1f761bf105e081b87d1c785bf34b710 mode=php-only'
+          test "$(git -C source-php rev-parse HEAD)" = '2d45d1eba1f761bf105e081b87d1c785bf34b710'
+          php -l source-php/wp-content/mu-plugins/esc-agent/src/Knowledge/KnowledgeIndex.php
+          php source-php/wp-content/mu-plugins/tests/esc-agent-published-collection-test.php
+          php source-php/wp-content/mu-plugins/tests/esc-agent-collection-source-registry-test.php
+          php source-php/wp-content/mu-plugins/tests/esc-agent-retrieval-context-test.php
+          php source-php/wp-content/mu-plugins/tests/esc-agent-complete-collection-summary-test.php
+          python3 -m py_compile scripts/ptscps-php-live-release.py scripts/ptscps-agent-factual-acceptance.py
+          grep -Fq 'PTSCPS_AGENT_RETRIEVAL_CONTEXT_ONLY' scripts/ptscps-php-live-release.py
+      - name: Atomic single-file PHP release and SHA-256 readback
+        shell: bash
+        env:
+          PTSCPS_AGENT_RETRIEVAL_CONTEXT_ONLY: '1'
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ptscps-php-live-release.py
+      - name: Validate all four published VI EN collections in production
+        shell: bash
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: python3 scripts/ptscps-agent-factual-acceptance.py
+      - name: Preserve sanitized production QA evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ptscps-agent-word-boundary-production-qa
+          path: audit/ptscps-agent-factual-acceptance-report.json
+          if-no-files-found: warn
+          retention-days: 10
+      - name: Confirm PHP-only release
+        run: echo PTSCPS_AGENT_METADATA_CONTEXT_V2_PHP_ONLY=PASS
