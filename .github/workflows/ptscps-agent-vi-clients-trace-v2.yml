@@ -1,0 +1,54 @@
+name: PTSCPS VI clients read-only evidence trace v2
+on:
+  push:
+    branches: [main]
+    paths: [audit/ptscps-agent-vi-clients-trace-v2.ready]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    if: >-
+      github.repository == 'ngocnhanvo/ptscps-actions'
+      && github.event.head_commit.message == 'audit(ptscps): inspect VI client evidence v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read-only public section metadata and protected skill result
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+        run: |
+          python3 - <<'PY'
+          import os,json,ftplib,ssl,io,re,uuid
+          from urllib.request import Request,urlopen
+          from urllib.parse import urlsplit
+          c={}
+          for line in os.environ['ENV_FILE'].splitlines():
+              if '=' in line:
+                  k,v=line.strip().removeprefix('export ').split('=',1);c[k]=v.strip().strip('"\'')
+          w=urlsplit(c['WC_URL']);f=urlsplit(c['WC_URL_CLIENT'])
+          assert w.scheme==f.scheme=='https' and w.hostname=='admin-ptscps.thegioihosting.io.vn' and f.hostname=='ptscps.thegioihosting.io.vn'
+          for id in ['home_01','home_03','home_14','home_15']:
+              with urlopen(w.geturl().rstrip('/')+'/wp-json/tablepress/v1/table/'+id,timeout=22) as res: t=json.load(res)
+              print('SOURCE_META',json.dumps({'id':id,'title':t.get('title'),'description':t.get('description'),'rows':len(t.get('items',[]))},ensure_ascii=False))
+          rid='trace'+os.environ['GITHUB_RUN_ID'];cid='vi-clients-frontend'
+          h={'Content-Type':'application/json','X-ESC-Debug':'regression','X-ESC-Run-Id':rid,'X-ESC-Test-Case':cid,'X-ESC-Test-Turn':'1'}
+          d=json.dumps({'message':'Những khách hàng tiêu biểu nào được giới thiệu trên trang chủ PTSC?','language':'vi','sessionId':str(uuid.uuid4())}).encode()
+          with urlopen(Request(f.geturl().rstrip('/')+'/api/agent/chat',data=d,headers=h,method='POST'),timeout=80) as res:
+              ans=json.load(res).get('reply',''); print('ANSWER',json.dumps({'http':res.status,'chars':len(ans),'empty':len(ans)==75}))
+          h=urlsplit(os.environ['FTP_SERVER'] if '://' in os.environ['FTP_SERVER'] else 'ftp://'+os.environ['FTP_SERVER'])
+          x=ftplib.FTP_TLS(context=ssl.create_default_context(),timeout=25);x.connect(h.hostname,h.port or 21);x.auth();x.login(os.environ['FTP_USERNAME'],os.environ['FTP_PASSWORD']);x.prot_p()
+          x.cwd('/domains/admin-ptscps.thegioihosting.io.vn/public_html/wp-content/esc-agent-debug/regression/'+rid+'/'+cid)
+          for name in x.nlst():
+              if not re.fullmatch(r'turn-01_req_[0-9a-f]{24}\.jsonl',name.split('/')[-1]):continue
+              b=io.BytesIO();x.retrbinary('RETR '+name.split('/')[-1],b.write)
+              for line in b.getvalue().splitlines():
+                  try: t=json.loads(line)
+                  except ValueError:continue
+                  if t.get('event') in ('skill_start','skill_result','skill_error','plan_validated','planner_failed'):
+                      print('SAFE_TRACE',json.dumps({k:t[k] for k in ('event','skill','action','result_type','result_count','status') if k in t},ensure_ascii=False))
+          x.quit()
+          PY
