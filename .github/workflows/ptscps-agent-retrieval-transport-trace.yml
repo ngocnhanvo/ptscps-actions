@@ -24,7 +24,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(cat audit/ptscps-agent-retrieval-transport-trace.ready)" = 'PTSCPS_AGENT_TRACE_ONLY php_sha=3144e27804baa79f00b94fd64342a8b75a39a3b5 backfill_run=41381347856'
+          test "$(cat audit/ptscps-agent-retrieval-transport-trace.ready)" = 'PTSCPS_AGENT_TRACE_ONLY php_sha=3144e27804baa79f00b94fd64342a8b75a39a3b5 backfill_run=41381347856 attempt=2'
       - name: Read-only production comparisons and protected regression log metadata
         env:
           ENV_FILE: ${{ secrets.ENV_FILE }}
@@ -114,11 +114,13 @@ jobs:
               ftp.login(os.environ['FTP_USERNAME'],os.environ['FTP_PASSWORD']);ftp.prot_p()
               root='/domains/'+hosts['WC_URL']+'/public_html/wp-content/esc-agent-debug/regression/'+run_id
               ftp.cwd(root)
-              allowed_events={'plan_validated','planner_failed','plan_rejected','skill_start',
+              allowed_events={'plan_validated','planner_failed','plan_rejected','llm_request','llm_response','skill_start',
                               'skill_result','skill_error','request_end','llm_failover',
                               'llm_retry','synthesis_failed','llm_provider_config_invalid'}
               fields={'event','skill','action','status','result_type','result_count','reason',
-                      'step','requires_synthesis','source_type','source_id','mode','attempt'}
+                      'step','requires_synthesis','source_type','source_id','mode','attempt',
+                      'provider','model','stage','http_status','error_type','finish_reason',
+                      'latency_ms','direct_response','resource_id','result','retry_after_seconds'}
               for row in report['cases']:
                   cid=row['id']
                   for suffix in ('frontend','wordpress'):
@@ -139,7 +141,7 @@ jobs:
                                   if 'reason' in item and not re.fullmatch(r'[a-z0-9_:-]{1,80}',str(item['reason'])):item.pop('reason',None)
                                   events.append(item)
                           report['regression_traces'][label]={'log_files':len(names),'events':events[:70]}
-                      except (ftplib.all_errors,ValueError) as e:
+                      except Exception as e:
                           report['regression_traces'][label]={'status':'unavailable','error_type':type(e).__name__}
               ftp.quit()
           except Exception as e:
