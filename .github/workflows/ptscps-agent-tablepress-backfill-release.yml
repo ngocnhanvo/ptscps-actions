@@ -1,0 +1,54 @@
+name: PTSCPS Agent TablePress backfill PHP guarded release
+on:
+  push:
+    branches: [main]
+    paths:
+      - audit/ptscps-agent-tablepress-backfill-release.ready
+permissions:
+  contents: read
+concurrency:
+  group: ptscps-wp-php-release
+  cancel-in-progress: false
+jobs:
+  release:
+    if: >-
+      github.repository == 'ngocnhanvo/ptscps-actions'
+      && github.event.head_commit.message == 'deploy(ptscps): guarded TablePress backfill tool PHP only'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout controlled PTSCPS release tools
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Checkout pinned PHP source
+        uses: actions/checkout@v4
+        with:
+          repository: ngocnhanvo/ptscps-php
+          ref: master
+          token: ${{ secrets.SOURCE_REPO_PAT }}
+          path: source-php
+          persist-credentials: false
+      - name: Verify exact PHP commit and portable rollback tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(cat audit/ptscps-agent-tablepress-backfill-release.ready)" = 'PTSCPS_TABLEPRESS_BACKFILL_TOOL_RELEASE source=3144e27804baa79f00b94fd64342a8b75a39a3b5 mode=php-only'
+          test "$(git -C source-php rev-parse HEAD)" = '3144e27804baa79f00b94fd64342a8b75a39a3b5'
+          php -l source-php/wp-content/mu-plugins/ptscps-agent-tablepress-backfill.php
+          php source-php/wp-content/mu-plugins/tests/ptscps-agent-tablepress-backfill-test.php
+          python3 -m py_compile scripts/ptscps-php-live-release.py
+          grep -Fq 'PTSCPS_AGENT_TABLEPRESS_BACKFILL_ONLY' scripts/ptscps-php-live-release.py
+      - name: Atomic guarded single-file FTPS deployment with SHA-256 remote readback
+        shell: bash
+        env:
+          PTSCPS_AGENT_TABLEPRESS_BACKFILL_ONLY: '1'
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ptscps-php-live-release.py
+      - name: Confirm no Astro build triggered
+        run: echo PTSCPS_AGENT_BACKFILL_TOOL_PHP_ONLY=PASS
