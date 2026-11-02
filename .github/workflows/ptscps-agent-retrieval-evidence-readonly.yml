@@ -45,8 +45,8 @@ jobs:
               value=unicodedata.normalize('NFD',value.lower().replace('đ','d'))
               return re.sub(r'\s+', ' ', re.sub(r'[^a-z0-9 ]+',' ', ''.join(c for c in value if unicodedata.category(c)!='Mn'))).strip()
           # These are semantic coverage probes, not rewritten customer queries.
-          cases=[('vi_services','home_03',['linh','vuc','dich','vu']),
-                 ('en_services','home_03_en',['service','areas']),
+          cases=[('vi_services','home_01',['linh','vuc','dich','vu']),
+                 ('en_services','home_01_en',['service','areas']),
                  ('vi_clients','home_15',['khach','hang','tieu','bieu']),
                  ('en_clients','home_15_en',['customers'])]
           for case,table_id,terms in cases:
@@ -70,6 +70,7 @@ jobs:
               # Include only field names, aggregate counts and query-token presence. Never emit source bodies.
               fieldnames=[str(f.get('name',f.get('key','')) if isinstance(f,dict) else f)[:48] for f in fields]
               print('PTSCPS_RETRIEVAL_EVIDENCE '+json.dumps({'case':case,'source':table_id,
+                  'table_metadata':{key:str(table.get(key,''))[:120] for key in ('title','description','name')},
                   'rows':len(items),'fields':fieldnames[:12],'image_only_rows':image_only,
                   'rows_with_any_query_term':overlap,'max_row_term_matches':max(coverage,default=0),
                   'query_tokens':terms,'present_tokens_anywhere':allterms},ensure_ascii=False))
