@@ -44,3 +44,9 @@ In code mode **normal**, source changes and source-only tests are allowed.
 Do not dispatch the production build or upload WordPress files over FTP without
 explicit approval. Never assume a sanitized source tree implies a sanitized
 live WordPress database.
+
+## RAG rebuild RUN03 (2026-11-03)
+
+- Read-only retrieval evidence: [Actions run #41513823111](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/41513823111), PHP guarded FTPS PASS, top-5 retrieval QA FAIL (6/20 source anchors, 1/4 natural probes, 0 wrong-locale hits).
+- Detailed source IDs/queries/top-5 are encrypted in [artifact #13174018382](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/41513823111/artifacts/13174018382). The public summary has aggregate metrics only.
+- RUN03 remains open for evidence-based ranking diagnosis; RUN07 four-source acceptance is BLOCKED on real published Post/Product corpus. See `docs/agent-rebuild/STATUS.md` for current checkpoint.
