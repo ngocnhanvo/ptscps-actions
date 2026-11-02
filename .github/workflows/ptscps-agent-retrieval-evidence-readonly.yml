@@ -1,0 +1,77 @@
+name: PTSCPS Agent retrieval TablePress evidence read-only
+on:
+  push:
+    branches: [main]
+    paths:
+      - audit/ptscps-agent-retrieval-evidence.ready
+permissions:
+  contents: read
+concurrency:
+  group: ptscps-agent-retrieval-evidence-readonly
+  cancel-in-progress: false
+jobs:
+  inspect:
+    if: >-
+      github.repository == 'ngocnhanvo/ptscps-actions'
+      && github.event.head_commit.message == 'audit(ptscps): compare live TablePress evidence read-only'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Compare official published source rows to natural-language query tokens
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        shell: bash
+        run: |
+          python3 - <<'PYCODE'
+          import os, json, re, html, unicodedata
+          from urllib.parse import urlsplit, quote
+          from urllib.request import Request, urlopen
+          origins=[]
+          for line in os.environ.get('ENV_FILE','').splitlines():
+              line=line.strip().removeprefix('export ')
+              if line.startswith('WC_URL='):
+                  origins.append(line.split('=',1)[1].strip().strip(chr(34)+chr(39)))
+          assert len(origins)==1
+          u=urlsplit(origins[0])
+          assert u.scheme=='https' and u.hostname=='admin-ptscps.thegioihosting.io.vn'
+          assert u.path in ('','/') and not u.port and not u.query and not u.fragment and not u.username
+          def text_value(value):
+              text=html.unescape(str(value if value is not None else ''))
+              return re.sub(r'\s+', ' ', re.sub(r'<[^>]+>', ' ', text)).strip()
+          def norm(value):
+              value=unicodedata.normalize('NFD',value.lower().replace('đ','d'))
+              return re.sub(r'\s+', ' ', re.sub(r'[^a-z0-9 ]+',' ', ''.join(c for c in value if unicodedata.category(c)!='Mn'))).strip()
+          # These are semantic coverage probes, not rewritten customer queries.
+          cases=[('vi_services','home_03',['linh','vuc','dich','vu']),
+                 ('en_services','home_03_en',['service','areas']),
+                 ('vi_clients','home_15',['khach','hang','tieu','bieu']),
+                 ('en_clients','home_15_en',['customers'])]
+          for case,table_id,terms in cases:
+              url=u.geturl().rstrip('/')+'/wp-json/tablepress/v1/table/'+quote(table_id)
+              with urlopen(Request(url,headers={'Accept':'application/json'}),timeout=28) as rsp:
+                  assert rsp.status==200
+                  table=json.loads(rsp.read(700000))
+              assert table.get('success') is True and table.get('id')==table_id
+              items=table.get('items'); fields=table.get('fields')
+              assert isinstance(items,list) and isinstance(fields,list)
+              rowtexts=[]; image_only=0
+              for item in items:
+                  assert isinstance(item,dict)
+                  vals=[str(v or '') for v in item.values()]
+                  plain=' '.join(v for v in (text_value(x) for x in vals) if v)
+                  if not plain and any('<img' in x.lower() for x in vals): image_only+=1
+                  rowtexts.append(norm(plain))
+              coverage=[sum(1 for t in terms if t in row) for row in rowtexts]
+              overlap=sum(1 for row in rowtexts if any(t in row for t in terms))
+              allterms=[term for term in terms if any(term in row for row in rowtexts)]
+              # Include only field names, aggregate counts and query-token presence. Never emit source bodies.
+              fieldnames=[str(f.get('name',f.get('key','')) if isinstance(f,dict) else f)[:48] for f in fields]
+              print('PTSCPS_RETRIEVAL_EVIDENCE '+json.dumps({'case':case,'source':table_id,
+                  'rows':len(items),'fields':fieldnames[:12],'image_only_rows':image_only,
+                  'rows_with_any_query_term':overlap,'max_row_term_matches':max(coverage,default=0),
+                  'query_tokens':terms,'present_tokens_anywhere':allterms},ensure_ascii=False))
+          print('PTSCPS_RETRIEVAL_EVIDENCE_READ_ONLY=PASS')
+          PYCODE
