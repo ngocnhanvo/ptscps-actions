@@ -1,0 +1,43 @@
+name: PTSCPS Agent TablePress semantic audit (production read-only)
+on:
+  push:
+    branches: [main]
+    paths:
+      - audit/ptscps-agent-tablepress-semantic-audit.ready
+permissions:
+  contents: read
+concurrency:
+  group: ptscps-agent-tablepress-semantic-audit
+  cancel-in-progress: false
+jobs:
+  audit:
+    if: >-
+      github.repository == 'ngocnhanvo/ptscps-actions'
+      && github.event.head_commit.message == 'audit(ptscps): inspect live TablePress semantic coverage read-only'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Check pinned stage-1 inventory and script syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(cat audit/ptscps-agent-tablepress-semantic-audit.ready)" = 'PTSCPS_TABLEPRESS_SEMANTIC_READ_ONLY inventory_run=41341229462 source=a4b517de654ed5a781874e032934527b4ef62087'
+          node --check scripts/ptscps-agent-tablepress-semantic-audit.mjs
+      - name: Probe 16 published TablePress tables without CMS writes
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: node scripts/ptscps-agent-tablepress-semantic-audit.mjs
+      - name: Upload read-only semantic diagnostics (no content bodies)
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ptscps-agent-tablepress-semantic-audit
+          path: audit/ptscps-agent-tablepress-semantic.json
+          retention-days: 7
+          if-no-files-found: error
