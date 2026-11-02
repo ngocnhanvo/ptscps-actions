@@ -1,0 +1,103 @@
+name: PTSCPS Agent published section PHP-only production acceptance
+on:
+  push:
+    branches: [main]
+    paths:
+      - audit/ptscps-agent-published-section-release.ready
+permissions:
+  contents: read
+concurrency:
+  group: ptscps-wp-php-release
+  cancel-in-progress: false
+jobs:
+  release:
+    if: >-
+      github.repository == 'ngocnhanvo/ptscps-actions'
+      && github.event.head_commit.message == 'deploy(ptscps): verified published section PHP only'
+    runs-on: ubuntu-latest
+    timeout-minutes: 16
+    steps:
+      - name: Checkout Actions release scripts
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Checkout pinned PHP source
+        uses: actions/checkout@v4
+        with:
+          repository: ngocnhanvo/ptscps-php
+          ref: master
+          token: ${{ secrets.SOURCE_REPO_PAT }}
+          path: source-php
+          persist-credentials: false
+      - name: Verify exact source and bilingual tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(cat audit/ptscps-agent-published-section-release.ready)" = 'PTSCPS_AGENT_PUBLISHED_SECTION_RELEASE source=2b55ce4f38cee2e0585d4b418dc5f3efe737d3e3 mode=php-only'
+          test "$(git -C source-php rev-parse HEAD)" = '2b55ce4f38cee2e0585d4b418dc5f3efe737d3e3'
+          php -l source-php/wp-content/mu-plugins/esc-agent/src/Core/KnowledgeAwarePlanner.php
+          php source-php/wp-content/mu-plugins/tests/esc-agent-published-collection-test.php
+          php source-php/wp-content/mu-plugins/tests/esc-agent-published-routing-test.php
+          php source-php/wp-content/mu-plugins/tests/esc-agent-published-abbreviation-test.php
+          php source-php/wp-content/mu-plugins/tests/esc-agent-complete-collection-summary-test.php
+          python3 -m py_compile scripts/ptscps-php-live-release.py
+          grep -Fq 'PTSCPS_AGENT_PUBLISHED_ROUTING_ONLY' scripts/ptscps-php-live-release.py
+      - name: Atomic single-file PHP FTPS with SHA-256 readback
+        shell: bash
+        env:
+          PTSCPS_AGENT_PUBLISHED_ROUTING_ONLY: '1'
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+        run: python3 scripts/ptscps-php-live-release.py
+      - name: Verify short published section question and PPS regression on production
+        shell: bash
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: |
+          python3 - <<'PYCODE'
+          import json, os, re, uuid, unicodedata
+          from urllib.parse import urlsplit
+          from urllib.request import Request, urlopen
+          values=[]
+          for line in os.environ['ENV_FILE'].splitlines():
+              line=line.strip().removeprefix('export ')
+              if line.startswith('WC_URL_CLIENT='):
+                  values.append(line.split('=',1)[1].strip().strip('"\''))
+          assert len(values)==1
+          u=urlsplit(values[0]); assert u.scheme=='https' and u.hostname=='ptscps.thegioihosting.io.vn' and u.path in ('','/') and not u.query and not u.fragment
+          endpoint=u.scheme+'://'+u.netloc+'/api/agent/chat'
+          def norm(s):
+              s=unicodedata.normalize('NFD', s.lower().replace('đ','d'))
+              return re.sub(r'\s+',' ',''.join(c for c in s if unicodedata.category(c)!='Mn'))
+          tests=[
+              ('vi_section','vi','LĨNH VỰC HOẠT ĐỘNG là gì'),
+              ('vi_services','vi','Những lĩnh vực dịch vụ nào được giới thiệu trên trang chủ PTSC?'),
+              ('en_services','en',"Which service areas are listed on PTSC's homepage?"),
+              ('vi_abbreviation','vi','pps là gì'),
+              ('en_abbreviation','en','What is PPS?'),
+          ]
+          for key,locale,question in tests:
+              body=json.dumps({'message':question,'language':locale,'sessionId':str(uuid.uuid4())}).encode()
+              req=Request(endpoint,data=body,headers={'Content-Type':'application/json','Accept':'application/json'},method='POST')
+              with urlopen(req,timeout=90) as response:
+                  assert response.status==200
+                  obj=json.loads(response.read(262144))
+              answer=obj.get('reply','') if isinstance(obj,dict) else ''
+              txt=norm(answer)
+              if key=='vi_section':
+                  requirements=['van hanh','cung ung nhan luc','thiet ke','sua chua']
+                  ok=all(term in txt for term in requirements)
+              elif key=='vi_services':
+                  ok=sum(term in txt for term in ['van hanh','cung ung nhan luc','thiet ke','sua chua'])>=3
+              elif key=='en_services':
+                  ok=len(answer)>90 and any(term in txt for term in ['operation','maintenance','engineering','fabrication','services']) and 'chua co du lieu' not in txt
+              else:
+                  ok='PTSC PRODUCTION SERVICES JSC' in answer.upper() and 'PPS' in answer.upper() and 'POWERPOINT' not in answer.upper()
+              print('PTSCPS_AGENT_PUBLISHED_SECTION_CASE '+json.dumps({'case':key,'locale':locale,'pass':ok,'reply_chars':len(answer)}))
+              if not ok: raise SystemExit('Published section / abbreviation production regression failed')
+          print('PTSCPS_AGENT_PUBLISHED_SECTION_PRODUCTION=PASS 5/5')
+          PYCODE
+      - name: Confirm PHP-only release; Astro remains unchanged
+        run: echo PTSCPS_AGENT_PUBLISHED_SECTION_PHP_ONLY=PASS
