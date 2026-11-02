@@ -1,0 +1,49 @@
+name: PTSCPS RAG RUN03 read-only miss attribution
+on:
+  push:
+    branches: [main]
+    paths: [audit/ptscps-agent-rag-run03-diagnostics.ready]
+permissions:
+  contents: read
+concurrency:
+  group: ptscps-agent-rag-readonly
+  cancel-in-progress: false
+jobs:
+  diagnose:
+    if: >-
+      github.repository == 'ngocnhanvo/ptscps-actions'
+      && github.event.head_commit.message == 'audit(ptscps): RUN03 read-only miss attribution'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate diagnostic request and syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(cat audit/ptscps-agent-rag-run03-diagnostics.ready)" = 'PTSCPS_RUN03_DIAGNOSTICS_READ_ONLY source=871602cd650aade4d3b996c63003deff49ed1458'
+          node --check scripts/ptscps-agent-rag-run03-diagnostics.mjs
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install Playwright Chromium
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Read-only production miss attribution (no provider quota)
+        env:
+          PTSCPS_SOURCE_SHA: 871602cd650aade4d3b996c63003deff49ed1458
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+          WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
+          WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
+        run: node scripts/ptscps-agent-rag-run03-diagnostics.mjs
+      - name: Publish aggregate-only diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ptscps-rag-run03-diagnostics-summary
+          path: audit/ptscps-agent-rag-run03-diagnostics-summary.json
+          if-no-files-found: warn
+          retention-days: 14
