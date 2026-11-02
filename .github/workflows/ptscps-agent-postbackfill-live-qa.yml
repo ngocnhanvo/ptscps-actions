@@ -1,0 +1,49 @@
+name: PTSCPS Agent bilingual post-backfill production QA
+on:
+  push:
+    branches: [main]
+    paths:
+      - audit/ptscps-agent-postbackfill-live-qa.ready
+permissions:
+  contents: read
+concurrency:
+  group: ptscps-agent-postbackfill-qa
+  cancel-in-progress: false
+jobs:
+  live-qa:
+    if: >-
+      github.repository == 'ngocnhanvo/ptscps-actions'
+      && github.event.head_commit.message == 'test(ptscps): verify post-backfill bilingual Agent on production'
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check one-off marker and script syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(cat audit/ptscps-agent-postbackfill-live-qa.ready)" = 'PTSCPS_AGENT_POSTBACKFILL_QA backfill_run=41381347856 php_sha=3144e27804baa79f00b94fd64342a8b75a39a3b5'
+          node --check scripts/ptscps-agent-postbackfill-live-qa.mjs
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install Playwright Chromium
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Read-only authenticated inventory and limited bilingual factual smoke
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+          WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
+          WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
+        run: node scripts/ptscps-agent-postbackfill-live-qa.mjs
+      - name: Preserve sanitized diagnostic artifact (including failed assertions)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ptscps-agent-postbackfill-live-qa
+          path: audit/ptscps-agent-postbackfill-live-qa-result.json
+          if-no-files-found: warn
+          retention-days: 14
