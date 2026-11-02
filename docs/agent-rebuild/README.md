@@ -57,3 +57,11 @@ Owner-approved execution scope: PTSCPS WordPress AI Agent. This is an **executio
 - RUN 01 source locale + unit tests: PHP [`68514b7e`](https://github.com/ngocnhanvo/ptscps-php/commit/68514b7e799a4083949ba491be4ad5a90eadeacd), [control run #41495039282](https://github.com/ngocnhanvo/source-commit-actions/actions/runs/41495039282) PASS.
 - ContactSkill ACF exact locale + unit tests: PHP [`f6f6e58d`](https://github.com/ngocnhanvo/ptscps-php/commit/f6f6e58d2d6de19b18b164cd4fe03d8af2424b09), [control run #41495944119](https://github.com/ngocnhanvo/source-commit-actions/actions/runs/41495944119) PASS.
 - Neither code commit is equivalent to production release or actual Agent acceptance.
+
+### RUN 02 production evidence — 2026-11-03
+
+- PHP [`79929f61`](https://github.com/ngocnhanvo/ptscps-php/commit/79929f61b6b55f17e0a67dd6429a3e9374895bcc): inventory now enumerates public post types and Thông tin chung, reports all ACF language codes. [Source tests #41502562437](https://github.com/ngocnhanvo/source-commit-actions/actions/runs/41502562437) PASS.
+- [Pre-release read-only census #41502909642](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/41502909642): 18/18 indexed, 719 orphan groups, legacy inventory schema.
+- [Guarded PHP release and postrelease census #41503433075](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/41503433075): FTPS identity, SHA-256 readback and PHP tests PASS; no Astro build/reindex. Live dynamic-language schema PASS; 20/20 eligible indexed (10 VI, 10 EN), Page 2, TablePress 16, Thông tin chung 2, Post 0, Product 0; 717 orphan groups untouched.
+- **Scope of PASS:** production inventory coverage of existing eligible published sources only. No Post/Product corpus, no top-5 recall measurement, no new end-to-end LLM acceptance. RUN 03–08 remain open; RUN 07 full four-source acceptance is blocked by missing real published Post/Product records.
+- Historical LLM and factual QA failures remain open until new focused evidence verifies fixes; do not repeat earlier successful backfill or delete orphan index groups.
