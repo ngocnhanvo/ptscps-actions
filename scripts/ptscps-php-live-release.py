@@ -104,6 +104,18 @@ if os.environ.get("PTSCPS_AGENT_FAILCLOSED_ONLY") == "1":
 if os.environ.get("PTSCPS_AGENT_PROVIDER_ROUTING_ONLY") == "1":
     FILES = ("wp-content/mu-plugins/esc-agent/src/Core/LlmProviderConfig.php",)
 
+# RUN 02 release: only the locale/ingestion files under review. No Agent
+# entrypoint, LLM provider config, CMS content, reindex or Astro build.
+if os.environ.get("PTSCPS_AGENT_RAG_RUN02_ONLY") == "1":
+    FILES = (
+        "wp-content/mu-plugins/esc-agent/src/Core/AgentLocale.php",
+        "wp-content/mu-plugins/esc-agent/src/Skills/ContactSkill.php",
+        "wp-content/mu-plugins/esc-agent/src/Knowledge/KnowledgeInventory.php",
+        "wp-content/mu-plugins/esc-agent/src/Knowledge/KnowledgeIndex.php",
+        "wp-content/mu-plugins/esc-agent/src/Knowledge/KnowledgeChunker.php",
+        "wp-content/mu-plugins/esc-agent/src/Knowledge/ProductKnowledgeSource.php",
+    )
+
 raw = os.environ.get("FTP_SERVER", "").strip()
 if "://" not in raw:
     raw = "ftp://" + raw

@@ -1,0 +1,95 @@
+name: PTSCPS RAG RUN02 guarded PHP-only locale and ingestion release
+on:
+  push:
+    branches: [main]
+    paths: [audit/ptscps-agent-rag-run02-release.ready]
+permissions:
+  contents: read
+concurrency:
+  group: ptscps-wp-php-release
+  cancel-in-progress: false
+jobs:
+  release:
+    if: >-
+      github.repository == 'ngocnhanvo/ptscps-actions'
+      && github.event.head_commit.message == 'deploy(ptscps): guarded RUN02 RAG source alignment PHP only'
+    runs-on: ubuntu-latest
+    timeout-minutes: 22
+    steps:
+      - name: Checkout guarded PTSCPS Actions release tooling
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Checkout pinned PTSCPS PHP source
+        uses: actions/checkout@v4
+        with:
+          repository: ngocnhanvo/ptscps-php
+          ref: 79929f61b6b55f17e0a67dd6429a3e9374895bcc
+          token: ${{ secrets.SOURCE_REPO_PAT }}
+          path: source-php
+          persist-credentials: false
+      - name: Verify exact SHA, release scope and portable regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(cat audit/ptscps-agent-rag-run02-release.ready)" = 'PTSCPS_RAG_RUN02_RELEASE source=79929f61b6b55f17e0a67dd6429a3e9374895bcc php-only'
+          test "$(git -C source-php rev-parse HEAD)" = '79929f61b6b55f17e0a67dd6429a3e9374895bcc'
+          grep -Fq 'PTSCPS_AGENT_RAG_RUN02_ONLY' scripts/ptscps-php-live-release.py
+          for file in \
+            wp-content/mu-plugins/esc-agent/src/Core/AgentLocale.php \
+            wp-content/mu-plugins/esc-agent/src/Skills/ContactSkill.php \
+            wp-content/mu-plugins/esc-agent/src/Knowledge/KnowledgeInventory.php \
+            wp-content/mu-plugins/esc-agent/src/Knowledge/KnowledgeIndex.php \
+            wp-content/mu-plugins/esc-agent/src/Knowledge/KnowledgeChunker.php \
+            wp-content/mu-plugins/esc-agent/src/Knowledge/ProductKnowledgeSource.php; do
+            php -l "source-php/$file"
+          done
+          for test in \
+            esc-agent-source-locale-test.php \
+            esc-agent-knowledge-inventory-test.php \
+            esc-agent-chunker-lossless-test.php \
+            esc-agent-product-facts-test.php \
+            esc-agent-contact-locale-test.php; do
+            php "source-php/wp-content/mu-plugins/tests/$test"
+          done
+          python3 -m py_compile scripts/ptscps-php-live-release.py
+          node --check scripts/ptscps-agent-rag-run02-inventory.mjs
+      - name: Atomic six-file PHP FTPS release with remote readback and rollback
+        env:
+          PTSCPS_AGENT_RAG_RUN02_ONLY: '1'
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+        run: python3 scripts/ptscps-php-live-release.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install Playwright Chromium
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Verify production read-only inventory uses dynamic ACF language census
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+          WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
+          WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          node scripts/ptscps-agent-rag-run02-inventory.mjs
+          node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            const report=JSON.parse(readFileSync("audit/ptscps-agent-rag-run02-inventory.json","utf8"));
+            if (!report.dynamic_language_schema) throw new Error("New PHP inventory not observed live");
+            if (report.counts.published !== report.counts.eligible + report.counts.unclassified)
+              throw new Error("Published locale census incomplete");
+            console.log("PTSCPS_RUN02_POSTRELEASE_INVENTORY_SCHEMA=PASS (coverage reported separately)");
+          '
+      - name: Preserve sanitized postrelease aggregate even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ptscps-rag-run02-postrelease-inventory
+          path: audit/ptscps-agent-rag-run02-inventory.json
+          if-no-files-found: warn
+          retention-days: 14
