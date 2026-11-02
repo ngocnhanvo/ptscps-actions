@@ -1,0 +1,118 @@
+name: PTSCPS Agent retrieval context guarded PHP release
+on:
+  push:
+    branches: [main]
+    paths:
+      - audit/ptscps-agent-retrieval-context-release.ready
+permissions:
+  contents: read
+concurrency:
+  group: ptscps-wp-php-release
+  cancel-in-progress: false
+jobs:
+  release:
+    if: >-
+      github.repository == 'ngocnhanvo/ptscps-actions'
+      && github.event.head_commit.message == 'deploy(ptscps): guarded retrieval context PHP only'
+    runs-on: ubuntu-latest
+    timeout-minutes: 17
+    steps:
+      - name: Checkout PTSCPS Actions guarded release tools
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Checkout exact pinned WordPress PHP source
+        uses: actions/checkout@v4
+        with:
+          repository: ngocnhanvo/ptscps-php
+          ref: master
+          token: ${{ secrets.SOURCE_REPO_PAT }}
+          path: source-php
+          persist-credentials: false
+      - name: Verify source pin and standalone bilingual regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(cat audit/ptscps-agent-retrieval-context-release.ready)" = 'PTSCPS_AGENT_RETRIEVAL_CONTEXT_RELEASE source=d6b579c844b5b7b39e867e7c36aa6b5bc4871d19 mode=php-only'
+          test "$(git -C source-php rev-parse HEAD)" = 'd6b579c844b5b7b39e867e7c36aa6b5bc4871d19'
+          php -l source-php/wp-content/mu-plugins/esc-agent/src/Knowledge/KnowledgeIndex.php
+          php -l source-php/wp-content/mu-plugins/tests/esc-agent-retrieval-context-test.php
+          php source-php/wp-content/mu-plugins/tests/esc-agent-retrieval-context-test.php
+          php source-php/wp-content/mu-plugins/tests/esc-agent-published-routing-test.php
+          python3 -m py_compile scripts/ptscps-php-live-release.py
+          grep -Fq 'PTSCPS_AGENT_RETRIEVAL_CONTEXT_ONLY' scripts/ptscps-php-live-release.py
+      - name: Atomic one-file PHP FTPS release and SHA-256 readback
+        shell: bash
+        env:
+          PTSCPS_AGENT_RETRIEVAL_CONTEXT_ONLY: '1'
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ptscps-php-live-release.py
+      - name: Read-only bilingual content QA on live Agent responses
+        shell: bash
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: |
+          python3 - <<'PYQA'
+          import json, os, re
+          from urllib.parse import urlsplit
+          from urllib.request import Request, urlopen
+          from urllib.error import HTTPError, URLError
+          origins=[]
+          for row in os.environ['ENV_FILE'].splitlines():
+              row=row.strip().removeprefix('export ')
+              if row.startswith('WC_URL_CLIENT='):
+                  origins.append(row.split('=',1)[1].strip().strip(chr(34)+chr(39)))
+          assert len(origins)==1, 'Frontend origin not found'
+          url=urlsplit(origins[0]); assert url.scheme=='https' and url.hostname=='ptscps.thegioihosting.io.vn'
+          assert url.path in ('','/') and not url.query and not url.fragment and not url.username and not url.password
+          cases=[
+              ('vi_services','vi','Những lĩnh vực dịch vụ nào được giới thiệu trên trang chủ PTSC?'),
+              ('en_services','en',"Which service areas are listed on PTSC's homepage?"),
+              ('vi_clients','vi','Những khách hàng tiêu biểu nào được giới thiệu trên trang chủ PTSC?'),
+              ('en_clients','en','Which featured customers are shown on the PTSC homepage?'),
+          ]
+          empty_messages=(
+              'dữ liệu website hiện tại chưa có thông tin xác thực',
+              'the website does not currently have verified english-language content',
+              'hệ thống đang gặp sự cố khi xử lý yêu cầu',
+              'the system cannot process this request',
+              'không tìm thấy dữ liệu xác thực',
+              'no verified information',
+              'unable to find verified',
+          )
+          failed=0
+          for case,locale,question in cases:
+              body=json.dumps({'message':question,'language':locale}).encode('utf-8')
+              req=Request(url.geturl().rstrip('/')+'/api/agent/chat', data=body,
+                  headers={'Content-Type':'application/json','Accept':'application/json'}, method='POST')
+              status=0; obj={}
+              try:
+                  with urlopen(req, timeout=85) as rsp:
+                      status=rsp.status
+                      obj=json.loads(rsp.read(256000))
+              except HTTPError as ex:
+                  status=ex.code
+              except (URLError, ValueError) as ex:
+                  print('AGENT_CONTENT_QA case='+case+' transport_error='+type(ex).__name__)
+              reply=obj.get('reply','') if isinstance(obj,dict) else ''
+              reply=reply if isinstance(reply,str) else ''
+              ungrounded=any(token in reply.lower() for token in empty_messages)
+              passed=status==200 and len(reply.strip())>=40 and not ungrounded
+              print('AGENT_CONTENT_QA case='+case+' result='+('PASS' if passed else 'FAIL')+
+                    ' http='+str(status)+' chars='+str(len(reply))+' empty_fallback='+str(ungrounded))
+              if not passed:
+                  safe=re.sub(r'[\r\n\t]+',' ',reply)[:250]
+                  print('AGENT_CONTENT_QA sample='+json.dumps(safe,ensure_ascii=False))
+                  failed+=1
+          if failed:
+              raise SystemExit('Bilingual content QA FAIL: no production factual acceptance')
+          print('PTSCPS_AGENT_BILINGUAL_NONEMPTY_QA=PASS 4/4 (verify source fidelity separately)')
+          PYQA
+      - name: Assert PHP-only scope without Astro build or index mutation
+        shell: bash
+        run: echo PTSCPS_AGENT_RETRIEVAL_PHP_ONLY=PASS

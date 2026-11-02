@@ -70,6 +70,11 @@ FILES = AGENT_PLANNER_ROUTING_FILES if os.environ.get("PTSCPS_AGENT_PLANNER_ROUT
     "wp-content/mu-plugins/ptscps-folders-accurate-counts.php",
 ) if os.environ.get("PTSCPS_FOLDERS_ONLY") == "1" else DEFAULT_FILES
 
+# The guarded retrieval-context release installs exactly one PHP runtime file.
+# Do not select the general Agent source list for a targeted ranking update.
+if os.environ.get("PTSCPS_AGENT_RETRIEVAL_CONTEXT_ONLY") == "1":
+    FILES = ("wp-content/mu-plugins/esc-agent/src/Knowledge/KnowledgeIndex.php",)
+
 raw = os.environ.get("FTP_SERVER", "").strip()
 if "://" not in raw:
     raw = "ftp://" + raw
