@@ -1,0 +1,69 @@
+name: PTSCPS Agent TablePress guarded production backfill operations
+on:
+  push:
+    branches: [main]
+    paths:
+      - audit/ptscps-agent-tablepress-backfill-preview.ready
+      - audit/ptscps-agent-tablepress-backfill-apply.ready
+permissions:
+  contents: read
+concurrency:
+  group: ptscps-agent-tablepress-backfill
+  cancel-in-progress: false
+jobs:
+  recover:
+    if: >-
+      github.repository == 'ngocnhanvo/ptscps-actions'
+      && (github.event.head_commit.message == 'audit(ptscps): preview guarded TablePress backfill on production'
+          || github.event.head_commit.message == 'deploy(ptscps): apply approved TablePress index backfill')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate one-time guarded operation
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event.head_commit.message }}" == 'audit(ptscps): preview guarded TablePress backfill on production' ]]; then
+            test "$(cat audit/ptscps-agent-tablepress-backfill-preview.ready)" = 'PTSCPS_TABLEPRESS_BACKFILL_PREVIEW release_run=41380573605 source=3144e27804baa79f00b94fd64342a8b75a39a3b5'
+          else
+            grep -Eq '^PTSCPS_TABLEPRESS_BACKFILL_APPLY fingerprint=[0-9a-f]{64} source=3144e27804baa79f00b94fd64342a8b75a39a3b5 release_run=41380573605$' audit/ptscps-agent-tablepress-backfill-apply.ready
+          fi
+          node --check scripts/ptscps-agent-tablepress-backfill-ops.mjs
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install headless Chromium
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Authenticated read-only preflight of the exact 16-source baseline
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+          WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
+          WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
+        run: node scripts/ptscps-agent-tablepress-backfill-ops.mjs preview
+      - name: Preserve preflight snapshot artifact BEFORE any production write
+        uses: actions/upload-artifact@v4
+        with:
+          name: ptscps-tablepress-backfill-preflight
+          path: audit/ptscps-agent-tablepress-backfill-preflight.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Apply fingerprint-pinned 16-source backfill and verify live CMS coverage
+        if: "${{ github.event.head_commit.message == 'deploy(ptscps): apply approved TablePress index backfill' }}"
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+          WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
+          WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
+        run: node scripts/ptscps-agent-tablepress-backfill-ops.mjs apply
+      - name: Preserve guarded write verification artifact
+        if: "${{ github.event.head_commit.message == 'deploy(ptscps): apply approved TablePress index backfill' && success() }}"
+        uses: actions/upload-artifact@v4
+        with:
+          name: ptscps-tablepress-backfill-result
+          path: audit/ptscps-agent-tablepress-backfill-result.json
+          if-no-files-found: error
+          retention-days: 14
