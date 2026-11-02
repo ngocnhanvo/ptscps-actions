@@ -1,0 +1,46 @@
+name: PTSCPS RAG RUN02 authenticated read-only CMS inventory
+on:
+  push:
+    branches: [main]
+    paths: [audit/ptscps-agent-rag-run02-inventory.ready]
+permissions:
+  contents: read
+concurrency:
+  group: ptscps-rag-run02-inventory
+  cancel-in-progress: false
+jobs:
+  inventory:
+    if: >-
+      github.repository == 'ngocnhanvo/ptscps-actions'
+      && github.event.head_commit.message == 'audit(ptscps): run02 read-only production CMS census'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install Playwright Chromium
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Validate read-only audit script
+        run: |
+          test "$(cat audit/ptscps-agent-rag-run02-inventory.ready)" = 'PTSCPS_RAG_RUN02_CENSUS=READ_ONLY'
+          node --check scripts/ptscps-agent-rag-run02-inventory.mjs
+      - name: Inventory published and indexed sources without changing CMS
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+          WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
+          WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
+        run: node scripts/ptscps-agent-rag-run02-inventory.mjs
+      - name: Upload sanitized aggregate only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ptscps-rag-run02-inventory
+          path: audit/ptscps-agent-rag-run02-inventory.json
+          if-no-files-found: warn
+          retention-days: 14
