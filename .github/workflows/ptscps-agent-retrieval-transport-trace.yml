@@ -1,0 +1,159 @@
+name: PTSCPS Agent retrieval and transport trace (read-only)
+on:
+  push:
+    branches: [main]
+    paths:
+      - audit/ptscps-agent-retrieval-transport-trace.ready
+permissions:
+  contents: read
+concurrency:
+  group: ptscps-agent-retrieval-transport-trace
+  cancel-in-progress: false
+jobs:
+  trace:
+    if: >-
+      github.repository == 'ngocnhanvo/ptscps-actions'
+      && github.event.head_commit.message == 'audit(ptscps): trace Agent retrieval and frontend upstream 503'
+    runs-on: ubuntu-latest
+    timeout-minutes: 16
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify one-off scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(cat audit/ptscps-agent-retrieval-transport-trace.ready)" = 'PTSCPS_AGENT_TRACE_ONLY php_sha=3144e27804baa79f00b94fd64342a8b75a39a3b5 backfill_run=41381347856'
+      - name: Read-only production comparisons and protected regression log metadata
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import ftplib, io, json, os, re, ssl, time, uuid
+          import urllib.request, urllib.error
+          from pathlib import Path
+          from urllib.parse import urlsplit
+
+          def variables(raw):
+              values={}
+              for row in raw.splitlines():
+                  row=row.strip()
+                  if row.startswith('export '): row=row[7:].strip()
+                  if '=' not in row or row.startswith('#'): continue
+                  k,v=row.split('=',1)
+                  if re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*',k.strip()):
+                      values[k.strip()]=v.strip().strip('"\'')
+              return values
+          cfg=variables(os.environ.get('ENV_FILE',''))
+          hosts={'WC_URL':'admin-ptscps.thegioihosting.io.vn','WC_URL_CLIENT':'ptscps.thegioihosting.io.vn'}
+          for key,host in hosts.items():
+              u=urlsplit(cfg.get(key,''))
+              assert (u.scheme,u.hostname,u.port,u.path,u.query,u.fragment)==('https',host,None,u.path,'','') and u.path in ('','/'), 'bad '+key
+          wp=cfg['WC_URL'].rstrip('/')
+          front=cfg['WC_URL_CLIENT'].rstrip('/')
+          run_id='trace'+os.environ['GITHUB_RUN_ID']
+          cases=[('vi_services','vi','Những lĩnh vực dịch vụ nào được giới thiệu trên trang chủ PTSC?'),
+                 ('en_services','en',"Which service areas are listed on PTSC's homepage?"),
+                 ('vi_clients','vi','Những khách hàng tiêu biểu nào được giới thiệu trên trang chủ PTSC?'),
+                 ('en_clients','en','Which featured customers are shown on the PTSC homepage?')]
+          report={'schema':1,'read_only':True,'php_sha':'3144e27804baa79f00b94fd64342a8b75a39a3b5',
+                  'backfill_run':41381347856,'run_id':run_id,'cases':[],'regression_traces':{}}
+          def request(url,case_id,lang,question,upstream):
+              body=json.dumps({'message':question,'language':lang,
+                               'sessionId':str(uuid.uuid4()),'session_id':str(uuid.uuid4())}).encode()
+              h={'Content-Type':'application/json','Accept':'application/json',
+                 'X-ESC-Debug':'regression','X-ESC-Run-Id':run_id,
+                 'X-ESC-Test-Case':case_id,'X-ESC-Test-Turn':'1'}
+              if upstream:
+                  if not cfg.get('WOO_SECRET'): return {'availability':'missing_upstream_secret'}
+                  h['Authorization']='Bearer '+cfg['WOO_SECRET']
+                  if cfg.get('WOO_KEY'):h['X-ESC-Woo-Key']=cfg['WOO_KEY']
+              else:h['Origin']=front
+              started=time.monotonic()
+              code=0; b=b''
+              try:
+                  req=urllib.request.Request(url,data=body,headers=h,method='POST')
+                  with urllib.request.urlopen(req,timeout=60 if not upstream else 35) as response:
+                      code=response.status;b=response.read(1024*1024)
+              except urllib.error.HTTPError as e:
+                  code=e.code;b=e.read(1024*1024)
+              except Exception as e:
+                  return {'http_status':0,'error_type':type(e).__name__,
+                          'elapsed_ms':round((time.monotonic()-started)*1000)}
+              try: obj=json.loads(b)
+              except Exception:obj={}
+              message=obj.get('message',obj.get('reply','')) if isinstance(obj,dict) else ''
+              if not isinstance(message,str):message=''
+              return {'http_status':code,'reply_chars':len(message),
+                      'error_code':obj.get('code') if isinstance(obj,dict) and isinstance(obj.get('code'),str) else None,
+                      'planner_failed':message.strip()=='Hệ thống đang gặp sự cố khi xử lý yêu cầu. Vui lòng thử lại sau.',
+                      'elapsed_ms':round((time.monotonic()-started)*1000)}
+          for cid,lang,question in cases:
+              row={'id':cid,'language':lang}
+              row['frontend']=request(front+'/api/agent/chat',cid+'-frontend',lang,question,False)
+              if cid in ('en_services','en_clients'):
+                  row['wordpress']=request(wp+'/wp-json/esc-agent/v1/chat',cid+'-wordpress',lang,question,True)
+              report['cases'].append(row)
+              print('TRACE case='+cid+' frontend_http='+str(row['frontend'].get('http_status',0))+
+                    ' wp_http='+str(row.get('wordpress',{}).get('http_status','not_checked')))
+
+          # Logs are accessed only through encrypted FTPS and are NEVER printed,
+          # uploaded, or persisted. Parse only whitelisted diagnostic metadata.
+          try:
+              raw=os.environ['FTP_SERVER'].strip()
+              if '://' not in raw:raw='ftp://'+raw
+              u=urlsplit(raw)
+              assert u.scheme in ('ftp','ftps') and u.hostname and not u.path.strip('/')
+              ftp=ftplib.FTP_TLS(context=ssl.create_default_context(),timeout=25)
+              ftp.connect(u.hostname,u.port or 21);ftp.auth()
+              ftp.login(os.environ['FTP_USERNAME'],os.environ['FTP_PASSWORD']);ftp.prot_p()
+              root='/domains/'+hosts['WC_URL']+'/public_html/wp-content/esc-agent-debug/regression/'+run_id
+              ftp.cwd(root)
+              allowed_events={'plan_validated','planner_failed','plan_rejected','skill_start',
+                              'skill_result','skill_error','request_end','llm_failover',
+                              'llm_retry','synthesis_failed','llm_provider_config_invalid'}
+              fields={'event','skill','action','status','result_type','result_count','reason',
+                      'step','requires_synthesis','source_type','source_id','mode','attempt'}
+              for row in report['cases']:
+                  cid=row['id']
+                  for suffix in ('frontend','wordpress'):
+                      label=cid+'-'+suffix
+                      try:
+                          ftp.cwd(root+'/'+label)
+                          names=[x.split('/')[-1] for x in ftp.nlst()]
+                          events=[]
+                          for filename in names:
+                              if not re.fullmatch(r'turn-01_req_[0-9a-f]{24}\.jsonl',filename): continue
+                              buf=io.BytesIO();ftp.retrbinary('RETR '+filename,buf.write)
+                              if len(buf.getvalue())>256000:continue
+                              for line in buf.getvalue().splitlines():
+                                  try: obj=json.loads(line)
+                                  except (ValueError,TypeError):continue
+                                  if not isinstance(obj,dict) or obj.get('event') not in allowed_events:continue
+                                  item={k:v for k,v in obj.items() if k in fields and isinstance(v,(str,int,float,bool,type(None)))}
+                                  if 'reason' in item and not re.fullmatch(r'[a-z0-9_:-]{1,80}',str(item['reason'])):item.pop('reason',None)
+                                  events.append(item)
+                          report['regression_traces'][label]={'log_files':len(names),'events':events[:70]}
+                      except (ftplib.all_errors,ValueError) as e:
+                          report['regression_traces'][label]={'status':'unavailable','error_type':type(e).__name__}
+              ftp.quit()
+          except Exception as e:
+              report['ftps_trace_status']='unavailable:'+type(e).__name__
+          Path('audit').mkdir(exist_ok=True)
+          Path('audit/ptscps-agent-retrieval-transport-trace-result.json').write_text(
+              json.dumps(report,indent=2,ensure_ascii=False)+'\n')
+          print('PTSCPS_AGENT_READ_ONLY_TRACE=COMPLETE (not acceptance PASS)')
+          PY
+      - name: Preserve sanitized diagnostic only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ptscps-agent-retrieval-transport-trace
+          path: audit/ptscps-agent-retrieval-transport-trace-result.json
+          if-no-files-found: warn
+          retention-days: 14
