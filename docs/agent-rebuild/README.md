@@ -11,11 +11,11 @@ Owner-approved execution scope: PTSCPS WordPress AI Agent. This is an **executio
 | Run | Scope | Gate | Status at RUN 00 audit |
 |---|---|---|---|
 | 00 | Audit architecture, production baseline, safe handoff | HEAD, latest runs, old PASS/FAIL preserved | PASS (read-only audit, this document) |
-| 01 | Source-language contract | ACF arbitrary valid locale; TablePress actual shortcode; tests | NOT STARTED |
+| 01 | Source-language contract | ACF arbitrary valid locale; TablePress actual shortcode; tests | SOURCE PASS, live acceptance pending — `68514b7e`, `f6f6e58d` |
 | 02 | Four-source ingestion | Page/Post/Product/TablePress/other ACF, update hooks, lossless chunking; no unplanned bulk reindex | PARTIAL — prior source tests exist |
 | 03 | Retrieval/RAG | Evidence recall/ranking across available sources; no PHP hard-coded semantic responses | NOT STARTED |
 | 04 | LLM Planner | Schema, conversational intent, tool plans, grounded dispatch | PARTIAL — provider failures observed |
-| 05 | Skills/Tool gateway | Verifiable contracts, CMS and dynamic WooCommerce retrieval | NOT STARTED |
+| 05 | Skills/Tool gateway | Verifiable contracts, CMS and dynamic WooCommerce retrieval | PARTIAL — ContactSkill ACF locale corrected in `f6f6e58d` |
 | 06 | LLM synthesis & resilience | Grounded language-correct answers, provider errors and failover | PARTIAL — production unstable |
 | 07 | Ground-truthed VI/EN+ multilingual QA | >=100 real-source cases when corpus supports, 0 cross-locale leakage; >=95% retrieval top-5, >=95% supported factual answers | NOT STARTED |
 | 08 | Release and production acceptance | Guarded PHP release, rollback/readback, postrelease read-only QA | NOT STARTED |
@@ -51,3 +51,9 @@ Owner-approved execution scope: PTSCPS WordPress AI Agent. This is an **executio
 4. RUN 07–08: factual QA from real published records; guarded deploy + production smoke, then close ledger only on measured PASS.
 
 **Requested long-task window:** 2026-11-03 00:39–09:00 Asia/Ho_Chi_Minh. GitHub Actions may run independently once configured, but ChatGPT itself does not continue executing after the active session ends.
+
+### Changes after baseline (2026-11-03)
+
+- RUN 01 source locale + unit tests: PHP [`68514b7e`](https://github.com/ngocnhanvo/ptscps-php/commit/68514b7e799a4083949ba491be4ad5a90eadeacd), [control run #41495039282](https://github.com/ngocnhanvo/source-commit-actions/actions/runs/41495039282) PASS.
+- ContactSkill ACF exact locale + unit tests: PHP [`f6f6e58d`](https://github.com/ngocnhanvo/ptscps-php/commit/f6f6e58d2d6de19b18b164cd4fe03d8af2424b09), [control run #41495944119](https://github.com/ngocnhanvo/source-commit-actions/actions/runs/41495944119) PASS.
+- Neither code commit is equivalent to production release or actual Agent acceptance.
