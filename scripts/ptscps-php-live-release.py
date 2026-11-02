@@ -79,6 +79,16 @@ if os.environ.get("PTSCPS_AGENT_RETRIEVAL_CONTEXT_ONLY") == "1":
 if os.environ.get("PTSCPS_AGENT_PUBLISHED_ROUTING_ONLY") == "1":
     FILES = ("wp-content/mu-plugins/esc-agent/src/Core/KnowledgeAwarePlanner.php",)
 
+# Only the four runtime files changed for knowledge-grounded LLM synthesis.
+# Do not deploy tests, WordPress core, frontend/Astro, or unrelated plugins.
+if os.environ.get("PTSCPS_AGENT_LLM_SYNTHESIS_ONLY") == "1":
+    FILES = (
+        "wp-content/mu-plugins/esc-agent/src/Core/KnowledgeAwarePlanner.php",
+        "wp-content/mu-plugins/esc-agent/src/Core/TelemetryPlanner.php",
+        "wp-content/mu-plugins/esc-agent/src/Core/AgentSynthesisPrompt.php",
+        "wp-content/mu-plugins/esc-agent/src/Skills/KnowledgeSearchSkill.php",
+    )
+
 raw = os.environ.get("FTP_SERVER", "").strip()
 if "://" not in raw:
     raw = "ftp://" + raw
