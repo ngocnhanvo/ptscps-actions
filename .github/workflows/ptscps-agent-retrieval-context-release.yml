@@ -33,11 +33,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(cat audit/ptscps-agent-retrieval-context-release.ready)" = 'PTSCPS_AGENT_RETRIEVAL_CONTEXT_RELEASE source=d6b579c844b5b7b39e867e7c36aa6b5bc4871d19 mode=php-only'
-          test "$(git -C source-php rev-parse HEAD)" = 'd6b579c844b5b7b39e867e7c36aa6b5bc4871d19'
+          test "$(cat audit/ptscps-agent-retrieval-context-release.ready)" = 'PTSCPS_AGENT_RETRIEVAL_CONTEXT_RELEASE source=fd038b2c205577c8f03b995d8b4813cd718321b8 mode=php-only'
+          test "$(git -C source-php rev-parse HEAD)" = 'fd038b2c205577c8f03b995d8b4813cd718321b8'
           php -l source-php/wp-content/mu-plugins/esc-agent/src/Knowledge/KnowledgeIndex.php
           php -l source-php/wp-content/mu-plugins/tests/esc-agent-retrieval-context-test.php
+          php -l source-php/wp-content/mu-plugins/tests/esc-agent-published-collection-test.php
           php source-php/wp-content/mu-plugins/tests/esc-agent-retrieval-context-test.php
+          php source-php/wp-content/mu-plugins/tests/esc-agent-published-collection-test.php
           php source-php/wp-content/mu-plugins/tests/esc-agent-published-routing-test.php
           python3 -m py_compile scripts/ptscps-php-live-release.py
           grep -Fq 'PTSCPS_AGENT_RETRIEVAL_CONTEXT_ONLY' scripts/ptscps-php-live-release.py
