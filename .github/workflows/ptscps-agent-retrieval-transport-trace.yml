@@ -24,7 +24,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(cat audit/ptscps-agent-retrieval-transport-trace.ready)" = 'PTSCPS_AGENT_TRACE_ONLY php_sha=3144e27804baa79f00b94fd64342a8b75a39a3b5 backfill_run=41381347856 attempt=3'
+          test "$(cat audit/ptscps-agent-retrieval-transport-trace.ready)" = 'PTSCPS_AGENT_TRACE_ONLY php_sha=8b66b400997f0589aa842355c835d9b74a0d68e3 backfill_run=41381347856 attempt=4'
       - name: Read-only production comparisons and protected regression log metadata
         env:
           ENV_FILE: ${{ secrets.ENV_FILE }}
@@ -61,7 +61,7 @@ jobs:
                  ('en_services','en',"Which service areas are listed on PTSC's homepage?"),
                  ('vi_clients','vi','Những khách hàng tiêu biểu nào được giới thiệu trên trang chủ PTSC?'),
                  ('en_clients','en','Which featured customers are shown on the PTSC homepage?')]
-          report={'schema':1,'read_only':True,'php_sha':'3144e27804baa79f00b94fd64342a8b75a39a3b5',
+          report={'schema':1,'read_only':True,'php_sha':'8b66b400997f0589aa842355c835d9b74a0d68e3',
                   'backfill_run':41381347856,'run_id':run_id,'cases':[],'regression_traces':{}}
           def request(url,case_id,lang,question,upstream):
               body=json.dumps({'message':question,'language':lang,
@@ -149,6 +149,15 @@ jobs:
           Path('audit').mkdir(exist_ok=True)
           Path('audit/ptscps-agent-retrieval-transport-trace-result.json').write_text(
               json.dumps(report,indent=2,ensure_ascii=False)+'\n')
+          # Only sanitized routing metadata, never prompts, responses, secrets or content.
+          for label, data in report['regression_traces'].items():
+              if not label.startswith('en_services-'): continue
+              events=data.get('events', [])
+              safe_keys={'event','skill','action','status','result_type','result_count',
+                         'mode','source_type','source_id','reason'}
+              safe=[{k:v for k,v in item.items() if k in safe_keys} for item in events]
+              print('PTSCPS_EN_SERVICE_TRACE '+json.dumps({'case':label,'events':safe[:40],
+                  'trace_status':data.get('status','ok')},ensure_ascii=False))
           print('PTSCPS_AGENT_READ_ONLY_TRACE=COMPLETE (not acceptance PASS)')
           PY
       - name: Preserve sanitized diagnostic only
