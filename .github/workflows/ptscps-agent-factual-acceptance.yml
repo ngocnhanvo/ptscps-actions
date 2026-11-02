@@ -1,0 +1,39 @@
+name: PTSCPS Agent four-case factual TablePress acceptance
+on:
+  push:
+    branches: [main]
+    paths:
+      - audit/ptscps-agent-factual-acceptance.ready
+permissions:
+  contents: read
+concurrency:
+  group: ptscps-agent-factual-acceptance
+  cancel-in-progress: false
+jobs:
+  inspect:
+    if: >-
+      github.repository == 'ngocnhanvo/ptscps-actions'
+      && github.event.head_commit.message == 'test(ptscps): check factual TablePress answer coverage VI EN'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check exact run marker and script syntax
+        run: |
+          set -euo pipefail
+          test "$(cat audit/ptscps-agent-factual-acceptance.ready)" = 'PTSCPS_FACTUAL_ACCEPTANCE v1 baseline=bfee57bdbe0fbe9d1199a8ab33927cf029a86d79'
+          python3 -m py_compile scripts/ptscps-agent-factual-acceptance.py
+      - name: Compare published source labels to Agent answers (read only)
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: python3 scripts/ptscps-agent-factual-acceptance.py
+      - name: Preserve factual evidence even if assertions fail
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ptscps-agent-factual-acceptance
+          path: audit/ptscps-agent-factual-acceptance-report.json
+          if-no-files-found: error
+          retention-days: 10
