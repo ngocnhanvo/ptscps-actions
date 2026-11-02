@@ -1,0 +1,109 @@
+name: PTSCPS Agent published knowledge routing guarded PHP release
+on:
+  push:
+    branches: [main]
+    paths:
+      - audit/ptscps-agent-published-routing-release.ready
+permissions:
+  contents: read
+concurrency:
+  group: ptscps-wp-php-release
+  cancel-in-progress: false
+jobs:
+  release:
+    if: >-
+      github.repository == 'ngocnhanvo/ptscps-actions'
+      && github.event.head_commit.message == 'deploy(ptscps): guarded published knowledge routing PHP only'
+    runs-on: ubuntu-latest
+    timeout-minutes: 16
+    steps:
+      - name: Checkout guarded release tools
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Checkout exact PHP source
+        uses: actions/checkout@v4
+        with:
+          repository: ngocnhanvo/ptscps-php
+          ref: master
+          token: ${{ secrets.SOURCE_REPO_PAT }}
+          path: source-php
+          persist-credentials: false
+      - name: Verify pinned source, PHP syntax, and bilingual regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(cat audit/ptscps-agent-published-routing-release.ready)" = 'PTSCPS_AGENT_PUBLISHED_ROUTING_RELEASE source=04ba642712e02c39bccd5399a46a1de935cbe5fe mode=php-only'
+          test "$(git -C source-php rev-parse HEAD)" = '04ba642712e02c39bccd5399a46a1de935cbe5fe'
+          for f in \
+            wp-content/mu-plugins/esc-agent/src/Core/KnowledgeAwarePlanner.php \
+            wp-content/mu-plugins/esc-agent/src/Core/TelemetryPlanner.php \
+            wp-content/mu-plugins/esc-agent/src/Knowledge/KnowledgeRetriever.php; do
+            php -l "source-php/$f"
+          done
+          php source-php/wp-content/mu-plugins/tests/esc-agent-published-routing-test.php
+          python3 -m py_compile scripts/ptscps-php-live-release.py
+          grep -Fq 'PTSCPS_AGENT_PLANNER_ROUTING_ONLY' scripts/ptscps-php-live-release.py
+      - name: Atomic pinned three-file PHP FTPS release and SHA256 readback
+        shell: bash
+        env:
+          PTSCPS_AGENT_PLANNER_ROUTING_ONLY: '1'
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ptscps-php-live-release.py
+      - name: Read-only focused VI EN live transport smoke
+        shell: bash
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: |
+          python3 - <<'PYCODE'
+          import json, os
+          from urllib.parse import urlsplit
+          from urllib.request import Request, urlopen
+          from urllib.error import HTTPError, URLError
+          values = []
+          for line in os.environ['ENV_FILE'].splitlines():
+              line = line.strip().removeprefix('export ')
+              if line.startswith('WC_URL_CLIENT='):
+                  values.append(line.split('=', 1)[1].strip().strip('"\''))
+          assert len(values) == 1, 'Missing frontend origin'
+          url = urlsplit(values[0])
+          assert url.scheme == 'https' and url.hostname == 'ptscps.thegioihosting.io.vn'
+          assert not url.username and not url.password and url.path in ('', '/') and not url.query and not url.fragment
+          cases = [
+              ('vi_services', 'vi', 'Những lĩnh vực dịch vụ nào được giới thiệu trên trang chủ PTSC?'),
+              ('en_services', 'en', "Which service areas are listed on PTSC's homepage?"),
+              ('vi_clients', 'vi', 'Những khách hàng tiêu biểu nào được giới thiệu trên trang chủ PTSC?'),
+              ('en_clients', 'en', 'Which featured customers are shown on the PTSC homepage?'),
+          ]
+          bad = 0
+          for case, locale, question in cases:
+              body = json.dumps({'message': question, 'language': locale}).encode()
+              req = Request(url.geturl().rstrip('/') + '/api/agent/chat', data=body,
+                  headers={'Content-Type':'application/json','Accept':'application/json'}, method='POST')
+              try:
+                  with urlopen(req, timeout=75) as response:
+                      status = response.status
+                      obj = json.loads(response.read(256000))
+              except HTTPError as exc:
+                  status = exc.code
+                  obj = {}
+              except (URLError, ValueError) as exc:
+                  status = 0
+                  obj = {}
+              reply = obj.get('reply', '') if isinstance(obj, dict) else ''
+              reply = reply if isinstance(reply, str) else ''
+              is_error = 'Hệ thống đang gặp sự cố khi xử lý yêu cầu' in reply or 'system cannot process this request' in reply.lower()
+              passed = status == 200 and len(reply.strip()) >= 30 and not is_error
+              print('PTSCPS_AGENT_PUBLISHED_SMOKE case=' + case + ' status=' + ('PASS' if passed else 'FAIL')
+                    + ' http=' + str(status) + ' reply_chars=' + str(len(reply)))
+              if not passed: bad += 1
+          if bad: raise SystemExit('Focused bilingual transport regression failed; production acceptance NOT verified')
+          print('PTSCPS_AGENT_PUBLISHED_TRANSPORT_SMOKE=PASS 4/4; factual grounding QA pending')
+          PYCODE
+      - name: Confirm no frontend build and no index mutation
+        run: echo PTSCPS_AGENT_ROUTING_PHP_ONLY=PASS
