@@ -99,6 +99,11 @@ if os.environ.get("PTSCPS_AGENT_FAILCLOSED_ONLY") == "1":
         "wp-content/mu-plugins/esc-agent/src/Core/TelemetryPlanner.php",
     )
 
+# Tested Cloudflare/Groq routing fix is a single-file PHP-only release.
+# Never include unrelated Agent runtime files, CMS content or Astro builds.
+if os.environ.get("PTSCPS_AGENT_PROVIDER_ROUTING_ONLY") == "1":
+    FILES = ("wp-content/mu-plugins/esc-agent/src/Core/LlmProviderConfig.php",)
+
 raw = os.environ.get("FTP_SERVER", "").strip()
 if "://" not in raw:
     raw = "ftp://" + raw
