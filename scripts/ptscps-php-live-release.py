@@ -75,6 +75,10 @@ FILES = AGENT_PLANNER_ROUTING_FILES if os.environ.get("PTSCPS_AGENT_PLANNER_ROUT
 if os.environ.get("PTSCPS_AGENT_RETRIEVAL_CONTEXT_ONLY") == "1":
     FILES = ("wp-content/mu-plugins/esc-agent/src/Knowledge/KnowledgeIndex.php",)
 
+# Published-content routing patch is one file: never re-upload unrelated Agent files.
+if os.environ.get("PTSCPS_AGENT_PUBLISHED_ROUTING_ONLY") == "1":
+    FILES = ("wp-content/mu-plugins/esc-agent/src/Core/KnowledgeAwarePlanner.php",)
+
 raw = os.environ.get("FTP_SERVER", "").strip()
 if "://" not in raw:
     raw = "ftp://" + raw

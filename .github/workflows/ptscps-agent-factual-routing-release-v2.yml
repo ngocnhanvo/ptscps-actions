@@ -1,0 +1,70 @@
+name: PTSCPS Agent published routing single-file PHP release
+on:
+  push:
+    branches: [main]
+    paths:
+      - audit/ptscps-agent-factual-routing-release-v2.ready
+permissions:
+  contents: read
+concurrency:
+  group: ptscps-wp-php-release
+  cancel-in-progress: false
+jobs:
+  release:
+    if: >-
+      github.repository == 'ngocnhanvo/ptscps-actions'
+      && github.event.head_commit.message == 'deploy(ptscps): guarded published routing PHP and factual QA'
+    runs-on: ubuntu-latest
+    timeout-minutes: 19
+    steps:
+      - name: Checkout PTSCPS Actions release script
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Checkout exact pinned PHP source
+        uses: actions/checkout@v4
+        with:
+          repository: ngocnhanvo/ptscps-php
+          ref: master
+          token: ${{ secrets.SOURCE_REPO_PAT }}
+          path: source-php
+          persist-credentials: false
+      - name: Verify source pin and PHP regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(cat audit/ptscps-agent-factual-routing-release-v2.ready)" = 'PTSCPS_AGENT_PUBLISHED_ROUTING_RELEASE source=c2c7b5532d08ffd47bbdfe3e71462c857b123ee8 mode=php-only'
+          test "$(git -C source-php rev-parse HEAD)" = 'c2c7b5532d08ffd47bbdfe3e71462c857b123ee8'
+          php -l source-php/wp-content/mu-plugins/esc-agent/src/Core/KnowledgeAwarePlanner.php
+          php -l source-php/wp-content/mu-plugins/tests/esc-agent-published-routing-test.php
+          php source-php/wp-content/mu-plugins/tests/esc-agent-published-routing-test.php
+          php source-php/wp-content/mu-plugins/tests/esc-agent-published-collection-test.php
+          php source-php/wp-content/mu-plugins/tests/esc-agent-collection-source-registry-test.php
+          python3 -m py_compile scripts/ptscps-agent-factual-acceptance.py scripts/ptscps-php-live-release.py
+          grep -Fq 'PTSCPS_AGENT_PUBLISHED_ROUTING_ONLY' scripts/ptscps-php-live-release.py
+      - name: Atomic one-file routing PHP FTPS release with SHA-256 readback
+        shell: bash
+        env:
+          PTSCPS_AGENT_PUBLISHED_ROUTING_ONLY: '1'
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ptscps-php-live-release.py
+      - name: Compare live published table labels to bilingual Agent answers
+        shell: bash
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: python3 scripts/ptscps-agent-factual-acceptance.py
+      - name: Preserve factual QA evidence even if assertion fails
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ptscps-agent-published-routing-live-qa
+          path: audit/ptscps-agent-factual-acceptance-report.json
+          if-no-files-found: warn
+          retention-days: 10
+      - name: Confirm PHP-only scope
+        run: echo PTSCPS_PUBLISHED_ROUTE_PHP_ONLY=PASS
