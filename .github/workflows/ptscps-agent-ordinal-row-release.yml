@@ -1,4 +1,4 @@
-name: PTSCPS canonical TablePress metadata guarded PHP release and targeted QA
+name: PTSCPS homepage collection locator guarded PHP release and targeted QA
 on:
   push:
     branches: [main]
@@ -12,7 +12,7 @@ jobs:
   guarded-php:
     if: >-
       github.repository == 'ngocnhanvo/ptscps-actions'
-      && github.event.head_commit.message == 'deploy(ptscps): canonical TablePress metadata PHP and two-case QA'
+      && github.event.head_commit.message == 'deploy(ptscps): homepage locator PHP and two-case QA'
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
@@ -22,7 +22,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: ngocnhanvo/ptscps-php
-          ref: b229f7fd9e18b91879a6599315ae087786543a24
+          ref: dec0bf3a76ab1036d0ae85aeb4033acfefa41b80
           token: ${{ secrets.SOURCE_REPO_PAT }}
           path: source-php
           persist-credentials: false
@@ -30,8 +30,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(cat audit/ptscps-agent-ordinal-row-release.ready)" = 'PTSCPS_CANONICAL_TABLEPRESS source=b229f7fd9e18b91879a6599315ae087786543a24 files=1 qa=2'
-          test "$(git -C source-php rev-parse HEAD)" = 'b229f7fd9e18b91879a6599315ae087786543a24'
+          test "$(cat audit/ptscps-agent-ordinal-row-release.ready)" = 'PTSCPS_HOMEPAGE_LOCATOR source=dec0bf3a76ab1036d0ae85aeb4033acfefa41b80 files=1 qa=2'
+          test "$(git -C source-php rev-parse HEAD)" = 'dec0bf3a76ab1036d0ae85aeb4033acfefa41b80'
           php -l source-php/wp-content/mu-plugins/esc-agent/src/Knowledge/KnowledgeIndex.php
           php source-php/wp-content/mu-plugins/tests/esc-agent-ordinal-original-query-test.php
           php source-php/wp-content/mu-plugins/tests/esc-agent-ordinal-collection-test.php
