@@ -657,7 +657,8 @@ async function productionQA() {
   console.log('INTRO_DESKTOP_MENU_QA=PASS');
   await desktop.close();
 
-  const mobile = await context.newPage({ viewport: { width: 390, height: 844 } });
+  const mobile = await context.newPage();
+  await mobile.setViewportSize({ width: 390, height: 844 });
   for (const spec of [specs[0], specs[2], specs[3]]) {
     const response = await mobile.goto(`${front}/${spec.slug}`, { waitUntil: 'load', timeout: 50000 });
     assert(response?.status() === 200, `Mobile route HTTP ${response?.status()} ${spec.slug}`);
