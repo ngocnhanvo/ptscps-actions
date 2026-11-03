@@ -54,7 +54,7 @@ def inspect(events, question, lang):
 def main():
     assert inspect([{'event':'skill_start','skill':'knowledge','action':'search','params':{'keyword':CASES[0][2]}}], CASES[0][2], 'vi')['keyword_equals_original']
     u = urlsplit(os.environ['FTP_SERVER'] if '://' in os.environ['FTP_SERVER'] else 'ftp://' + os.environ['FTP_SERVER'])
-    if u.scheme not in ('ftp','ftps') or not u.hostname or not u.username or not u.password or u.path not in ('','/') or u.query or u.fragment:
+    if u.scheme not in ('ftp','ftps') or not u.hostname or u.username or u.password or u.path not in ('','/') or u.query or u.fragment:
         raise RuntimeError('Unsafe FTPS configuration')
     ftp = ftplib.FTP_TLS(context=ssl.create_default_context(), timeout=25)
     result = {'schema':1, 'scope':'existing_two_regression_logs_keyword_comparison_only', 'run_id':RUN, 'cases':[]}

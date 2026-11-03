@@ -20,7 +20,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(cat audit/ptscps-agent-client-existing-keyword.ready)" = 'PTSCPS_CLIENT_KEYWORD_TRACE run=41601228430 readonly=1 count=2'
+          test "$(cat audit/ptscps-agent-client-existing-keyword.ready)" = 'PTSCPS_CLIENT_KEYWORD_TRACE run=41601228430 readonly=2 count=2'
           python3 -m py_compile scripts/ptscps-agent-client-existing-keyword-audit.py scripts/ptscps-agent-fact-intent-grounded.py
       - name: Read only the two existing opt-in FTPS traces
         env:
