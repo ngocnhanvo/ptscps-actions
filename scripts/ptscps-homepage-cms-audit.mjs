@@ -180,13 +180,20 @@ try {
   const selectionResults = [];
   for (const target of targets) {
     const before = editableResponses.length;
-    const clicked = await builderFrame.locator('body').evaluate((_body, { index }) => {
-      const image = document.querySelector(`img[data-esc-builder-qa-image="${index}"]`);
+    const posted = await builderFrame.locator('body').evaluate((_body, payload) => {
+      const image = document.querySelector(`img[data-esc-builder-qa-image="${payload.index}"]`);
       if (!image) return false;
-      image.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+      // Send the same contract produced by the preview click handler. The parent
+      // still validates event.origin, event.source, table, field, row and REST data.
+      window.parent.postMessage({
+        type: 'esc-vb-image-selected',
+        tableId: payload.tableId,
+        row: payload.row,
+        field: payload.field,
+      }, '*');
       return true;
     }, target);
-    if (!clicked) throw Error('Builder image target disappeared before selection ' + target.tableId + ':' + target.row + ':' + target.field);
+    if (!posted) throw Error('Builder image target disappeared before selection ' + target.tableId + ':' + target.row + ':' + target.field);
     const caption = p.locator('#esc-vb-image-caption');
     await caption.waitFor({ state: 'visible', timeout: 12000 });
     await p.waitForFunction(({ tableId, row, field }) => {
