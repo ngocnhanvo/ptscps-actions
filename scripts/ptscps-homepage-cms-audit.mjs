@@ -130,7 +130,107 @@ try {
     throw Error('Native ESC Table Insert Image workflow unavailable');
   }
 
-  console.log('CMS_AUDIT=PASS; IMAGE_DATA_AUDITED=YES; WRITES=0');
+  // Exercise the real Visual Builder image-selection path without saving.
+  // This catches stale/misrouted sidebar image URLs even when ESC Table storage is correct.
+  const builderUrl = origin + '/wp-admin/edit.php?post_type=page&page=esc-visual-builder&esc_vb_page=82467';
+  const editableResponses = [];
+  const responseListener = async (response) => {
+    if (!response.url().includes('/wp-json/esc-builder/v1/editable-images')) return;
+    try {
+      const body = await response.json();
+      editableResponses.push({ at: Date.now(), body });
+      if (editableResponses.length > 40) editableResponses.shift();
+    } catch { /* response validation below will report the missing body */ }
+  };
+  p.on('response', responseListener);
+  await p.goto(builderUrl, { waitUntil: 'domcontentloaded', timeout: 50000 });
+  const builderFrame = p.frameLocator('#esc-vb-frame');
+  await builderFrame.locator('[data-tablepress-preview]').first().waitFor({ state: 'visible', timeout: 50000 });
+  await p.waitForTimeout(1200);
+
+  const targets = await builderFrame.locator('body').evaluate(() => {
+    const all = Array.from(document.querySelectorAll('[data-tablepress-preview] img'));
+    const rows = [];
+    all.forEach((img, index) => {
+      const marker = img.closest('[data-esc-builder-image-row]');
+      const root = img.closest('[data-tablepress-preview]');
+      const tableId = root?.getAttribute('data-tablepress-preview') || '';
+      const row = Number(marker?.getAttribute('data-esc-builder-image-row'));
+      const field = marker?.getAttribute('data-esc-builder-image-field') ||
+        (tableId === 'home_01' && marker ? 'img' : '');
+      if (!marker || !field || !Number.isSafeInteger(row) || row < 0) return;
+      img.setAttribute('data-esc-builder-qa-image', String(index));
+      rows.push({ index, tableId, row, field, renderedSrc: img.currentSrc || img.getAttribute('src') || '' });
+    });
+    const unique = new Map();
+    rows.forEach((item) => {
+      const key = item.tableId + ':' + item.row + ':' + item.field;
+      if (!unique.has(key)) unique.set(key, item);
+    });
+    const list = [...unique.values()];
+    // Cover every homepage section with images, plus every featured-project row.
+    return list.filter((item, idx) =>
+      item.tableId === 'home_04' ||
+      list.findIndex((candidate) => candidate.tableId === item.tableId) === idx
+    ).slice(0, 24);
+  });
+  console.log('BUILDER_IMAGE_TARGETS=' + JSON.stringify(targets));
+  if (!targets.length) throw Error('Visual Builder exposed no editable homepage images');
+
+  const selectionResults = [];
+  for (const target of targets) {
+    const before = editableResponses.length;
+    const image = builderFrame.locator(`img[data-esc-builder-qa-image="${target.index}"]`);
+    await image.scrollIntoViewIfNeeded();
+    await image.click({ force: true });
+    const caption = p.locator('#esc-vb-image-caption');
+    await caption.waitFor({ state: 'visible', timeout: 12000 });
+    await p.waitForFunction(({ tableId, row, field }) => {
+      const el = document.querySelector('#esc-vb-image-caption');
+      const text = el?.textContent || '';
+      return text.includes(tableId) && text.includes(field) && text.includes('dòng ' + (row + 1));
+    }, target, { timeout: 12000 });
+    for (let attempt = 0; attempt < 30 && editableResponses.length <= before; attempt++) {
+      await p.waitForTimeout(120);
+    }
+    const response = editableResponses.slice(before).reverse().find((entry) =>
+      entry?.body?.table_id === target.tableId && entry?.body?.field === target.field);
+    const selected = response?.body?.images?.find((item) =>
+      item?.row === target.row && item?.field === target.field && item?.editable && typeof item?.url === 'string');
+    if (!selected) throw Error('Builder editable-images response missing selected cell ' + target.tableId + ':' + target.row + ':' + target.field);
+    await p.waitForFunction((expected) => {
+      const img = document.querySelector('#esc-vb-image-preview');
+      if (!img || img.style.display === 'none') return false;
+      try { return new URL(img.src).pathname === new URL(expected).pathname; } catch { return false; }
+    }, selected.url, { timeout: 12000 });
+    const previewUrl = await p.locator('#esc-vb-image-preview').getAttribute('src') || '';
+    const expectedPath = new URL(selected.url, origin).pathname;
+    const previewPath = new URL(previewUrl, origin).pathname;
+    selectionResults.push({
+      tableId: target.tableId,
+      row: target.row,
+      field: target.field,
+      expectedFile: expectedPath.split('/').pop(),
+      previewFile: previewPath.split('/').pop(),
+      matched: expectedPath === previewPath,
+    });
+  }
+  p.off('response', responseListener);
+  console.log('BUILDER_IMAGE_SELECTIONS=' + JSON.stringify(selectionResults));
+  const mismatches = selectionResults.filter((item) => !item.matched);
+  const lamSonSelections = selectionResults.filter((item) =>
+    String(item.previewFile || '').toLowerCase() === targetFilename.toLowerCase());
+  console.log('BUILDER_IMAGE_LAM_SON=' + JSON.stringify(lamSonSelections));
+  console.log('BUILDER_IMAGE_AUDIT=' + JSON.stringify({
+    status: mismatches.length ? 'FAIL_MISMATCH' : 'PASS',
+    tested: selectionResults.length,
+    mismatches: mismatches.length,
+    lamSonSelections: lamSonSelections.length,
+    writes: 0,
+  }));
+  if (mismatches.length) throw Error('Visual Builder image sidebar does not match selected ESC Table cells');
+
+  console.log('CMS_AUDIT=PASS; IMAGE_DATA_AUDITED=YES; BUILDER_SELECTION_AUDITED=YES; WRITES=0');
 } finally {
   await browser.close();
 }
