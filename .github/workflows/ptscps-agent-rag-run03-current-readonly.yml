@@ -1,0 +1,57 @@
+name: PTSCPS current RUN03 read-only retrieval remeasurement
+on:
+  push:
+    branches: [main]
+    paths: [audit/ptscps-agent-rag-run03-current-readonly.ready]
+permissions:
+  contents: read
+concurrency:
+  group: ptscps-agent-rag-run03-current-readonly
+  cancel-in-progress: false
+jobs:
+  measure:
+    if: >-
+      github.repository == 'ngocnhanvo/ptscps-actions'
+      && github.event.head_commit.message == 'audit(ptscps): remeasure current RUN03 retrieval read-only'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: ngocnhanvo/source-commit-actions
+          ref: main
+          path: source-control
+          persist-credentials: false
+      - name: Validate current measurement scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(cat audit/ptscps-agent-rag-run03-current-readonly.ready)" = 'PTSCPS_RUN03_CURRENT_READ_ONLY php=55e8e587e6daf7480ae06c96cd61db052aa5e237 retrieval_base=a73b33da2f8fbf12d2e59c4d1f5aa8ada42733e1'
+          node --check scripts/ptscps-agent-rag-run03-readonly.mjs
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install Playwright Chromium
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Measure current production retrieval without writes or LLM calls
+        env:
+          PTSCPS_SOURCE_SHA: 55e8e587e6daf7480ae06c96cd61db052aa5e237
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+          WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
+          WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
+        run: node scripts/ptscps-agent-rag-run03-readonly.mjs
+      - name: Upload sanitized aggregate and encrypted private evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ptscps-rag-run03-current-readonly
+          path: |
+            audit/ptscps-agent-rag-run03-summary.json
+            audit/ptscps-agent-rag-run03-private.cms
+          if-no-files-found: warn
+          retention-days: 14
