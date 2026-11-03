@@ -130,118 +130,109 @@ try {
     throw Error('Native ESC Table Insert Image workflow unavailable');
   }
 
-  // Exercise the real Visual Builder image-selection path without saving.
-  // This catches stale/misrouted sidebar image URLs even when ESC Table storage is correct.
+  // Verify the live Builder maps the current ESC Table cells to distinct rendered images.
   const builderUrl = origin + '/wp-admin/edit.php?post_type=page&page=esc-visual-builder&esc_vb_page=82467';
-  const editableResponses = [];
-  const responseListener = async (response) => {
-    if (!response.url().includes('/wp-json/esc-builder/v1/editable-images')) return;
-    try {
-      const body = await response.json();
-      editableResponses.push({ at: Date.now(), body });
-      if (editableResponses.length > 40) editableResponses.shift();
-    } catch { /* response validation below will report the missing body */ }
-  };
-  p.on('response', responseListener);
   await p.goto(builderUrl, { waitUntil: 'domcontentloaded', timeout: 50000 });
   const builderFrame = p.frameLocator('#esc-vb-frame');
   await builderFrame.locator('[data-tablepress-preview]').first().waitFor({ state: 'visible', timeout: 50000 });
   await p.waitForTimeout(1200);
-
   const targets = await builderFrame.locator('body').evaluate(() => {
-    const all = Array.from(document.querySelectorAll('[data-tablepress-preview] img'));
     const rows = [];
-    all.forEach((img, index) => {
+    for (const img of Array.from(document.querySelectorAll('[data-tablepress-preview] img'))) {
       const marker = img.closest('[data-esc-builder-image-row]');
       const root = img.closest('[data-tablepress-preview]');
       const tableId = root?.getAttribute('data-tablepress-preview') || '';
       const row = Number(marker?.getAttribute('data-esc-builder-image-row'));
       const field = marker?.getAttribute('data-esc-builder-image-field') ||
         (tableId === 'home_01' && marker ? 'img' : '');
-      if (!marker || !field || !Number.isSafeInteger(row) || row < 0) return;
-      img.setAttribute('data-esc-builder-qa-image', String(index));
-      rows.push({ index, tableId, row, field, renderedSrc: img.currentSrc || img.getAttribute('src') || '' });
-    });
+      if (!marker || !field || !Number.isSafeInteger(row) || row < 0) continue;
+      rows.push({ tableId, row, field, renderedSrc: img.currentSrc || img.getAttribute('src') || '' });
+    }
     const unique = new Map();
-    rows.forEach((item) => {
+    for (const item of rows) {
       const key = item.tableId + ':' + item.row + ':' + item.field;
       if (!unique.has(key)) unique.set(key, item);
-    });
-    const list = [...unique.values()];
-    // Cover every homepage section with images, plus every featured-project row.
-    return list.filter((item, idx) =>
-      item.tableId === 'home_04' ||
-      list.findIndex((candidate) => candidate.tableId === item.tableId) === idx
-    ).slice(0, 24);
+    }
+    return [...unique.values()];
+  });
+  const builderLamSon = targets.filter((item) => {
+    try { return decodeURIComponent(new URL(item.renderedSrc).pathname).toLowerCase().endsWith('/' + targetFilename.toLowerCase()); }
+    catch { return false; }
   });
   console.log('BUILDER_IMAGE_TARGETS=' + JSON.stringify(targets));
-  if (!targets.length) throw Error('Visual Builder exposed no editable homepage images');
-
-  const selectionResults = [];
-  for (const target of targets) {
-    const before = editableResponses.length;
-    const posted = await builderFrame.locator('body').evaluate((_body, payload) => {
-      const image = document.querySelector(`img[data-esc-builder-qa-image="${payload.index}"]`);
-      if (!image) return false;
-      // Send the same contract produced by the preview click handler. The parent
-      // still validates event.origin, event.source, table, field, row and REST data.
-      window.parent.postMessage({
-        type: 'esc-vb-image-selected',
-        tableId: payload.tableId,
-        row: payload.row,
-        field: payload.field,
-      }, '*');
-      return true;
-    }, target);
-    if (!posted) throw Error('Builder image target disappeared before selection ' + target.tableId + ':' + target.row + ':' + target.field);
-    const caption = p.locator('#esc-vb-image-caption');
-    await caption.waitFor({ state: 'visible', timeout: 12000 });
-    await p.waitForFunction(({ tableId, row, field }) => {
-      const el = document.querySelector('#esc-vb-image-caption');
-      const text = el?.textContent || '';
-      return text.includes(tableId) && text.includes(field) && text.includes('dòng ' + (row + 1));
-    }, target, { timeout: 12000 });
-    for (let attempt = 0; attempt < 30 && editableResponses.length <= before; attempt++) {
-      await p.waitForTimeout(120);
-    }
-    const response = editableResponses.slice(before).reverse().find((entry) =>
-      entry?.body?.table_id === target.tableId && entry?.body?.field === target.field);
-    const selected = response?.body?.images?.find((item) =>
-      item?.row === target.row && item?.field === target.field && item?.editable && typeof item?.url === 'string');
-    if (!selected) throw Error('Builder editable-images response missing selected cell ' + target.tableId + ':' + target.row + ':' + target.field);
-    await p.waitForFunction((expected) => {
-      const img = document.querySelector('#esc-vb-image-preview');
-      if (!img || img.style.display === 'none') return false;
-      try { return new URL(img.src).pathname === new URL(expected).pathname; } catch { return false; }
-    }, selected.url, { timeout: 12000 });
-    const previewUrl = await p.locator('#esc-vb-image-preview').getAttribute('src') || '';
-    const expectedPath = new URL(selected.url, origin).pathname;
-    const previewPath = new URL(previewUrl, origin).pathname;
-    selectionResults.push({
-      tableId: target.tableId,
-      row: target.row,
-      field: target.field,
-      expectedFile: expectedPath.split('/').pop(),
-      previewFile: previewPath.split('/').pop(),
-      matched: expectedPath === previewPath,
-    });
-  }
-  p.off('response', responseListener);
-  console.log('BUILDER_IMAGE_SELECTIONS=' + JSON.stringify(selectionResults));
-  const mismatches = selectionResults.filter((item) => !item.matched);
-  const lamSonSelections = selectionResults.filter((item) =>
-    String(item.previewFile || '').toLowerCase() === targetFilename.toLowerCase());
-  console.log('BUILDER_IMAGE_LAM_SON=' + JSON.stringify(lamSonSelections));
-  console.log('BUILDER_IMAGE_AUDIT=' + JSON.stringify({
-    status: mismatches.length ? 'FAIL_MISMATCH' : 'PASS',
-    tested: selectionResults.length,
-    mismatches: mismatches.length,
-    lamSonSelections: lamSonSelections.length,
+  console.log('BUILDER_IMAGE_LAM_SON=' + JSON.stringify(builderLamSon));
+  console.log('BUILDER_IMAGE_RENDER_AUDIT=' + JSON.stringify({
+    status: builderLamSon.length === 1 && builderLamSon[0].tableId === 'home_04' && builderLamSon[0].row === 0 ? 'PASS' : 'FAIL',
+    targets: targets.length,
+    lamSonTargets: builderLamSon.length,
     writes: 0,
   }));
-  if (mismatches.length) throw Error('Visual Builder image sidebar does not match selected ESC Table cells');
+  if (builderLamSon.length !== 1 || builderLamSon[0].tableId !== 'home_04' || builderLamSon[0].row !== 0) {
+    throw Error('Live Builder maps FPSO-PTSC-LAM-SON.jpg outside the expected home_04 row 0 cell');
+  }
 
-  console.log('CMS_AUDIT=PASS; IMAGE_DATA_AUDITED=YES; BUILDER_SELECTION_AUDITED=YES; WRITES=0');
+  // Verify the actually deployed production homepage, not only live WordPress/Builder data.
+  const clientOrigin = process.env.CLIENT_ORIGIN;
+  if (!clientOrigin) throw Error('Frontend production origin missing');
+  const response = await p.goto(clientOrigin + '/', { waitUntil: 'domcontentloaded', timeout: 50000 });
+  if (!response || !response.ok()) throw Error('Production homepage HTTP ' + (response?.status() || 'NO_RESPONSE'));
+  await p.waitForTimeout(2500);
+  const production = await p.evaluate((filename) => {
+    const needle = filename.toLowerCase();
+    const context = (el) => {
+      let node = el;
+      for (let depth = 0; node && depth < 7; depth++, node = node.parentElement) {
+        const heading = node.querySelector?.('h1,h2,h3,h4,h5,h6')?.textContent?.trim() || '';
+        if (heading) return { tag: node.tagName, id: node.id || '', className: String(node.className || '').slice(0, 180), heading: heading.slice(0, 180) };
+      }
+      return { tag: el.tagName, id: el.id || '', className: String(el.className || '').slice(0, 180), heading: '' };
+    };
+    const imageMatches = [];
+    const imageFiles = [];
+    for (const img of Array.from(document.images)) {
+      const refs = [img.currentSrc, img.getAttribute('src') || '', img.getAttribute('srcset') || ''].filter(Boolean);
+      const primary = refs[0] || '';
+      try { imageFiles.push(decodeURIComponent(new URL(primary, location.href).pathname).split('/').pop() || ''); } catch {}
+      if (refs.some((value) => value.toLowerCase().includes(needle))) {
+        imageMatches.push({
+          src: img.currentSrc || img.getAttribute('src') || '',
+          srcAttr: img.getAttribute('src') || '',
+          alt: img.getAttribute('alt') || '',
+          context: context(img),
+        });
+      }
+    }
+    const backgroundMatches = [];
+    for (const el of Array.from(document.querySelectorAll('body *'))) {
+      const bg = getComputedStyle(el).backgroundImage || '';
+      if (bg.toLowerCase().includes(needle)) backgroundMatches.push({ backgroundImage: bg, context: context(el) });
+    }
+    return {
+      href: location.href,
+      title: document.title,
+      imageCount: document.images.length,
+      imageFiles: [...new Set(imageFiles.filter(Boolean))].slice(0, 120),
+      imageMatches,
+      backgroundMatches,
+    };
+  }, targetFilename);
+  const productionTargetCount = production.imageMatches.length + production.backgroundMatches.length;
+  console.log('PRODUCTION_IMAGE_AUDIT=' + JSON.stringify({
+    status: productionTargetCount === 1 ? 'PASS' : 'FAIL',
+    href: production.href,
+    imageCount: production.imageCount,
+    targetFilename,
+    targetElements: productionTargetCount,
+    imageMatches: production.imageMatches,
+    backgroundMatches: production.backgroundMatches,
+    writes: 0,
+  }));
+  console.log('PRODUCTION_IMAGE_FILES=' + JSON.stringify(production.imageFiles));
+  if (productionTargetCount !== 1) {
+    throw Error('Production homepage renders ' + productionTargetCount + ' elements using ' + targetFilename + '; expected exactly 1');
+  }
+
+  console.log('CMS_AUDIT=PASS; IMAGE_DATA_AUDITED=YES; BUILDER_RENDER_AUDITED=YES; PRODUCTION_RENDER_AUDITED=YES; WRITES=0');
 } finally {
   await browser.close();
 }

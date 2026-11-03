@@ -27,8 +27,12 @@ jobs:
           wp=urlsplit(vals.get('WC_URL','').strip().strip('"\''))
           front=urlsplit(vals.get('WC_URL_CLIENT','').strip().strip('"\''))
           if wp.scheme!='https' or not wp.hostname or wp.hostname==front.hostname or wp.path not in ('','/') or wp.query or wp.fragment or wp.username or wp.password or wp.port not in (None,443):raise SystemExit('Invalid WP origin')
-          with open(os.environ['GITHUB_ENV'],'a') as f:f.write('WP_ORIGIN=https://'+wp.hostname+'\n')
+          if front.scheme!='https' or not front.hostname or front.path not in ('','/') or front.query or front.fragment or front.username or front.password or front.port not in (None,443):raise SystemExit('Invalid frontend origin')
+          with open(os.environ['GITHUB_ENV'],'a') as f:
+              f.write('WP_ORIGIN=https://'+wp.hostname+'\n')
+              f.write('CLIENT_ORIGIN=https://'+front.hostname+'\n')
           print('WP_ORIGIN_VALIDATED=PASS')
+          print('CLIENT_ORIGIN_VALIDATED=PASS')
           PY
       - name: Install Playwright Chromium
         run: |
