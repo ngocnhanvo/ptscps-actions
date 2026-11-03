@@ -1,0 +1,55 @@
+name: PTSCPS introduction pages CMS setup, build and QA
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'audit/ptscps-intro-pages-setup-20261104.ready'
+permissions:
+  contents: read
+jobs:
+  setup-build-qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Resolve isolated WordPress and frontend origins
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os,re
+          from urllib.parse import urlsplit
+          vals=dict(re.findall(r'^\s*(?:export\s+)?(WC_URL|WC_URL_CLIENT)\s*=\s*(.+)\s*$',os.environ.get('ENV_FILE',''),re.M))
+          def norm(k):
+              u=urlsplit(vals.get(k,'').strip().strip('"\''))
+              if u.scheme!='https' or not u.hostname or u.path not in ('','/') or u.query or u.fragment or u.username or u.password or u.port not in (None,443):
+                  raise SystemExit('INVALID_ORIGIN '+k)
+              return 'https://'+u.hostname
+          wp,front=norm('WC_URL'),norm('WC_URL_CLIENT')
+          if wp==front: raise SystemExit('ORIGIN_COLLISION')
+          with open(os.environ['GITHUB_ENV'],'a') as f:
+              f.write('WP_ORIGIN='+wp+'\nFRONT_ORIGIN='+front+'\n')
+          print('INTRO_SETUP_ORIGINS=PASS')
+          PY
+      - name: Install Playwright Chromium
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Create/update introduction CMS, trigger native WordPress build and verify production
+        env:
+          WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
+          WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
+        run: node scripts/ptscps-intro-pages-setup.mjs
+      - name: Upload introduction visual QA screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ptscps-intro-pages-visual-qa-${{ github.run_id }}
+          path: artifacts/ptscps-intro-pages/
+          if-no-files-found: warn
+          retention-days: 14
