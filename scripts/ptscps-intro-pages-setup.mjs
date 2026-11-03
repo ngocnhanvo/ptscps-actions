@@ -493,7 +493,7 @@ async function ensureMenu() {
     assert(!before.some((item) => item.title === title), 'Native menu already contains unexpected duplicate title ' + title);
     await urlInput.fill(url, { force: true });
     await nameInput.fill(title, { force: true });
-    await addButton.click({ force: true });
+    await addButton.evaluate((button) => button.click());
     for (let attempt = 0; attempt < 20; attempt++) {
       await sleep(250);
       const items = await nativeItems();
