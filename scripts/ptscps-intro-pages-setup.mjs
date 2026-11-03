@@ -459,8 +459,22 @@ async function ensureMenu() {
     const customLinksBox = page.locator('#add-custom-links');
     assert(await customLinksBox.count() === 1, 'Native Custom Links postbox unavailable');
     const toggle = customLinksBox.locator('.postbox-header .hndle, .handlediv').first();
-    assert(await toggle.count() > 0, 'Native Custom Links postbox toggle unavailable');
-    await toggle.click();
+    if (await toggle.count() > 0 && await toggle.isVisible().catch(() => false)) {
+      await toggle.click();
+    } else {
+      // Lightweight wp-admin profiles can keep the native postbox content but
+      // omit the normal toggle chrome. Reveal that existing content only.
+      const revealed = await page.evaluate(() => {
+        const box = document.querySelector('#add-custom-links');
+        const inside = box?.querySelector('.inside');
+        if (!box || !inside) return false;
+        box.classList.remove('closed', 'hide-if-js');
+        inside.removeAttribute('hidden');
+        inside.style.display = 'block';
+        return true;
+      });
+      assert(revealed, 'Native Custom Links postbox content unavailable');
+    }
     await urlInput.waitFor({ state: 'visible', timeout: 8000 });
     console.log('INTRO_MENU_CUSTOM_LINKS_BOX=OPENED');
   }
