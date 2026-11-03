@@ -13,7 +13,7 @@ const browser=await chromium.launch({headless:true});
 const page=await browser.newPage({viewport:{width:1440,height:900}});
 const report=(k,v)=>console.log('ABOUT_PREFLIGHT_'+k+'='+JSON.stringify(v));
 
-const textOnly=(html='')=>String(html).replace(/<script\\b[^>]*>[\\s\\S]*?<\\/script>/gi,' ').replace(/<style\\b[^>]*>[\\s\\S]*?<\\/style>/gi,' ').replace(/<[^>]+>/g,' ').replace(/&nbsp;|&#160;/gi,' ').replace(/\\s+/g,' ').trim();
+const textOnly=(html='')=>String(html).replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,' ').replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi,' ').replace(/<[^>]+>/g,' ').replace(/&nbsp;|&#160;/gi,' ').replace(/\s+/g,' ').trim();
 const fingerprint=(value='')=>crypto.createHash('sha256').update(String(value)).digest('hex').slice(0,16);
 
 try{
@@ -39,13 +39,13 @@ try{
   await page.goto(wp+'/wp-login.php',{waitUntil:'domcontentloaded',timeout:45000});
   await page.locator('#user_login').fill(username);
   await page.locator('#user_pass').fill(password);
-  await Promise.all([page.waitForURL(/\\/wp-admin\\//,{timeout:45000}),page.locator('#wp-submit').click()]);
+  await Promise.all([page.waitForURL(/\/wp-admin\//,{timeout:45000}),page.locator('#wp-submit').click()]);
   assert.ok(page.url().startsWith(wp+'/wp-admin/'),'WordPress admin authentication not confirmed');
   report('AUTH','PASS');
 
   const nonceRes=await page.request.post(wp+'/wp-admin/admin-ajax.php',{form:{action:'rest-nonce'},timeout:20000});
   const nonce=(await nonceRes.text()).trim();
-  assert.ok(nonceRes.ok()&&/^[a-f\\d]{8,20}$/i.test(nonce),'REST nonce unavailable');
+  assert.ok(nonceRes.ok()&&/^[a-f\d]{8,20}$/i.test(nonce),'REST nonce unavailable');
   const headers={'X-WP-Nonce':nonce,'Cache-Control':'no-cache'};
 
   const nativeMenus=await page.request.get(wp+'/wp-json/wp/v2/menus?per_page=100',{headers,timeout:25000});
