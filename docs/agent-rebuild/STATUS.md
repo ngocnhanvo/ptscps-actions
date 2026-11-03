@@ -1,5 +1,13 @@
 # PTSCPS RAG rebuild — latest checkpoint
 
+## Active checkpoint — 2026-11-03 22:25 Asia/Ho_Chi_Minh (Qwen Planner fallback production acceptance)
+
+- PHP `master=55e8e587e6daf7480ae06c96cd61db052aa5e237`: added Groq Qwen 3.8 27B as **Planner-only** fallback with compact contract prompt; existing Groq planners remain ahead of it and synthesis routing is unchanged. Encrypted source-control run `#41662689112` PASS, including PHP syntax, planner-priority, compact-prompt, half-open and fail-closed regressions.
+- Production guarded release + QA `#41663229279` **PASS**: protected FTPS/readback deployed provider config + Planner runtime without Astro build. Postrelease factual QA **8/8 PASS**, all Agent HTTP 200; VI/EN services and featured customers second/last labels matched exact published TablePress order. Semantic paraphrase QA **2/2 PASS**, including the original VI intent `dự án tiêu biểu` versus `công trình khẳng định năng lực` and the EN equivalent, all HTTP 200 with no fallback/locale leak.
+- This resolves the observed semantic-paraphrase mismatch and current ordinal/provider-503 regression. Do **not** rerun these acceptance cases or modify canonical ordinal retrieval without new evidence.
+- Overall RAG project is **not DONE** solely from this 10-case PASS: RUN03 corpus-wide retrieval gate remains unaccepted from the earlier read-only baseline, and RUN07 full four-source acceptance remains **BLOCKED** because production still has no real published Post/Product corpus. Preserve 717 orphan groups; no fabricated records, no bulk reindex, no Astro build. RUN08 is PASS for this PHP-only production release scope.
+- Next exact action: continue RUN03/RUN07 only with real-source evidence. Do not reopen RUN04–06 provider resilience unless a fresh production failure appears.
+
 ## Active checkpoint — 2026-11-03 16:19 Asia/Ho_Chi_Minh (two failed second-row LLM traces)
 
 - Current PHP `master=4f8e755c6a9f11c3b1fd22b2bfc5fc8fa7a0c1ab`, Astro `master=28ae46057de761bc3ae8c4a2a3abe660a6043e1a` unchanged. Actions source was `e910c6d2f84fe053b670b147c49a5dd2104c0bfe` before this docs checkpoint. Source-control [#41609913264](https://github.com/ngocnhanvo/source-commit-actions/actions/runs/41609913264) PASS for a focused two-case opt-in trace (no rerun of prior PASS, no PHP/CMS/index/Astro writes).
