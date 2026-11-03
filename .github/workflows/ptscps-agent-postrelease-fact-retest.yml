@@ -1,0 +1,40 @@
+name: PTSCPS postrelease fact-intent retest of three failed cases only
+on:
+  push:
+    branches: [main]
+    paths: [audit/ptscps-agent-postrelease-fact.ready]
+permissions:
+  contents: read
+concurrency:
+  group: ptscps-agent-fact-postrelease-three
+  cancel-in-progress: false
+jobs:
+  retest:
+    if: >-
+      github.repository == 'ngocnhanvo/ptscps-actions'
+      && github.event.head_commit.message == 'test(ptscps): retest only three failed fact-intent cases after PHP fix'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Guard live PHP source and limited three-case subset
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(cat audit/ptscps-agent-postrelease-fact.ready)" = 'PTSCPS_FACT_RETEST source=43dc22895f009f6b57d3c9ee855b2d464dabedf4 prior=41584499949 limited=3'
+          python3 -m py_compile scripts/ptscps-agent-postrelease-fact-retest.py scripts/ptscps-agent-fact-intent-grounded.py
+          python3 scripts/ptscps-agent-fact-intent-grounded.py --self-test
+      - name: Retest only the 3 factual failures against live CMS and Agent
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: python3 scripts/ptscps-agent-postrelease-fact-retest.py
+      - name: Preserve sanitized outcome
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ptscps-agent-postrelease-fact-three-summary
+          path: audit/ptscps-agent-postrelease-fact-summary.json
+          if-no-files-found: warn
+          retention-days: 7
