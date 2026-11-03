@@ -1,5 +1,13 @@
 # PTSCPS RAG rebuild — latest checkpoint
 
+## Active checkpoint — 2026-11-03 16:10 Asia/Ho_Chi_Minh (8 NEW source-grounded fact cases)
+
+- `knowledge/main` governance and `ptscps-actions/main` HEAD checked before any action; PHP `master=4f8e755c6a9f11c3b1fd22b2bfc5fc8fa7a0c1ab`, Astro `master=28ae46057de761bc3ae8c4a2a3abe660a6043e1a` unchanged. No reindex, CMS writes, PHP release, Astro build, or repeats of previously PASS first-row QA.
+- Source-control [#41608512632](https://github.com/ngocnhanvo/source-commit-actions/actions/runs/41608512632) PASS: added eight second-/last-row fact questions (four published TablePress sources, VI/EN), independent of prior first-item PASS tests. Actions `main=9854067bb6bd945c71db372e3e176606b603db58` before this docs update. Offline syntax/selftest PASS.
+- **Production QA [#41608538901](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/41608538901): FAIL — only 1/8 PASS.** `en_services_last` PASS; `vi_services_second` and `en_services_second` returned HTTP 200 but did not include the exact source-grounded second label; the other five cases (`vi_services_last`, `vi_clients_second`, `vi_clients_last`, `en_clients_second`, `en_clients_last`) returned HTTP 503. `blocked_source=0`. Sanitized artifact [#13218046375](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/41608538901/artifacts/13218046375). No questions, labels, answers or secrets were persisted; no claim of 503 root cause.
+- **Next exact step:** Diagnose the two HTTP-200 second-row misses as source selection vs row-order evidence vs LLM synthesis using scoped, read-only and sanitized runtime metadata (no new LLM calls required for source retrieval); attribute provider/failover stage for naturally observed HTTP 503 using permissioned diagnostics, without retrying all eight or repeating PASS. Preserve original LLM planning/synthesis: no PHP semantic answer fallback, no fabricated source content, no unapproved reindex or deletion of 717 orphan groups.
+- Acceptance: RUN03 recall@5 >=95% remains FAIL/UNACCEPTED (this workflow measures factual answers, not recall); RUN04–06 reliability FAIL/NOT ACCEPTED; RUN07 full 100+ four-source QA BLOCKED by absent real published Post/Product; RUN08 NOT STARTED. **Overall IN PROGRESS.** Chế độ code: auto-build.
+
 ## Active checkpoint — 2026-11-03 15:33 Asia/Ho_Chi_Minh (VI/EN first-customer checks)
 
 - `knowledge/main` governance checked before work. PHP `master=4f8e755c6a9f11c3b1fd22b2bfc5fc8fa7a0c1ab`, Actions `main=fdd0a8a325f09a565a30beb68cbe80f24e9b9226` before this docs commit; Astro production `master=28ae46057de761bc3ae8c4a2a3abe660a6043e1a` unchanged.
