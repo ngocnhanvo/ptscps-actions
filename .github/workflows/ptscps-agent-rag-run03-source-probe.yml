@@ -1,0 +1,71 @@
+name: PTSCPS RAG RUN03 source-grounded English metadata probe
+on:
+  push:
+    branches: [main]
+    paths: [audit/ptscps-agent-rag-run03-source-probe.ready]
+permissions:
+  contents: read
+concurrency:
+  group: ptscps-wp-php-release
+  cancel-in-progress: false
+jobs:
+  guarded-source-probe:
+    if: >-
+      github.repository == 'ngocnhanvo/ptscps-actions'
+      && github.event.head_commit.message == 'audit(ptscps): run RUN03 English source metadata probe'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: ngocnhanvo/ptscps-php
+          ref: ccd44459f36e6b2a372eb91f778a5ac221620da2
+          token: ${{ secrets.SOURCE_REPO_PAT }}
+          path: source-php
+          persist-credentials: false
+      - name: Verify pinned PHP, guards and syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(cat audit/ptscps-agent-rag-run03-source-probe.ready)" = 'PTSCPS_RUN03_SOURCE_PROBE source=ccd44459f36e6b2a372eb91f778a5ac221620da2'
+          test "$(git -C source-php rev-parse HEAD)" = 'ccd44459f36e6b2a372eb91f778a5ac221620da2'
+          php -l source-php/wp-content/mu-plugins/esc-agent/src/Knowledge/KnowledgeInventory.php
+          php source-php/wp-content/mu-plugins/tests/esc-agent-retrieval-readonly-test.php
+          php source-php/wp-content/mu-plugins/tests/esc-agent-retrieval-stage-regression-test.php
+          php source-php/wp-content/mu-plugins/tests/esc-agent-published-collection-test.php
+          php source-php/wp-content/mu-plugins/tests/esc-agent-source-locale-test.php
+          python3 -m py_compile scripts/ptscps-php-live-release.py
+          node --check scripts/ptscps-agent-rag-run03-source-probe.mjs
+      - name: Guarded PHP-only FTPS release with SHA-256 readback
+        env:
+          PTSCPS_AGENT_KNOWLEDGE_ONLY: '1'
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+        run: python3 scripts/ptscps-php-live-release.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install Playwright Chromium
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Compare real published English metadata via admin read-only endpoint
+        env:
+          PTSCPS_SOURCE_SHA: ccd44459f36e6b2a372eb91f778a5ac221620da2
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+          WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
+          WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
+        run: node scripts/ptscps-agent-rag-run03-source-probe.mjs
+      - name: Upload aggregate-only source probe
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ptscps-rag-run03-source-probe-summary
+          path: audit/ptscps-agent-rag-run03-source-probe-summary.json
+          if-no-files-found: warn
+          retention-days: 14
