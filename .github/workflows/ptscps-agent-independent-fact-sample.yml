@@ -1,0 +1,40 @@
+name: PTSCPS new source-grounded fact intent sample (8 cases)
+on:
+  push:
+    branches: [main]
+    paths: [audit/ptscps-agent-independent-fact-sample.ready]
+permissions:
+  contents: read
+concurrency:
+  group: ptscps-agent-independent-fact-sample
+  cancel-in-progress: false
+jobs:
+  independent-fact-sample:
+    if: >-
+      github.repository == 'ngocnhanvo/ptscps-actions'
+      && github.event.head_commit.message == 'test(ptscps): sample eight new source-grounded positional facts'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate scope and offline assertions
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(cat audit/ptscps-agent-independent-fact-sample.ready)" = 'PTSCPS_INDEPENDENT_FACT php=4f8e755c6a9f11c3b1fd22b2bfc5fc8fa7a0c1ab cases=8'
+          python3 -m py_compile scripts/ptscps-agent-fact-intent-grounded.py scripts/ptscps-agent-independent-fact-sample.py
+          python3 scripts/ptscps-agent-independent-fact-sample.py --self-test
+      - name: Evaluate eight new second-and-last answers against published CMS rows
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: python3 scripts/ptscps-agent-independent-fact-sample.py
+      - name: Upload sanitized aggregate-only result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ptscps-independent-fact-sample-summary
+          path: audit/ptscps-agent-independent-fact-summary.json
+          if-no-files-found: warn
+          retention-days: 7
