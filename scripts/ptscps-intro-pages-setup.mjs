@@ -453,6 +453,18 @@ async function ensureMenu() {
   assert(await urlInput.count() === 1 && await nameInput.count() === 1 && await addButton.count() === 1,
     'Native Custom Links controls unavailable');
 
+  // WordPress persists each administrator's postbox collapsed state. Open the
+  // native Custom Links box when needed instead of assuming it is expanded.
+  if (!(await urlInput.isVisible())) {
+    const customLinksBox = page.locator('#add-custom-links');
+    assert(await customLinksBox.count() === 1, 'Native Custom Links postbox unavailable');
+    const toggle = customLinksBox.locator('.postbox-header .hndle, .handlediv').first();
+    assert(await toggle.count() > 0, 'Native Custom Links postbox toggle unavailable');
+    await toggle.click();
+    await urlInput.waitFor({ state: 'visible', timeout: 8000 });
+    console.log('INTRO_MENU_CUSTOM_LINKS_BOX=OPENED');
+  }
+
   async function nativeItems() {
     return page.evaluate(() => Array.from(document.querySelectorAll('#menu-to-edit > li.menu-item')).map((li) => ({
       id: Number(String(li.id || '').replace(/^menu-item-/, '')),
