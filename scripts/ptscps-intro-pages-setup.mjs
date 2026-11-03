@@ -389,9 +389,16 @@ async function ensurePage(spec) {
 }
 
 async function getRestNonce() {
-  const response = await page.request.post(uri('/wp-admin/admin-ajax.php'), { form: { action: 'rest-nonce' }, timeout: 20000 });
-  const nonce = (await response.text()).trim();
-  assert(response.ok() && /^[A-Za-z0-9_-]{8,32}$/.test(nonce), `WordPress REST nonce unavailable: status=${response.status()} length=${nonce.length}`);
+  // WordPress core exposes the REST nonce to authenticated Admin pages.
+  // Use that native value instead of the site-specific admin-ajax rest-nonce
+  // action, which is not registered on this installation.
+  await page.goto(uri('/wp-admin/nav-menus.php'), { waitUntil: 'domcontentloaded', timeout: 45000 });
+  const nonce = await page.evaluate(() => {
+    const value = globalThis.wpApiSettings?.nonce;
+    return typeof value === 'string' ? value.trim() : '';
+  });
+  assert(/^[A-Za-z0-9_-]{8,32}$/.test(nonce), `WordPress native REST nonce unavailable: length=${nonce.length}`);
+  console.log('INTRO_REST_NONCE=PASS source=wpApiSettings');
   return nonce;
 }
 function menuTitle(item) {
@@ -579,6 +586,36 @@ async function productionQA() {
   await mobile.close();
 }
 
+async function verifyCompletedCmsCheckpoint() {
+  for (const spec of specs) {
+    const table = await readTable(spec.id);
+    assert(table, 'Completed ESC Table checkpoint missing ' + spec.id);
+    assertTableExact(spec, table);
+  }
+
+  const response = await page.request.get(uri('/wp-json/wp/v2/pages?status=publish&per_page=100&_fields=id,slug,acf,content'), {
+    timeout: 25000,
+    headers: { 'Cache-Control': 'no-cache' },
+  });
+  assert(response.ok(), `Cannot verify completed Page checkpoint: HTTP ${response.status()}`);
+  const pages = await response.json();
+  const ids = [];
+  for (const spec of specs) {
+    const matches = pages.filter((item) => String(item?.slug || '') === spec.slug);
+    assert(matches.length === 1, `Completed Page checkpoint mismatch ${spec.slug}: count=${matches.length}`);
+    const item = matches[0];
+    const lang = item?.acf?.product_lang?.value || item?.acf?.product_lang || '';
+    const rendered = String(item?.content?.rendered || '');
+    assert(item?.acf?.key === spec.key, 'Completed Page key mismatch ' + spec.slug);
+    assert(item?.acf?.action === 'IntroPage', 'Completed Page action mismatch ' + spec.slug);
+    assert(lang === 'vi', 'Completed Page language mismatch ' + spec.slug);
+    assert(rendered.includes(spec.id), 'Completed Page shortcode checkpoint missing ' + spec.id);
+    ids.push(Number(item.id));
+  }
+  assert(new Set(ids).size === specs.length, 'Completed introduction Page IDs are not unique');
+  console.log('INTRO_CMS_CHECKPOINT=PASS_SKIP_WRITES tables=5 pages=5');
+}
+
 try {
   await page.goto(uri('/wp-login.php'), { waitUntil: 'domcontentloaded', timeout: 50000 });
   await page.locator('#user_login').fill(username);
@@ -587,10 +624,10 @@ try {
   assert(new URL(page.url()).origin === wp, 'WordPress authentication escaped configured origin');
   console.log('INTRO_SETUP_ADMIN_AUTH=PASS');
 
-  for (const spec of specs) await ensureTable(spec);
-  const pageIds = [];
-  for (const spec of specs) pageIds.push(await ensurePage(spec));
-  assert(new Set(pageIds).size === specs.length, 'Introduction Page IDs are not unique');
+  // Runs through 41696055202 already completed and read back all five tables
+  // and all five published Pages. Verify that durable checkpoint and continue
+  // at the first unfinished stage instead of replaying successful CMS writes.
+  await verifyCompletedCmsCheckpoint();
   await ensureMenu();
   console.log('INTRO_CMS_SETUP=PASS pages=5 tables=5 menu=two-level brochure=external');
 
