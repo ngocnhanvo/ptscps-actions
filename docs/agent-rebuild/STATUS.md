@@ -1,5 +1,7 @@
 # PTSCPS RAG rebuild — latest checkpoint
 
+- **Latest RUN03 production comparison (2026-11-03 ~07:49 Asia/Ho_Chi_Minh): DIAGNOSTIC/FTPS PASS, retrieval FAIL.** PHP `e5620533b0a1b315b81592c9d5798692fe72a9d5` [source #41555205467](https://github.com/ngocnhanvo/source-commit-actions/actions/runs/41555205467); Actions `e1421cf6664fa4663b9720d138a87430e6b01b44` [source #41555355841](https://github.com/ngocnhanvo/source-commit-actions/actions/runs/41555355841); guarded [production #41555378708](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/41555378708) PASS (3 installed, 3 unchanged, SHA-256 verified). Four natural probes: fact 1/4, collection 2/4, wrong-locale 0. VI clients improved via published collection metadata; EN services token coverage and EN clients SQL lexical still miss. See [detailed checkpoint](RUN03-MODE-COMPARE-2026-11-03.md). RUN03 >=95% FAIL; RUN07 BLOCKED missing Post/Product; RUN04–06/08 not accepted. No reindex, CMS write, LLM or Astro build.
+
 - Timestamp: 2026-11-03 02:54 (Asia/Ho_Chi_Minh), RUN 03 live read-only retrieval QA measured after guarded PHP release.
 - Active run: **03 FAIL retrieval quality; measurement and guarded PHP release PASS**. RUN 02 census remains PASS; Post/Product corpus remains absent.
 - RUN 00: **PASS — audit only**; see `README.md` for verified HEAD and PASS/FAIL evidence.

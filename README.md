@@ -1,5 +1,7 @@
 # PTSCPS Actions — WordPress-controlled deployment and read-only tests
 
+Latest RUN03 comparison: [guarded production #41555378708](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/41555378708) PASS (3 PHP installed, 3 unchanged, SHA-256 readback), fact-mode 1/4 versus collection-mode 2/4 natural top-5, wrong-locale 0; **retrieval QA FAIL**. See `docs/agent-rebuild/RUN03-MODE-COMPARE-2026-11-03.md`. No Astro build.
+
 Repository: `ngocnhanvo/ptscps-actions` (branch `main`).
 
 ## Source of truth and branches
