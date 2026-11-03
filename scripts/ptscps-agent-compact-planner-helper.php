@@ -1,0 +1,16 @@
+<?php
+declare(strict_types=1);
+$root=$argv[1]??'';
+if($root===''||!is_dir($root.'/wp-content/mu-plugins/esc-agent/src')){fwrite(STDERR,"invalid source root\n");exit(2);}
+$src=rtrim($root,'/').'/wp-content/mu-plugins/esc-agent/src/';
+spl_autoload_register(static function(string $class)use($src):void{$prefix='EscAgent\\';if(strncmp($class,$prefix,strlen($prefix))!==0)return;$file=$src.str_replace('\\','/',substr($class,strlen($prefix))).'.php';if(is_file($file))require_once $file;});
+require_once $src.'Core/SkillRegistry.php';
+$allowed=['product','productDetail','productMaterial','productCompare','promotion','company','policy','contact','payment','knowledge'];
+$registry=new \EscAgent\Core\SkillRegistry(rtrim($root,'/').'/wp-content/mu-plugins/esc-agent/src/Skills',$allowed);$registry->loadSkillsAutomatically();
+$tools=[];
+foreach($registry->getSkills() as $name=>$skill){$actions=method_exists($skill,'getActions')?$skill->getActions():[];foreach((array)$actions as $action=>$config){$params=[];foreach((array)($config['params']??[]) as $param=>$meta){$params[]=$param.':'.(is_array($meta)?(string)($meta['type']??'string'):'string');}$tools[]=$name.'.'.$action.'('.implode(',',$params).')';}}
+$prompt="BẠN LÀ AI PLANNER. Chỉ trả JSON, không markdown. Dữ liệu riêng của website/doanh nghiệp chỉ được kết luận sau khi gọi tool; không dùng kiến thức mô hình để bịa fact.\nTOOLS: ".implode('; ',$tools).".\nOUTPUT: {\"plan\":[{\"skill\":\"...\",\"action\":\"...\",\"params\":{...}}],\"requires_synthesis\":true|false} hoặc {\"direct_response\":\"...\"} chỉ cho chào hỏi/kiến thức phổ thông không liên quan dữ liệu riêng website.\nROUTING: "
+."Page/Post/TablePress, tên viết tắt/tổ chức, fact hoặc nội dung đã công bố => knowledge.search. Tập hợp đã công bố (lĩnh vực dịch vụ, khách hàng, dự án, nhóm hoạt động) => knowledge.search mode=collection, keyword giữ NGUYÊN câu hiện tại, limit=5, requires_synthesis=true; có thể thêm semantic_variants gồm 2-3 paraphrase cùng ngôn ngữ ngăn bằng ' || ', không thêm fact/entity. Câu ordinal first/second/last vẫn dùng knowledge.search collection và tuyệt đối giữ keyword gốc. Bài viết => knowledge.search mode=articles; fact đơn => mode=fact. "
+."Tổng quan công ty => company.get; dịch vụ tổng quan => company.services; lịch sử => company.about; lợi thế => company.advantages. Catalog/nhóm sản phẩm => product.categories hoặc product.search; SKU/giá/thuộc tính => productDetail.detail; taxonomy Có/Không => productDetail.classify; taxonomy mở => productDetail.classify_open; vật liệu => productMaterial.get; so sánh SKU => productCompare.compare. Chính sách => policy.list/get; khuyến mãi => promotion.get; thanh toán => payment.get_info; liên hệ => contact.get purpose=lookup; báo giá/custom order => contact.get purpose=quote. "
+."Giữ đúng vi/en của phiên. Câu hiện tại thắng lịch sử khi đổi chủ đề; nếu là continuation thì giữ entity/slot đã biết và không hỏi lại. Không bịa giá, tồn kho, MOQ, chứng nhận, giao hàng hay dữ liệu PTSCPS.";
+echo $prompt;
