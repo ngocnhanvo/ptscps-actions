@@ -1,5 +1,13 @@
 # PTSCPS RAG rebuild — latest checkpoint
 
+## Active checkpoint — 2026-11-03 22:31 Asia/Ho_Chi_Minh (current RUN03 raw retrieval remeasurement)
+
+- Actions `6c7f740a963c1a8570c650fc31a1db0362795ff5`, read-only production run `#41664577730`: measurement executed successfully but the configured RUN03 gate **FAIL**. Current 20-source audit: anchor queries 6/20 top-5 (**30%**), four legacy natural probes 1/4 (**25%**), wrong-locale hits **0**. No CMS/index/LLM/PHP/Astro writes occurred.
+- This raw audit calls `KnowledgeIndex` directly and intentionally does **not** include the LLM Planner semantic variants added later. Therefore it must not overwrite the separately verified end-to-end production result: Qwen-fallback release `#41663229279` remains **8/8 ordinal + 2/2 semantic paraphrase PASS**, all HTTP 200.
+- Do not disable `strong_authoritative_collapse` or weaken factual guards merely to make synthetic title/heading anchors green; the audit itself states those anchors are not semantic/factual QA. RUN03 stays **NOT ACCEPTED** under the existing raw top-5 gate until a valid Planner-aware/real-user-intent retrieval acceptance is defined and measured, or the owner explicitly changes the gate.
+- RUN07 full four-source acceptance remains **BLOCKED** by the verified absence of real published Post/Product corpus. Do not fabricate Post/Product records. RUN08 remains PASS for the latest PHP-only production release scope. Preserve 717 orphan groups and all 10 newly PASS production cases.
+- Current practical user-facing regression (PPS project paraphrase + positional TablePress answers/provider 503) is resolved; reopen only on fresh failing evidence.
+
 ## Active checkpoint — 2026-11-03 22:25 Asia/Ho_Chi_Minh (Qwen Planner fallback production acceptance)
 
 - PHP `master=55e8e587e6daf7480ae06c96cd61db052aa5e237`: added Groq Qwen 3.8 27B as **Planner-only** fallback with compact contract prompt; existing Groq planners remain ahead of it and synthesis routing is unchanged. Encrypted source-control run `#41662689112` PASS, including PHP syntax, planner-priority, compact-prompt, half-open and fail-closed regressions.
