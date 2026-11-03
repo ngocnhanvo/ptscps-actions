@@ -1,0 +1,49 @@
+name: PTSCPS bounded Cloudflare current Planner contract probe
+on:
+  push:
+    branches: [main]
+    paths: [audit/ptscps-agent-cloudflare-planner-probe.ready]
+permissions:
+  contents: read
+concurrency:
+  group: ptscps-agent-cloudflare-planner-probe
+  cancel-in-progress: false
+jobs:
+  probe:
+    if: >-
+      github.repository == 'ngocnhanvo/ptscps-actions'
+      && github.event.head_commit.message == 'audit(ptscps): test Cloudflare current Planner contract'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: actions/checkout@v4
+        with:
+          repository: ngocnhanvo/ptscps-php
+          ref: a73b33da2f8fbf12d2e59c4d1f5aa8ada42733e1
+          token: ${{ secrets.SOURCE_REPO_PAT }}
+          path: source-php
+          persist-credentials: false
+      - name: Validate provider-only QA
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(cat audit/ptscps-agent-cloudflare-planner-probe.ready)" = 'PTSCPS_CF_PLANNER_PROBE source=a73b33da2f8fbf12d2e59c4d1f5aa8ada42733e1 cases=6'
+          php -l scripts/ptscps-agent-cloudflare-planner-helper.php
+          python3 -m py_compile scripts/ptscps-agent-cloudflare-planner-probe.py
+      - name: Test current Planner contract directly on Cloudflare
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+        run: python3 scripts/ptscps-agent-cloudflare-planner-probe.py
+      - name: Upload sanitized Planner compatibility summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ptscps-cloudflare-planner-probe
+          path: audit/ptscps-agent-cloudflare-planner-probe-summary.json
+          if-no-files-found: warn
+          retention-days: 7
