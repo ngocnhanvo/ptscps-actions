@@ -28,7 +28,7 @@ CASES = (
 def main():
     wp = diag.qa.origin('WC_URL', 'admin-ptscps.thegioihosting.io.vn')
     front = diag.qa.origin('WC_URL_CLIENT', 'ptscps.thegioihosting.io.vn')
-    report = {'schema': 1, 'source_php': '4f8e755c6a9f11c3b1fd22b2bfc5fc8fa7a0c1ab',
+    report = {'schema': 1, 'source_php': 'c1421e897127f58e5a23ac771608028f7a22ab18',
               'scope': 'two_previously_failed_second_row_cases_only', 'cases': [],
               'notes': ['Opt-in synthetic trace; no response/source text, params, prompts or secrets are exported.',
                         'Trace reveals planner, tool and provider stages; source identity requires separate trusted validation.',
