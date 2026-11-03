@@ -58,7 +58,7 @@ def safe(value):
 def trace(ftp, runid):
     # Existing opt-in per-request debug logging; do not crawl unrelated sessions.
     root = ('/domains/admin-ptscps.thegioihosting.io.vn/public_html/'
-            'wp-content/esc-agent-debug/regression/' + runid + '/' + CASE + '-frontend')
+            'wp-content/esc-agent-debug/regression/' + runid + '/' + CASE)
     try:
         ftp.cwd(root)
         events = []
