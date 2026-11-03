@@ -1,0 +1,47 @@
+name: PTSCPS relative homepage media production QA
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'audit/ptscps-homepage-relative-production-qa.ready'
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate production/admin configured origins
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os,re
+          from urllib.parse import urlsplit
+          vals=dict(re.findall(r'^\s*(WC_URL|WC_URL_CLIENT)\s*=\s*(.+)\s*$', os.environ.get('ENV_FILE',''), re.M))
+          a=urlsplit(vals.get('WC_URL','').strip().strip('"\''))
+          b=urlsplit(vals.get('WC_URL_CLIENT','').strip().strip('"\''))
+          for u in (a,b):
+              if u.scheme!='https' or not u.hostname or u.port not in (None,443) or u.path not in ('','/') or u.query or u.fragment or u.username or u.password:
+                  raise SystemExit('Invalid WordPress/frontend origin')
+          if a.hostname == b.hostname or a.hostname != 'admin-ptscps.thegioihosting.io.vn':
+              raise SystemExit('Unexpected PTSCPS origin')
+          with open(os.environ['GITHUB_ENV'],'a') as f:
+              f.write('WP_ORIGIN=https://'+a.hostname+'\n')
+              f.write('CLIENT_ORIGIN=https://'+b.hostname+'\n')
+          print('RELATIVE_PRODUCTION_QA_ORIGINS=PASS')
+          PY
+      - name: Install Playwright
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Verify WordPress ESC media and deployed local image
+        env:
+          WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
+          WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
+        run: node scripts/ptscps-homepage-relative-production-qa.mjs
