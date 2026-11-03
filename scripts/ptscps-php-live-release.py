@@ -125,6 +125,14 @@ if os.environ.get("PTSCPS_AGENT_ORDINAL_ONLY") == "1":
         "wp-content/mu-plugins/esc-agent/src/Skills/KnowledgeSearchSkill.php",
     )
 
+# Source-row normalization changes only collection selection/ranking and row expansion.
+# Keep the release atomic and exclude unchanged executor/prompt/CMS/Astro files.
+if os.environ.get("PTSCPS_AGENT_ORDINAL_ROWS_ONLY") == "1":
+    FILES = (
+        "wp-content/mu-plugins/esc-agent/src/Knowledge/KnowledgeRetriever.php",
+        "wp-content/mu-plugins/esc-agent/src/Knowledge/KnowledgeIndex.php",
+    )
+
 # One guarded retriever patch: dependency before the executor method call.
 # Do not deploy tests, unrelated PHP, WordPress content or Astro files.
 if os.environ.get("PTSCPS_AGENT_ORDINAL_ORIGINAL_ONLY") == "1":
