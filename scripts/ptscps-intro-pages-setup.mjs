@@ -574,7 +574,14 @@ async function triggerNativeWordPressBuild() {
   const heading = page.locator('.wrap h1').filter({ hasText: /Build Website/i });
   const button = page.locator('#vcs-build-btn-main');
   assert(await heading.count() > 0 && await button.count() > 0, 'WordPress Build Website tool unavailable');
-  assert(!(await button.isDisabled()), 'WordPress Build Website button is disabled before request');
+  if (await button.isDisabled()) {
+    const force = page.locator('#vcs-force-build');
+    assert(await force.count() === 1 && !(await force.isDisabled()), 'WordPress Build Website is disabled and Build ngoại lệ is unavailable');
+    await force.check();
+    await page.waitForTimeout(250);
+    assert(!(await button.isDisabled()), 'Build ngoại lệ did not enable WordPress Build Website button');
+    console.log('INTRO_BUILD_FORCE=ENABLED_VIA_WORDPRESS_UI');
+  }
   const triggerResponse = page.waitForResponse((response) => {
     try {
       const url = new URL(response.url());
