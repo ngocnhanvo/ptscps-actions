@@ -1,0 +1,68 @@
+name: PTSCPS ordinal source-order guarded PHP release + failed-case recheck
+on:
+  push:
+    branches: [main]
+    paths: [audit/ptscps-agent-ordinal-release.ready]
+permissions:
+  contents: read
+concurrency:
+  group: ptscps-wp-php-release
+  cancel-in-progress: false
+jobs:
+  guarded-php:
+    if: >-
+      github.repository == 'ngocnhanvo/ptscps-actions'
+      && github.event.head_commit.message == 'deploy(ptscps): ordinal source-order PHP and targeted QA'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: ngocnhanvo/ptscps-php
+          ref: b8e5726902835e8274dfcdae803b87e5638a14a1
+          token: ${{ secrets.SOURCE_REPO_PAT }}
+          path: source-php
+          persist-credentials: false
+      - name: Verify exact source, three-case regression scope, and PHP syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(cat audit/ptscps-agent-ordinal-release.ready)" = 'PTSCPS_ORDINAL source=b8e5726902835e8274dfcdae803b87e5638a14a1 files=2 subset=3'
+          test "$(git -C source-php rev-parse HEAD)" = 'b8e5726902835e8274dfcdae803b87e5638a14a1'
+          php -l source-php/wp-content/mu-plugins/esc-agent/src/Knowledge/KnowledgeRetriever.php
+          php -l source-php/wp-content/mu-plugins/esc-agent/src/Skills/KnowledgeSearchSkill.php
+          php source-php/wp-content/mu-plugins/tests/esc-agent-ordinal-collection-test.php
+          php source-php/wp-content/mu-plugins/tests/esc-agent-collection-planner-contract-test.php
+          python3 -m py_compile scripts/ptscps-php-live-release.py scripts/ptscps-agent-ordinal-fact-retest.py scripts/ptscps-agent-postrelease-fact-retest.py
+      - name: Release exactly two changed Agent files by protected FTPS with readback
+        env:
+          PTSCPS_AGENT_ORDINAL_ONLY: '1'
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+        run: python3 scripts/ptscps-php-live-release.py
+  postrelease-three-failures:
+    needs: [guarded-php]
+    if: needs.guarded-php.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Retest ONLY the three previously failed positional facts
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: python3 scripts/ptscps-agent-ordinal-fact-retest.py
+      - name: Retain sanitized facts-only results without source labels or answers
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ptscps-agent-ordinal-postrelease-three-summary
+          path: audit/ptscps-agent-ordinal-fact-summary.json
+          if-no-files-found: warn
+          retention-days: 7

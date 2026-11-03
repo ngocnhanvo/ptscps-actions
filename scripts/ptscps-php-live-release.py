@@ -117,6 +117,14 @@ if os.environ.get("PTSCPS_AGENT_LLM_PROBE_ONLY") == "1":
         "wp-content/mu-plugins/esc-agent/src/Core/TelemetryPlanner.php",
     )
 
+# Published positional fact routing affects only ordered retrieval + Skill presentation.
+# Do not install tests, unrelated Agent files, CMS records, or Astro content.
+if os.environ.get("PTSCPS_AGENT_ORDINAL_ONLY") == "1":
+    FILES = (
+        "wp-content/mu-plugins/esc-agent/src/Knowledge/KnowledgeRetriever.php",
+        "wp-content/mu-plugins/esc-agent/src/Skills/KnowledgeSearchSkill.php",
+    )
+
 # RUN 02 release: only the locale/ingestion files under review. No Agent
 # entrypoint, LLM provider config, CMS content, reindex or Astro build.
 if os.environ.get("PTSCPS_AGENT_RAG_RUN02_ONLY") == "1":
