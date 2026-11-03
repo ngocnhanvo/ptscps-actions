@@ -1,5 +1,13 @@
 # PTSCPS RAG rebuild — latest checkpoint
 
+## Active checkpoint — 2026-11-03 ~23:00 Asia/Ho_Chi_Minh (RUN03 accepted on current production corpus)
+
+- PHP `ca980ff157d1b061ecf24d2fb9cc93bce372675b`: QA-only canonical source-recall probe now grounds generic Page anchors in bounded content already indexed from the same published Page; chat runtime retrieval/planning/synthesis logic is unchanged. Encrypted source-control run `#41668773705` PASS.
+- Actions `e1ca5129e2bd9bfad2cf9bd1355bff15f54969b5`, production canonical RUN03 `#41669195646` **PASS**: protected FTPS/readback PASS, no Astro build, then **20/20 source recall@5 = 100%**, wrong-locale hits **0**. Breakdown: Page 2/2, TablePress 16/16, Thông tin chung 2/2. Artifact `#13247002370` stores sanitized aggregate + encrypted private evidence.
+- Combine this corpus-wide source-identification gate with the already accepted production answer gates: semantic paraphrase **2/2 PASS** and factual/ordinal **8/8 PASS**, all HTTP 200 in `#41663229279`. Therefore **RUN03 is ACCEPTED for every real eligible published source currently present in production**; the original PPS-project paraphrase symptom remains resolved.
+- Scope boundary remains explicit: current production has **0 published Post and 0 published Product** in the accepted corpus. RUN07 full four-source/multisource acceptance therefore remains **BLOCKED by real corpus availability**; do not fabricate Post/Product records, weaken the gate, delete 717 orphan groups, bulk-reindex, or trigger an Astro build. RUN04–06 stay closed unless fresh production failure appears; RUN08 remains PASS for the current PHP-only release path.
+- No further safe RUN07 execution exists until real published Post/Product sources are available. Resume from RUN07 when that prerequisite changes; otherwise preserve the accepted current-corpus evidence.
+
 ## Active checkpoint — 2026-11-03 22:31 Asia/Ho_Chi_Minh (current RUN03 raw retrieval remeasurement)
 
 - Actions `6c7f740a963c1a8570c650fc31a1db0362795ff5`, read-only production run `#41664577730`: measurement executed successfully but the configured RUN03 gate **FAIL**. Current 20-source audit: anchor queries 6/20 top-5 (**30%**), four legacy natural probes 1/4 (**25%**), wrong-locale hits **0**. No CMS/index/LLM/PHP/Astro writes occurred.
