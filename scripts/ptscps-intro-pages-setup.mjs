@@ -406,78 +406,139 @@ function menuTitle(item) {
   return String(typeof value === 'object' ? value.raw || value.rendered || '' : value || '').replace(/<[^>]*>/g, '').trim();
 }
 async function ensureMenu() {
-  const escResponse = await page.request.get(uri(`/wp-json/esc-api/v1/menus?_intro_write=${Date.now()}`), { timeout: 25000, headers: { 'Cache-Control': 'no-cache' } });
+  const escResponse = await page.request.get(uri(`/wp-json/esc-api/v1/menus?_intro_write=${Date.now()}`), {
+    timeout: 25000,
+    headers: { 'Cache-Control': 'no-cache' },
+  });
   assert(escResponse.ok(), 'ESC menu endpoint unavailable');
   const esc = await escResponse.json();
   const header = esc?.menus?.Header?.vi;
   assert(header?.id && Array.isArray(header.items), 'Header.vi WordPress menu missing');
   const menuId = Number(header.id);
-  const nonce = await getRestNonce();
-  const headers = { 'X-WP-Nonce': nonce, 'Cache-Control': 'no-cache' };
-  const itemsResponse = await page.request.get(uri(`/wp-json/wp/v2/menu-items?menus=${menuId}&per_page=100&context=edit`), { headers, timeout: 25000 });
-  assert(itemsResponse.ok(), `Native menu-items read failed HTTP ${itemsResponse.status()}`);
-  let nativeItems = await itemsResponse.json();
-  const findByTitle = (title) => nativeItems.filter((item) => menuTitle(item) === title);
-
-  let parents = findByTitle('Giới thiệu').filter((item) => Number(item.parent || 0) === 0);
-  assert(parents.length <= 1, 'Duplicate top-level Giới thiệu items; refusing write');
-  let parentId;
-  if (!parents.length) {
-    const created = await page.request.post(uri('/wp-json/wp/v2/menu-items'), { headers, data: { title: 'Giới thiệu', type: 'custom', url: '#', menus: menuId, status: 'publish' }, timeout: 25000 });
-    const body = await created.json().catch(() => ({}));
-    assert(created.ok() && body.id, `Create Giới thiệu menu parent failed HTTP ${created.status()}`);
-    parentId = Number(body.id);
-    nativeItems.push(body);
-    console.log('INTRO_MENU_PARENT=CREATED id=' + parentId);
-  } else {
-    parentId = Number(parents[0].id);
-    console.log('INTRO_MENU_PARENT=REUSED id=' + parentId);
-  }
-
   const desired = [
     ...specs.map((spec) => ({ title: spec.title, url: `/${spec.slug}`, target: '' })),
     { title: 'Company Brochure', url: brochureUrl, target: '_blank' },
   ];
-  for (const child of desired) {
-    const matches = findByTitle(child.title);
-    assert(matches.length <= 1, 'Duplicate menu item title ' + child.title);
-    let item = matches[0];
-    const payload = { title: child.title, type: 'custom', url: child.url, menus: menuId, parent: parentId, status: 'publish', target: child.target };
-    if (!item) {
-      const created = await page.request.post(uri('/wp-json/wp/v2/menu-items'), { headers, data: payload, timeout: 25000 });
-      const body = await created.json().catch(() => ({}));
-      assert(created.ok() && body.id, `Create menu child failed ${child.title} HTTP ${created.status()}`);
-      nativeItems.push(body);
-      console.log(`INTRO_MENU_CHILD=${child.title} CREATED id=${body.id}`);
-    } else {
-      const actualUrl = String(item.url || '').trim();
-      const actualParent = Number(item.parent || 0);
-      const actualTarget = String(item.target || '');
-      if (actualParent !== parentId || actualUrl !== child.url || actualTarget !== child.target) {
-        const updated = await page.request.post(uri(`/wp-json/wp/v2/menu-items/${item.id}`), { headers, data: payload, timeout: 25000 });
-        assert(updated.ok(), `Update menu child failed ${child.title} HTTP ${updated.status()}`);
-        console.log(`INTRO_MENU_CHILD=${child.title} UPDATED id=${item.id}`);
-      } else console.log(`INTRO_MENU_CHILD=${child.title} ALREADY_CORRECT id=${item.id}`);
+
+  const currentParents = (header.items || []).filter((item) => item.label === 'Giới thiệu');
+  assert(currentParents.length <= 1, 'Duplicate top-level Giới thiệu items; refusing write');
+  if (currentParents.length === 1) {
+    const intro = currentParents[0];
+    const children = Array.isArray(intro.children) ? intro.children : [];
+    const exact = desired.every((entry) => children.some((child) =>
+      child.label === entry.title
+      && String(child.href || '') === entry.url
+      && !(child.children || []).length
+    ));
+    if (exact && children.length === desired.length) {
+      console.log('INTRO_MENU=ALREADY_CORRECT_SKIP_WRITE children=' + children.length);
+      return;
     }
+    throw Error('Existing Giới thiệu menu is partial or differs; refusing duplicate native creation');
   }
 
+  // Use the authenticated WordPress Menu Manager itself. This avoids depending
+  // on a custom REST nonce endpoint and preserves native nav-menu save hooks/logs.
+  await page.goto(uri(`/wp-admin/nav-menus.php?action=edit&menu=${menuId}`), {
+    waitUntil: 'domcontentloaded',
+    timeout: 45000,
+  });
+  assert(new URL(page.url()).origin === wp, 'Native Menu Manager escaped configured WordPress origin');
+  const menuForm = page.locator('#update-nav-menu');
+  assert(await menuForm.count() === 1, 'Native WordPress menu form unavailable');
+
+  const urlInput = page.locator('#custom-menu-item-url');
+  const nameInput = page.locator('#custom-menu-item-name');
+  const addButton = page.locator('#submit-customlinkdiv');
+  assert(await urlInput.count() === 1 && await nameInput.count() === 1 && await addButton.count() === 1,
+    'Native Custom Links controls unavailable');
+
+  async function nativeItems() {
+    return page.evaluate(() => Array.from(document.querySelectorAll('#menu-to-edit > li.menu-item')).map((li) => ({
+      id: Number(String(li.id || '').replace(/^menu-item-/, '')),
+      title: String(li.querySelector('.edit-menu-item-title')?.value || '').trim(),
+      url: String(li.querySelector('.edit-menu-item-url')?.value || '').trim(),
+      parent: Number(li.querySelector('.menu-item-data-parent-id')?.value || 0),
+    })));
+  }
+
+  async function addCustomLink(title, url) {
+    const before = await nativeItems();
+    assert(!before.some((item) => item.title === title), 'Native menu already contains unexpected duplicate title ' + title);
+    await urlInput.fill(url);
+    await nameInput.fill(title);
+    await addButton.click();
+    for (let attempt = 0; attempt < 20; attempt++) {
+      await sleep(250);
+      const items = await nativeItems();
+      const matches = items.filter((item) => item.title === title);
+      if (matches.length === 1 && items.length === before.length + 1) {
+        console.log(`INTRO_MENU_NATIVE_ADD=${title} id=${matches[0].id}`);
+        return matches[0].id;
+      }
+    }
+    throw Error('Native WordPress Add to Menu did not create ' + title);
+  }
+
+  const parentId = await addCustomLink('Giới thiệu', '#');
+  const created = [];
+  for (const child of desired) {
+    const id = await addCustomLink(child.title, child.url);
+    created.push({ ...child, id });
+  }
+
+  const parentApplied = await page.evaluate(({ parentId, children }) => {
+    const root = document.querySelector('#menu-to-edit');
+    if (!root) return { ok: false, reason: 'menu-root-missing' };
+    for (const child of children) {
+      const li = document.querySelector(`#menu-item-${child.id}`);
+      const parent = li?.querySelector('.menu-item-data-parent-id');
+      if (!li || !parent) return { ok: false, reason: 'menu-item-missing', child };
+      parent.value = String(parentId);
+      li.className = String(li.className || '').replace(/menu-item-depth-\\d+/g, 'menu-item-depth-1');
+      const target = li.querySelector('.edit-menu-item-target');
+      if (target && child.target === '_blank') target.checked = true;
+    }
+    return { ok: true };
+  }, { parentId, children: created });
+  assert(parentApplied?.ok, 'Unable to assign native submenu hierarchy: ' + JSON.stringify(parentApplied));
+
+  const save = page.locator('#save_menu_header');
+  const saveFallback = page.locator('#save_menu_footer');
+  const saveControl = await save.count() ? save : saveFallback;
+  assert(await saveControl.count() > 0, 'Native Save Menu control unavailable');
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 45000 }),
+    saveControl.click(),
+  ]);
+  console.log('INTRO_MENU_NATIVE_SAVE=PASS');
+
   let verified = null;
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < 12; i++) {
     await sleep(900);
-    const response = await page.request.get(uri(`/wp-json/esc-api/v1/menus?_intro_verify=${Date.now()}`), { headers: { 'Cache-Control': 'no-cache' }, timeout: 25000 });
+    const response = await page.request.get(uri(`/wp-json/esc-api/v1/menus?_intro_verify=${Date.now()}`), {
+      headers: { 'Cache-Control': 'no-cache' },
+      timeout: 25000,
+    });
     if (!response.ok()) continue;
     const current = (await response.json())?.menus?.Header?.vi;
     const intro = current?.items?.find((item) => item.label === 'Giới thiệu');
-    const labels = (intro?.children || []).map((item) => item.label);
-    if (desired.every((entry) => labels.includes(entry.title))) { verified = { current, intro }; break; }
+    const children = intro?.children || [];
+    const exact = desired.every((entry) => children.some((child) =>
+      child.label === entry.title
+      && String(child.href || '') === entry.url
+      && !(child.children || []).length
+    ));
+    if (exact && children.length === desired.length) {
+      verified = { current, intro };
+      break;
+    }
   }
-  assert(verified, 'Header.vi did not expose the 2-level Giới thiệu menu after native saves');
-  assert((verified.intro.children || []).every((child) => !(child.children || []).length), 'Giới thiệu menu exceeded requested 2 levels');
+  assert(verified, 'Header.vi did not expose the requested 2-level Giới thiệu menu after native save');
   const brochure = verified.intro.children.find((child) => child.label === 'Company Brochure');
   assert(String(brochure?.href || '') === brochureUrl, 'Company Brochure URL changed');
   console.log('INTRO_MENU=PASS_TWO_LEVEL children=' + verified.intro.children.length);
 }
-
 async function triggerNativeWordPressBuild() {
   await page.goto(uri('/wp-admin/admin.php?page=vcs-build-trigger'), { waitUntil: 'domcontentloaded', timeout: 45000 });
   assert(new URL(page.url()).origin === wp, 'Build dashboard redirected outside WordPress');
