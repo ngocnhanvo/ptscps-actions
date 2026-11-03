@@ -1,0 +1,47 @@
+name: PTSCPS normalize homepage CMS image URLs (guarded)
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'audit/ptscps-homepage-image-relative.ready'
+permissions:
+  contents: read
+jobs:
+  normalize-image-urls:
+    runs-on: ubuntu-latest
+    timeout-minutes: 28
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate WordPress target origin
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os,re
+          from urllib.parse import urlsplit
+          vals=dict(re.findall(r'^\s*(WC_URL|WC_URL_CLIENT)\s*=\s*(.+)\s*$',os.environ.get('ENV_FILE',''),re.M))
+          wp=urlsplit(vals.get('WC_URL','').strip().strip('"\''))
+          front=urlsplit(vals.get('WC_URL_CLIENT','').strip().strip('"\''))
+          if wp.scheme!='https' or not wp.hostname or wp.hostname==front.hostname or wp.path not in ('','/') or wp.query or wp.fragment or wp.username or wp.password or wp.port not in (None,443):
+              raise SystemExit('Invalid WordPress origin')
+          if wp.hostname!='admin-ptscps.thegioihosting.io.vn':
+              raise SystemExit('Unexpected WordPress Admin domain; cannot normalize')
+          with open(os.environ['GITHUB_ENV'],'a') as f: f.write('WP_ORIGIN=https://'+wp.hostname+'\n')
+          print('CMS_IMAGE_RELATIVE_TARGET=PASS')
+          PY
+      - name: Unit test exact-domain normalization
+        run: node scripts/ptscps-homepage-image-relative.mjs --self-test
+      - name: Install Playwright Chromium
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Normalize only own-domain CMS image tags via native TablePress and verify
+        env:
+          WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
+          WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
+        run: node scripts/ptscps-homepage-image-relative.mjs --apply
