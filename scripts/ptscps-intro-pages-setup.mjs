@@ -437,81 +437,86 @@ async function ensureMenu() {
     throw Error('Existing Giới thiệu menu is partial or differs; refusing duplicate native creation');
   }
 
-  // Use the authenticated WordPress Menu Manager itself. This avoids depending
-  // on a custom REST nonce endpoint and preserves native nav-menu save hooks/logs.
+  // Use the exact WordPress core add-menu-item AJAX contract. The lightweight
+  // admin profile keeps the native form + nonce but omits wpNavMenu JS, so call
+  // the same core handler directly and then submit the native update form once.
   await page.goto(uri(`/wp-admin/nav-menus.php?action=edit&menu=${menuId}`), {
     waitUntil: 'domcontentloaded',
     timeout: 45000,
   });
   assert(new URL(page.url()).origin === wp, 'Native Menu Manager escaped configured WordPress origin');
-  const menuForm = page.locator('#update-nav-menu');
-  assert(await menuForm.count() === 1, 'Native WordPress menu form unavailable');
+  assert(await page.locator('#update-nav-menu').count() === 1, 'Native WordPress menu form unavailable');
 
-  const urlInput = page.locator('#custom-menu-item-url');
-  const nameInput = page.locator('#custom-menu-item-name');
-  const addButton = page.locator('#submit-customlinkdiv');
-  assert(await urlInput.count() === 1 && await nameInput.count() === 1 && await addButton.count() === 1,
-    'Native Custom Links controls unavailable');
+  const addNonce = String(await page.locator('#menu-settings-column-nonce').inputValue()).trim();
+  assert(/^[A-Za-z0-9_-]{8,32}$/.test(addNonce), 'Native add-menu-item nonce unavailable');
 
-  // WordPress persists each administrator's postbox collapsed state. Open the
-  // native Custom Links box when needed instead of assuming it is expanded.
-  if (!(await urlInput.isVisible())) {
-    const customLinksBox = page.locator('#add-custom-links');
-    assert(await customLinksBox.count() === 1, 'Native Custom Links postbox unavailable');
-    const toggle = customLinksBox.locator('.postbox-header .hndle, .handlediv').first();
-    if (await toggle.count() > 0 && await toggle.isVisible().catch(() => false)) {
-      await toggle.click();
-    } else {
-      // Lightweight wp-admin profiles can keep the native postbox content but
-      // omit the normal toggle chrome. Reveal that existing content only.
-      const revealed = await page.evaluate(() => {
-        const box = document.querySelector('#add-custom-links');
-        const inside = box?.querySelector('.inside');
-        if (!box || !inside) return false;
-        box.classList.remove('closed', 'hide-if-js');
-        inside.removeAttribute('hidden');
-        inside.style.display = 'block';
-        return true;
-      });
-      assert(revealed, 'Native Custom Links postbox content unavailable');
+  const beforeItems = await page.evaluate(() => Array.from(document.querySelectorAll('#menu-to-edit > li.menu-item')).map((li) => ({
+    id: Number(String(li.id || '').replace(/^menu-item-/, '')),
+    title: String(li.querySelector('.edit-menu-item-title')?.value || '').trim(),
+    url: String(li.querySelector('.edit-menu-item-url')?.value || '').trim(),
+    parent: Number(li.querySelector('.menu-item-data-parent-id')?.value || 0),
+  })));
+  assert(!beforeItems.some((item) => item.title === 'Giới thiệu'), 'Native menu already contains unindexed Giới thiệu item');
+
+  const batch = [
+    { title: 'Giới thiệu', url: '#', target: '' },
+    ...desired,
+  ];
+  const addForm = {
+    action: 'add-menu-item',
+    menu: String(menuId),
+    'menu-settings-column-nonce': addNonce,
+  };
+  batch.forEach((item, index) => {
+    const key = String(-(index + 1));
+    addForm[`menu-item[${key}][menu-item-type]`] = 'custom';
+    addForm[`menu-item[${key}][menu-item-url]`] = item.url;
+    addForm[`menu-item[${key}][menu-item-title]`] = item.title;
+  });
+
+  const addResponse = await page.request.post(uri('/wp-admin/admin-ajax.php'), {
+    form: addForm,
+    timeout: 30000,
+  });
+  assert(addResponse.ok(), `WordPress core add-menu-item HTTP ${addResponse.status()}`);
+  const markup = (await addResponse.text()).trim();
+  assert(markup && markup !== '-1' && markup !== '0', 'WordPress core add-menu-item rejected the native nonce/payload');
+
+  const returnedIds = [...markup.matchAll(/id=["']menu-item-(\\d+)["']/g)].map((match) => Number(match[1]));
+  assert(returnedIds.length === batch.length && new Set(returnedIds).size === batch.length,
+    `WordPress core add-menu-item returned unexpected item count ${returnedIds.length}`);
+
+  const appended = await page.evaluate((html) => {
+    const root = document.querySelector('#menu-to-edit');
+    if (!root) return false;
+    root.insertAdjacentHTML('beforeend', html);
+    return true;
+  }, markup);
+  assert(appended, 'Native menu list unavailable after core add-menu-item response');
+
+  const createdItems = await page.evaluate(() => Array.from(document.querySelectorAll('#menu-to-edit > li.menu-item')).map((li) => ({
+    id: Number(String(li.id || '').replace(/^menu-item-/, '')),
+    title: String(li.querySelector('.edit-menu-item-title')?.value || '').trim(),
+    url: String(li.querySelector('.edit-menu-item-url')?.value || '').trim(),
+    parent: Number(li.querySelector('.menu-item-data-parent-id')?.value || 0),
+  })));
+  assert(createdItems.length === beforeItems.length + batch.length, 'Native menu DOM item count mismatch after core AJAX');
+
+  const createdByTitle = new Map();
+  for (const item of createdItems) {
+    if (batch.some((entry) => entry.title === item.title)) {
+      assert(!createdByTitle.has(item.title), 'Duplicate native menu title after core AJAX: ' + item.title);
+      createdByTitle.set(item.title, item);
     }
-    const visible = await urlInput.isVisible().catch(() => false);
-    console.log('INTRO_MENU_CUSTOM_LINKS_BOX=' + (visible ? 'OPENED' : 'DOM_ONLY_LIGHT_PROFILE'));
   }
-
-  async function nativeItems() {
-    return page.evaluate(() => Array.from(document.querySelectorAll('#menu-to-edit > li.menu-item')).map((li) => ({
-      id: Number(String(li.id || '').replace(/^menu-item-/, '')),
-      title: String(li.querySelector('.edit-menu-item-title')?.value || '').trim(),
-      url: String(li.querySelector('.edit-menu-item-url')?.value || '').trim(),
-      parent: Number(li.querySelector('.menu-item-data-parent-id')?.value || 0),
-    })));
+  for (const item of batch) {
+    const created = createdByTitle.get(item.title);
+    assert(created && returnedIds.includes(created.id), 'Core AJAX markup missing expected item ' + item.title);
+    assert(created.url === item.url, 'Core AJAX URL mismatch for ' + item.title);
   }
-
-  async function addCustomLink(title, url) {
-    const before = await nativeItems();
-    assert(!before.some((item) => item.title === title), 'Native menu already contains unexpected duplicate title ' + title);
-    await urlInput.fill(url, { force: true });
-    await nameInput.fill(title, { force: true });
-    await addButton.evaluate((button) => button.click());
-    for (let attempt = 0; attempt < 20; attempt++) {
-      await sleep(250);
-      const items = await nativeItems();
-      const matches = items.filter((item) => item.title === title);
-      if (matches.length === 1 && items.length === before.length + 1) {
-        console.log(`INTRO_MENU_NATIVE_ADD=${title} id=${matches[0].id}`);
-        return matches[0].id;
-      }
-    }
-    throw Error('Native WordPress Add to Menu did not create ' + title);
-  }
-
-  const parentId = await addCustomLink('Giới thiệu', '#');
-  const created = [];
-  for (const child of desired) {
-    const id = await addCustomLink(child.title, child.url);
-    created.push({ ...child, id });
-  }
+  const parentId = createdByTitle.get('Giới thiệu').id;
+  const created = desired.map((item) => ({ ...item, id: createdByTitle.get(item.title).id }));
+  console.log('INTRO_MENU_CORE_AJAX=PASS items=' + batch.length);
 
   const parentApplied = await page.evaluate(({ parentId, children }) => {
     const root = document.querySelector('#menu-to-edit');
@@ -523,22 +528,28 @@ async function ensureMenu() {
       parent.value = String(parentId);
       li.className = String(li.className || '').replace(/menu-item-depth-\\d+/g, 'menu-item-depth-1');
       const target = li.querySelector('.edit-menu-item-target');
-      if (target && child.target === '_blank') target.checked = true;
+      if (target) target.checked = child.target === '_blank';
     }
     return { ok: true };
   }, { parentId, children: created });
   assert(parentApplied?.ok, 'Unable to assign native submenu hierarchy: ' + JSON.stringify(parentApplied));
 
-  const save = page.locator('#save_menu_header');
-  const saveFallback = page.locator('#save_menu_footer');
-  const saveControl = await save.count() ? save : saveFallback;
-  assert(await saveControl.count() > 0, 'Native Save Menu control unavailable');
-  await Promise.all([
-    page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 45000 }),
-    saveControl.click(),
-  ]);
+  // Mirror WordPress nav-menu.js max_input_vars protection before the native
+  // form submit. requestSubmit keeps the normal update action, nonce and hooks.
+  await page.evaluate(() => {
+    const form = document.querySelector('#update-nav-menu');
+    const submitter = document.querySelector('#save_menu_header') || document.querySelector('#save_menu_footer');
+    const packed = form?.querySelector('[name="nav-menu-data"]');
+    if (!form || !submitter || !packed) throw new Error('Native Save Menu form controls missing');
+    const rows = Array.from(new FormData(form).entries()).map(([name, value]) => ({
+      name,
+      value: String(value),
+    }));
+    packed.value = JSON.stringify(rows);
+    form.requestSubmit(submitter);
+  });
+  await page.waitForLoadState('domcontentloaded', { timeout: 45000 });
   console.log('INTRO_MENU_NATIVE_SAVE=PASS');
-
   let verified = null;
   for (let i = 0; i < 12; i++) {
     await sleep(900);
