@@ -251,6 +251,13 @@ async function ensureTable(spec) {
   console.log(`INTRO_TABLE=${spec.id} NATIVE_SAVE_READBACK=PASS items=${saved.items.length}`);
 }
 
+async function submitClassicEditorControl(control, label) {
+  const navigation = page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 45000 });
+  await control.click();
+  await navigation;
+  assert(/\/wp-admin\/post\.php/.test(page.url()), `${label} did not return to the Classic Editor`);
+}
+
 async function setAcf(name, value, { optional = false } = {}) {
   const field = page.locator(`.acf-field[data-name="${name}"]`).first();
   if (await field.count() === 0) {
@@ -356,16 +363,14 @@ async function ensurePage(spec) {
     assert(pageId > 0, 'Cannot identify new Page ID ' + spec.slug);
   } else {
     const control = wasPublished ? page.locator('#publish') : page.locator('#save-post');
-    await control.click();
-    await sleep(1800);
+    await submitClassicEditorControl(control, `Save existing Page ${spec.slug}`);
   }
 
   await page.goto(uri(`/wp-admin/post.php?post=${pageId}&action=edit`), { waitUntil: 'domcontentloaded', timeout: 45000 });
   await setPageSlug(spec);
   const publish = page.locator('#publish');
   assert(await publish.count(), 'Publish/Update control unavailable ' + spec.slug);
-  await publish.click();
-  await sleep(2000);
+  await submitClassicEditorControl(publish, `Publish Page ${spec.slug}`);
   await page.goto(uri(`/wp-admin/post.php?post=${pageId}&action=edit`), { waitUntil: 'domcontentloaded', timeout: 45000 });
   const readback = await page.evaluate(() => ({
     status: document.querySelector('#post_status')?.value || '',
