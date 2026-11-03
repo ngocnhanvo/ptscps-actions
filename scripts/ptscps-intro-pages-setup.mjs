@@ -419,6 +419,12 @@ async function ensureMenu() {
     ...specs.map((spec) => ({ title: spec.title, url: `/${spec.slug}`, target: '' })),
     { title: 'Company Brochure', url: brochureUrl, target: '_blank' },
   ];
+  const escHref = (url) => {
+    const value = String(url || '').trim();
+    if (/^[a-z][a-z0-9+.-]*:/i.test(value) || value.startsWith('//')) return value;
+    if (value === '/' || value === '') return value;
+    return value.replace(/^\/+|\/+$/g, '');
+  };
 
   const currentParents = (header.items || []).filter((item) => item.label === 'Giới thiệu');
   assert(currentParents.length <= 1, 'Duplicate top-level Giới thiệu items; refusing write');
@@ -427,7 +433,7 @@ async function ensureMenu() {
     const children = Array.isArray(intro.children) ? intro.children : [];
     const exact = desired.every((entry) => children.some((child) =>
       child.label === entry.title
-      && String(child.href || '') === entry.url
+      && String(child.href || '') === escHref(entry.url)
       && !(child.children || []).length
     ));
     if (exact && children.length === desired.length) {
@@ -549,7 +555,7 @@ async function ensureMenu() {
     const children = intro?.children || [];
     const exact = desired.every((entry) => children.some((child) =>
       child.label === entry.title
-      && String(child.href || '') === entry.url
+      && String(child.href || '') === escHref(entry.url)
       && !(child.children || []).length
     ));
     if (exact && children.length === desired.length) {
