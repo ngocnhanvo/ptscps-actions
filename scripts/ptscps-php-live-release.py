@@ -108,6 +108,15 @@ if os.environ.get("PTSCPS_AGENT_FAILCLOSED_ONLY") == "1":
 if os.environ.get("PTSCPS_AGENT_PROVIDER_ROUTING_ONLY") == "1":
     FILES = ("wp-content/mu-plugins/esc-agent/src/Core/LlmProviderConfig.php",)
 
+# Install the Router before the Planner: old Planner works with new Router,
+# so there is no transient undefined-method window during atomic activation.
+# Only these two LLM runtime files may be touched; neither CMS nor Astro.
+if os.environ.get("PTSCPS_AGENT_LLM_PROBE_ONLY") == "1":
+    FILES = (
+        "wp-content/mu-plugins/esc-agent/src/Core/LlmRouter.php",
+        "wp-content/mu-plugins/esc-agent/src/Core/TelemetryPlanner.php",
+    )
+
 # RUN 02 release: only the locale/ingestion files under review. No Agent
 # entrypoint, LLM provider config, CMS content, reindex or Astro build.
 if os.environ.get("PTSCPS_AGENT_RAG_RUN02_ONLY") == "1":

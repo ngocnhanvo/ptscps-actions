@@ -1,0 +1,51 @@
+name: PTSCPS guarded lazy half-open LLM provider PHP release
+on:
+  push:
+    branches: [main]
+    paths: [audit/ptscps-agent-llm-probe-release.ready]
+permissions:
+  contents: read
+concurrency:
+  group: ptscps-wp-php-release
+  cancel-in-progress: false
+jobs:
+  guarded-php:
+    if: >-
+      github.repository == 'ngocnhanvo/ptscps-actions'
+      && github.event.head_commit.message == 'deploy(ptscps): half-open LLM probe guard PHP only'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: ngocnhanvo/ptscps-php
+          ref: 43dc22895f009f6b57d3c9ee855b2d464dabedf4
+          token: ${{ secrets.SOURCE_REPO_PAT }}
+          path: source-php
+          persist-credentials: false
+      - name: Verify exact source, scope, and real PHP regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(cat audit/ptscps-agent-llm-probe-release.ready)" = 'PTSCPS_LLM_LAZY_PROBE source=43dc22895f009f6b57d3c9ee855b2d464dabedf4 scope=2'
+          test "$(git -C source-php rev-parse HEAD)" = '43dc22895f009f6b57d3c9ee855b2d464dabedf4'
+          test -f source-php/wp-content/mu-plugins/esc-agent/src/Core/LlmRouter.php
+          test -f source-php/wp-content/mu-plugins/esc-agent/src/Core/TelemetryPlanner.php
+          php -l source-php/wp-content/mu-plugins/esc-agent/src/Core/LlmRouter.php
+          php -l source-php/wp-content/mu-plugins/esc-agent/src/Core/TelemetryPlanner.php
+          php source-php/wp-content/mu-plugins/tests/esc-agent-llm-half-open-lazy-test.php
+          php source-php/wp-content/mu-plugins/tests/esc-agent-planner-priority-test.php
+          php source-php/wp-content/mu-plugins/tests/esc-agent-llm-fail-closed-test.php
+          php source-php/wp-content/mu-plugins/tests/esc-agent-collection-planner-contract-test.php
+          python3 -m py_compile scripts/ptscps-php-live-release.py
+      - name: Deploy exactly LlmRouter and TelemetryPlanner through guarded FTPS and readback
+        env:
+          PTSCPS_AGENT_LLM_PROBE_ONLY: '1'
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+        run: python3 scripts/ptscps-php-live-release.py
