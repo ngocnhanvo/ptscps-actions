@@ -475,8 +475,8 @@ async function ensureMenu() {
       });
       assert(revealed, 'Native Custom Links postbox content unavailable');
     }
-    await urlInput.waitFor({ state: 'visible', timeout: 8000 });
-    console.log('INTRO_MENU_CUSTOM_LINKS_BOX=OPENED');
+    const visible = await urlInput.isVisible().catch(() => false);
+    console.log('INTRO_MENU_CUSTOM_LINKS_BOX=' + (visible ? 'OPENED' : 'DOM_ONLY_LIGHT_PROFILE'));
   }
 
   async function nativeItems() {
@@ -491,9 +491,9 @@ async function ensureMenu() {
   async function addCustomLink(title, url) {
     const before = await nativeItems();
     assert(!before.some((item) => item.title === title), 'Native menu already contains unexpected duplicate title ' + title);
-    await urlInput.fill(url);
-    await nameInput.fill(title);
-    await addButton.click();
+    await urlInput.fill(url, { force: true });
+    await nameInput.fill(title, { force: true });
+    await addButton.click({ force: true });
     for (let attempt = 0; attempt < 20; attempt++) {
       await sleep(250);
       const items = await nativeItems();
