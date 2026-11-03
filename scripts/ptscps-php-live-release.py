@@ -79,6 +79,10 @@ if os.environ.get("PTSCPS_AGENT_RETRIEVAL_CONTEXT_ONLY") == "1":
 if os.environ.get("PTSCPS_AGENT_PUBLISHED_ROUTING_ONLY") == "1":
     FILES = ("wp-content/mu-plugins/esc-agent/src/Core/KnowledgeAwarePlanner.php",)
 
+# RUN03/RUN04: a prompt-only LLM routing change must upload Planner.php alone.
+if os.environ.get("PTSCPS_AGENT_PLANNER_PROMPT_ONLY") == "1":
+    FILES = ("wp-content/mu-plugins/esc-agent/src/Core/Planner.php",)
+
 # Only the four runtime files changed for knowledge-grounded LLM synthesis.
 # Do not deploy tests, WordPress core, frontend/Astro, or unrelated plugins.
 if os.environ.get("PTSCPS_AGENT_LLM_SYNTHESIS_ONLY") == "1":
