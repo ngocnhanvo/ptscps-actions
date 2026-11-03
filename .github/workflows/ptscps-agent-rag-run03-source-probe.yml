@@ -12,7 +12,7 @@ jobs:
   guarded-source-probe:
     if: >-
       github.repository == 'ngocnhanvo/ptscps-actions'
-      && github.event.head_commit.message == 'audit(ptscps): run RUN03 English source metadata probe'
+      && github.event.head_commit.message == 'deploy(ptscps): RUN03 English subject QA guarded PHP'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -22,7 +22,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: ngocnhanvo/ptscps-php
-          ref: ccd44459f36e6b2a372eb91f778a5ac221620da2
+          ref: 5b9e455ec9bd64368c57a9d2684a81a86adb5c7f
           token: ${{ secrets.SOURCE_REPO_PAT }}
           path: source-php
           persist-credentials: false
@@ -30,8 +30,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(cat audit/ptscps-agent-rag-run03-source-probe.ready)" = 'PTSCPS_RUN03_SOURCE_PROBE source=ccd44459f36e6b2a372eb91f778a5ac221620da2'
-          test "$(git -C source-php rev-parse HEAD)" = 'ccd44459f36e6b2a372eb91f778a5ac221620da2'
+          test "$(cat audit/ptscps-agent-rag-run03-source-probe.ready)" = 'PTSCPS_RUN03_SOURCE_PROBE source=5b9e455ec9bd64368c57a9d2684a81a86adb5c7f'
+          test "$(git -C source-php rev-parse HEAD)" = '5b9e455ec9bd64368c57a9d2684a81a86adb5c7f'
           php -l source-php/wp-content/mu-plugins/esc-agent/src/Knowledge/KnowledgeInventory.php
           php source-php/wp-content/mu-plugins/tests/esc-agent-retrieval-readonly-test.php
           php source-php/wp-content/mu-plugins/tests/esc-agent-retrieval-stage-regression-test.php
@@ -56,7 +56,7 @@ jobs:
           npx playwright install --with-deps chromium
       - name: Compare real published English metadata via admin read-only endpoint
         env:
-          PTSCPS_SOURCE_SHA: ccd44459f36e6b2a372eb91f778a5ac221620da2
+          PTSCPS_SOURCE_SHA: 5b9e455ec9bd64368c57a9d2684a81a86adb5c7f
           ENV_FILE: ${{ secrets.ENV_FILE }}
           WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
           WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
