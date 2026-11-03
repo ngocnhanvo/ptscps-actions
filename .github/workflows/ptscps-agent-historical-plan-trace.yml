@@ -1,0 +1,41 @@
+name: PTSCPS Agent existing LLM plan telemetry (read-only)
+on:
+  push:
+    branches: [main]
+    paths:
+      - audit/ptscps-agent-historical-plan-trace.ready
+permissions:
+  contents: read
+concurrency:
+  group: ptscps-agent-existing-plan-trace
+  cancel-in-progress: false
+jobs:
+  read:
+    if: >-
+      github.repository == 'ngocnhanvo/ptscps-actions'
+      && github.event.head_commit.message == 'audit(ptscps): read corrected existing Planner telemetry case'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify corrected historic read-only scope
+        run: |
+          set -euo pipefail
+          test "$(cat audit/ptscps-agent-historical-plan-trace.ready)" = 'PTSCPS_HISTORICAL_PLAN_TRACE source=ac6647a35c72b26dcc8cb76a99b9f602b0a38449 readonly=1'
+          python3 -m py_compile scripts/ptscps-agent-historical-plan-trace.py
+      - name: Read only existing one-case Planner and Skill event metadata
+        env:
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+        run: python3 scripts/ptscps-agent-historical-plan-trace.py
+      - name: Upload sanitized historical telemetry
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ptscps-agent-historical-plan-trace-summary
+          path: audit/ptscps-agent-historical-plan-trace-summary.json
+          if-no-files-found: warn
+          retention-days: 7
