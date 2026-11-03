@@ -23,7 +23,7 @@ jobs:
           python3 - <<'PY'
           import os,re
           from urllib.parse import urlsplit
-          vals=dict(re.findall(r'^\\s*(WC_URL|WC_URL_CLIENT)\\s*=\\s*(.+)\\s*$',os.environ.get('ENV_FILE',''),re.M))
+          vals=dict(re.findall(r'^\s*(WC_URL|WC_URL_CLIENT)\s*=\s*(.+)\s*$',os.environ.get('ENV_FILE',''),re.M))
           def origin(name):
               p=urlsplit(vals.get(name,'').strip().strip('"').strip("'"))
               if p.scheme!='https' or not p.hostname or p.path not in ('','/') or p.query or p.fragment or p.username or p.password or p.port not in (None,443):
