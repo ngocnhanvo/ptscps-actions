@@ -391,7 +391,7 @@ async function ensurePage(spec) {
 async function getRestNonce() {
   const response = await page.request.post(uri('/wp-admin/admin-ajax.php'), { form: { action: 'rest-nonce' }, timeout: 20000 });
   const nonce = (await response.text()).trim();
-  assert(response.ok() && /^[a-f\d]{8,20}$/i.test(nonce), 'WordPress REST nonce unavailable');
+  assert(response.ok() && /^[A-Za-z0-9_-]{8,32}$/.test(nonce), `WordPress REST nonce unavailable: status=${response.status()} length=${nonce.length}`);
   return nonce;
 }
 function menuTitle(item) {
