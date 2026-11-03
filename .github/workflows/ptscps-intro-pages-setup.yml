@@ -40,11 +40,18 @@ jobs:
         run: |
           npm install --no-save --no-audit --no-fund playwright@1.56.1
           npx playwright install --with-deps chromium
+      - name: Bind introduction award images through native ESC Table Insert Image
+        env:
+          WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
+          WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
+        run: node scripts/ptscps-intro-awards-media.mjs
       - name: Create/update introduction CMS, trigger native WordPress build and verify production
         env:
           WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
           WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
         run: node scripts/ptscps-intro-pages-setup.mjs
+      - name: Verify award images and lightbox on deployed frontend
+        run: node scripts/ptscps-intro-awards-production-qa.mjs
       - name: Upload introduction visual QA screenshots
         if: always()
         uses: actions/upload-artifact@v4
