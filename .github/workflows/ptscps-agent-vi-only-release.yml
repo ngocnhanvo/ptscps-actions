@@ -1,0 +1,60 @@
+name: PTSCPS Vietnamese-only AI Chatbox guarded PHP release
+on:
+  push:
+    branches: [main]
+    paths: [audit/ptscps-agent-vi-only-release.ready]
+permissions:
+  contents: read
+concurrency:
+  group: ptscps-wp-php-release
+  cancel-in-progress: false
+jobs:
+  guarded-php:
+    if: >-
+      github.repository == 'ngocnhanvo/ptscps-actions'
+      && github.event.head_commit.message == 'deploy(ptscps): temporarily limit AI Chatbox to Vietnamese'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: ngocnhanvo/ptscps-php
+          ref: 694331c5521a7a81bb592158948dd34c6fc8608c
+          token: ${{ secrets.SOURCE_REPO_PAT }}
+          path: source-php
+          persist-credentials: false
+      - name: Verify exact source and Vietnamese-only gate regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(cat audit/ptscps-agent-vi-only-release.ready)" = 'PTSCPS_AGENT_VI_ONLY source=694331c5521a7a81bb592158948dd34c6fc8608c notice=vietnamese-only'
+          test "$(git -C source-php rev-parse HEAD)" = '694331c5521a7a81bb592158948dd34c6fc8608c'
+          php -l source-php/wp-content/mu-plugins/esc-agent.php
+          php -l source-php/wp-content/mu-plugins/esc-agent/src/Core/AgentLocale.php
+          php source-php/wp-content/mu-plugins/tests/esc-agent-vietnamese-only-chat-test.php
+          php source-php/wp-content/mu-plugins/tests/esc-agent-source-locale-test.php
+          python3 -m py_compile scripts/ptscps-php-live-release.py scripts/ptscps-agent-vi-only-backend-smoke.py
+      - name: Deploy Agent locale entrypoint through protected FTPS readback
+        env:
+          PTSCPS_AGENT_HISTORY_LOCALE_ONLY: '1'
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+        run: python3 scripts/ptscps-php-live-release.py
+  postrelease-backend:
+    needs: [guarded-php]
+    if: needs.guarded-php.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify non-Vietnamese requests stop before LLM
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: python3 scripts/ptscps-agent-vi-only-backend-smoke.py
