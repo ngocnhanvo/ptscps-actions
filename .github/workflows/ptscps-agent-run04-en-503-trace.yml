@@ -2,7 +2,7 @@ name: PTSCPS RUN04 EN collection 503 single-request attribution
 on:
   push:
     branches: [main]
-    paths: [audit/ptscps-agent-run04-en-503.ready]
+    paths: [audit/ptscps-agent-run04-en-503-v2.ready]
 permissions:
   contents: read
 concurrency:
@@ -12,7 +12,7 @@ jobs:
   trace:
     if: >-
       github.repository == 'ngocnhanvo/ptscps-actions'
-      && github.event.head_commit.message == 'audit(ptscps): trace RUN04 EN service 503 after Planner release'
+      && github.event.head_commit.message == 'audit(ptscps): verify corrected RUN04 telemetry path'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -22,7 +22,7 @@ jobs:
       - name: Validate fixed one-request scope
         run: |
           set -euo pipefail
-          test "$(cat audit/ptscps-agent-run04-en-503.ready)" = 'PTSCPS_RUN04_EN_503 php=cb612e024a946b3d87b775a31f8ca70a48aae331'
+          test "$(cat audit/ptscps-agent-run04-en-503-v2.ready)" = 'PTSCPS_RUN04_EN_TRACE_V2 php=cb612e024a946b3d87b775a31f8ca70a48aae331'
           python3 -m py_compile scripts/ptscps-agent-run04-en-503-trace.py
       - name: Make one English collection request and read only its telemetry
         env:
@@ -35,7 +35,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ptscps-agent-run04-en-503-summary
+          name: ptscps-agent-run04-en-503-path-v2-summary
           path: audit/ptscps-agent-run04-en-503-summary.json
           if-no-files-found: warn
           retention-days: 7
