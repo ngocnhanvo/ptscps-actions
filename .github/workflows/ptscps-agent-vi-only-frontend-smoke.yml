@@ -1,0 +1,60 @@
+name: PTSCPS Vietnamese-only AI Chatbox frontend production smoke
+on:
+  push:
+    branches: [main]
+    paths: [audit/ptscps-agent-vi-only-frontend-smoke.ready]
+permissions:
+  contents: read
+jobs:
+  frontend-smoke:
+    if: >-
+      github.repository == 'ngocnhanvo/ptscps-actions'
+      && github.event.head_commit.message == 'test(ptscps): verify Vietnamese-only Agent frontend'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify EN and FR stop at the public Astro proxy
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, os, re, urllib.request
+          from urllib.parse import urlsplit
+
+          notice = 'This feature is currently available in Vietnamese only.'
+          vals = {}
+          for line in os.environ.get('ENV_FILE', '').splitlines():
+              line = line.strip()
+              if line.startswith('export '):
+                  line = line[7:].strip()
+              m = re.match(r'^([A-Za-z_][A-Za-z0-9_]*)=(.*)$', line)
+              if not m:
+                  continue
+              raw = m.group(2).strip()
+              if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in ("'", '"'):
+                  raw = raw[1:-1]
+              vals[m.group(1)] = raw
+          base = vals.get('WC_URL_CLIENT', '').rstrip('/')
+          u = urlsplit(base)
+          if (u.scheme != 'https' or not u.hostname or u.port not in (None, 443)
+                  or u.path not in ('', '/') or u.query or u.fragment or u.username or u.password):
+              raise SystemExit('PTSCPS_AGENT_VI_ONLY_FRONTEND=BLOCKED invalid frontend origin')
+          url = base + '/api/agent/chat'
+          for language in ('en', 'fr'):
+              payload = json.dumps({'message': 'availability check', 'language': language}).encode()
+              request = urllib.request.Request(url, data=payload, method='POST', headers={
+                  'Content-Type': 'application/json',
+                  'Origin': base,
+                  'Accept': 'application/json',
+              })
+              with urllib.request.urlopen(request, timeout=20) as response:
+                  body = json.loads(response.read().decode())
+                  if response.status != 200 or body.get('reply') != notice:
+                      raise RuntimeError('Unexpected public non-Vietnamese Agent response')
+              print(f'PTSCPS_AGENT_VI_ONLY_FRONTEND_{language.upper()}=PASS')
+          print('PTSCPS_AGENT_VI_ONLY_FRONTEND=PASS')
+          PY
