@@ -1,0 +1,37 @@
+name: PTSCPS first-client TablePress evidence shape read-only audit
+on:
+  push:
+    branches: [main]
+    paths: [audit/ptscps-agent-client-first-evidence.ready]
+permissions:
+  contents: read
+jobs:
+  audit:
+    if: >-
+      github.repository == 'ngocnhanvo/ptscps-actions'
+      && github.event.head_commit.message == 'test(ptscps): inspect first-client source evidence shape only'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Guard exact two-source non-LLM read-only diagnostic
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(cat audit/ptscps-agent-client-first-evidence.ready)" = 'PTSCPS_CLIENT_EVIDENCE source=b8e5726902835e8274dfcdae803b87e5638a14a1 count=2 readonly=1'
+          python3 -m py_compile scripts/ptscps-agent-client-first-evidence-audit.py scripts/ptscps-agent-fact-intent-grounded.py
+          python3 scripts/ptscps-agent-fact-intent-grounded.py --self-test
+      - name: Inspect only sanitized source structure for VI/EN published clients
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: python3 scripts/ptscps-agent-client-first-evidence-audit.py
+      - name: Save sanitized Boolean evidence shape
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ptscps-client-first-evidence-shape
+          path: audit/ptscps-agent-client-first-evidence-summary.json
+          if-no-files-found: warn
+          retention-days: 7
