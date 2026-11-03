@@ -47,11 +47,15 @@ jobs:
         run: node scripts/ptscps-intro-pages-audit.mjs
       - name: Verify deployed introduction pages on desktop and mobile
         run: node scripts/ptscps-intro-pages-production-qa.mjs
+      - name: Verify award images and lightbox on deployed frontend
+        run: node scripts/ptscps-intro-awards-production-qa.mjs
       - name: Upload final introduction visual QA screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ptscps-intro-pages-final-qa-${{ github.run_id }}
-          path: artifacts/ptscps-intro-pages-final/
+          path: |
+            artifacts/ptscps-intro-pages-final/
+            artifacts/ptscps-intro-pages/
           if-no-files-found: warn
           retention-days: 14

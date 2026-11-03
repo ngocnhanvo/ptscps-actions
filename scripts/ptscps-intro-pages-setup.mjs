@@ -611,7 +611,9 @@ async function waitForProduction() {
     try {
       const response = await context.request.get(`${front}/${probe.slug}?_intro_qa=${Date.now()}`, { timeout: 25000, headers: { 'Cache-Control': 'no-cache' } });
       const text = response.ok() ? await response.text() : '';
-      if (response.status() === 200 && text.includes(probe.title) && text.includes(probe.snippet)) {
+      const awardBuildReady = text.includes('data-about-award-image')
+        && text.includes('data-gallery-trigger="about00-awards"');
+      if (response.status() === 200 && text.includes(probe.title) && text.includes(probe.snippet) && awardBuildReady) {
         console.log(`INTRO_BUILD_DEPLOYED=PASS attempt=${attempt}`);
         return;
       }
