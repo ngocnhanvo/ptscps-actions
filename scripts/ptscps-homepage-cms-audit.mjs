@@ -180,9 +180,13 @@ try {
   const selectionResults = [];
   for (const target of targets) {
     const before = editableResponses.length;
-    const image = builderFrame.locator(`img[data-esc-builder-qa-image="${target.index}"]`);
-    await image.scrollIntoViewIfNeeded();
-    await image.click({ force: true });
+    const clicked = await builderFrame.locator('body').evaluate(({ index }) => {
+      const image = document.querySelector(`img[data-esc-builder-qa-image="${index}"]`);
+      if (!image) return false;
+      image.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+      return true;
+    }, target);
+    if (!clicked) throw Error('Builder image target disappeared before selection ' + target.tableId + ':' + target.row + ':' + target.field);
     const caption = p.locator('#esc-vb-image-caption');
     await caption.waitFor({ state: 'visible', timeout: 12000 });
     await p.waitForFunction(({ tableId, row, field }) => {
