@@ -180,7 +180,7 @@ try {
   const selectionResults = [];
   for (const target of targets) {
     const before = editableResponses.length;
-    const clicked = await builderFrame.locator('body').evaluate(({ index }) => {
+    const clicked = await builderFrame.locator('body').evaluate((_body, { index }) => {
       const image = document.querySelector(`img[data-esc-builder-qa-image="${index}"]`);
       if (!image) return false;
       image.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
