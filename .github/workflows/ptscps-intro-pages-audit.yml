@@ -36,5 +36,12 @@ jobs:
               f.write('WP_ORIGIN='+wp+'\nFRONT_ORIGIN='+front+'\n')
           print('INTRO_AUDIT_ORIGINS=PASS')
           PY
+      - name: Install Playwright Chromium
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium
       - name: Audit current target pages, ESC tables and Header menu
+        env:
+          WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
+          WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
         run: node scripts/ptscps-intro-pages-audit.mjs
