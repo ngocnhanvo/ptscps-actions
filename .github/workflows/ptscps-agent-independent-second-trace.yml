@@ -12,7 +12,7 @@ jobs:
   scoped-trace:
     if: >-
       github.repository == 'ngocnhanvo/ptscps-actions'
-      && github.event.head_commit.message == 'audit(ptscps): attribute two failed second-row answers only'
+      && github.event.head_commit.message == 'audit(ptscps): identify homepage collection candidate'
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
@@ -22,7 +22,7 @@ jobs:
       - name: Verify exact scope and syntax
         run: |
           set -euo pipefail
-          test "$(cat audit/ptscps-agent-independent-second-trace.ready)" = 'PTSCPS_SECOND_TRACE source=b229f7fd9e18b91879a6599315ae087786543a24 cases=2'
+          test "$(cat audit/ptscps-agent-independent-second-trace.ready)" = 'PTSCPS_SECOND_TRACE source=dec0bf3a76ab1036d0ae85aeb4033acfefa41b80 cases=2 candidates=public'
           python3 -m py_compile scripts/ptscps-agent-client-routing-trace.py scripts/ptscps-agent-independent-fact-sample.py scripts/ptscps-agent-independent-second-trace.py
       - name: Trace ONLY two already failed second-row questions
         env:

@@ -25,13 +25,48 @@ CASES = (
 )
 
 
+def table_language(table_id):
+    table_id = str(table_id or '')
+    if table_id.count('_') >= 2:
+        if table_id.endswith('_en'):
+            return 'en'
+        if table_id.endswith('_vi'):
+            return 'vi'
+    return 'vi'
+
+
+def probe_home_candidates(wp):
+    candidates = []
+    for page in range(1, 6):
+        status, payload = diag.qa.request_json(
+            wp + f'/wp-json/tablepress/v1/tables/prefix/home_?page={page}&per_page=30', timeout=30)
+        if status != 200 or not isinstance(payload, list):
+            break
+        for table in payload:
+            if not isinstance(table, dict):
+                continue
+            table_id = str(table.get('id') or '')
+            items = table.get('items')
+            rows = len(items) if isinstance(items, list) else -1
+            meta = diag.qa.norm(str(table.get('title') or '') + ' ' + str(table.get('description') or ''))
+            service_hint = ('service' in meta or 'dich vu' in meta or 'linh vuc' in meta)
+            if service_hint or rows == 5:
+                candidates.append({'table_id': table_id, 'language': table_language(table_id),
+                                   'rows': rows, 'service_hint': service_hint})
+        if len(payload) < 30:
+            break
+    return sorted(candidates, key=lambda x: (x['language'], x['table_id']))
+
+
 def main():
     wp = diag.qa.origin('WC_URL', 'admin-ptscps.thegioihosting.io.vn')
     front = diag.qa.origin('WC_URL_CLIENT', 'ptscps.thegioihosting.io.vn')
-    report = {'schema': 1, 'source_php': 'c1421e897127f58e5a23ac771608028f7a22ab18',
+    report = {'schema': 1, 'source_php': 'dec0bf3a76ab1036d0ae85aeb4033acfefa41b80',
               'scope': 'two_previously_failed_second_row_cases_only', 'cases': [],
+              'home_collection_candidates': probe_home_candidates(wp),
               'notes': ['Opt-in synthetic trace; no response/source text, params, prompts or secrets are exported.',
                         'Trace reveals planner, tool and provider stages; source identity requires separate trusted validation.',
+                        'Public TablePress IDs, row counts and service-like flags are exported only for source attribution.',
                         'No CMS/index/FTP write, PHP release, Astro build, or already-PASS case rerun.']}
     ftp = None
     try:
