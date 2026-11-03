@@ -266,7 +266,7 @@ async function setAcf(name, value, { optional = false } = {}) {
   }
   const select = field.locator('select').first();
   if (await select.count()) { await select.selectOption(String(value)); return; }
-  const exact = field.locator(`input[value="${String(value).replaceAll('"', '\\"')}"]`).first();
+  const exact = field.locator(`input[type="radio"][value="${String(value).replaceAll('"', '\\"')}"],input[type="checkbox"][value="${String(value).replaceAll('"', '\\"')}"]`).first();
   if (await exact.count()) { await exact.check(); return; }
   const text = field.locator('input[type="text"],input[type="number"]').first();
   if (await text.count()) { await text.fill(String(value)); return; }
