@@ -1,0 +1,94 @@
+name: PTSCPS compact Qwen Planner fallback guarded release and regression QA
+on:
+  push:
+    branches: [main]
+    paths: [audit/ptscps-agent-qwen-fallback-release.ready]
+permissions:
+  contents: read
+concurrency:
+  group: ptscps-wp-php-release
+  cancel-in-progress: false
+jobs:
+  guarded-php:
+    if: >-
+      github.repository == 'ngocnhanvo/ptscps-actions'
+      && github.event.head_commit.message == 'deploy(ptscps): compact Qwen Planner fallback and regression QA'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: ngocnhanvo/ptscps-php
+          ref: 55e8e587e6daf7480ae06c96cd61db052aa5e237
+          token: ${{ secrets.SOURCE_REPO_PAT }}
+          path: source-php
+          persist-credentials: false
+      - name: Verify exact source and Planner regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(cat audit/ptscps-agent-qwen-fallback-release.ready)" = 'PTSCPS_QWEN_PLANNER_FALLBACK source=55e8e587e6daf7480ae06c96cd61db052aa5e237 runtime_files=2 qa=ordinal8+paraphrase2'
+          test "$(git -C source-php rev-parse HEAD)" = '55e8e587e6daf7480ae06c96cd61db052aa5e237'
+          php -l source-php/wp-content/mu-plugins/esc-agent/src/Core/LlmProviderConfig.php
+          php -l source-php/wp-content/mu-plugins/esc-agent/src/Core/TelemetryPlanner.php
+          php source-php/wp-content/mu-plugins/tests/esc-agent-planner-priority-test.php
+          php source-php/wp-content/mu-plugins/tests/esc-agent-qwen-compact-planner-test.php
+          php source-php/wp-content/mu-plugins/tests/esc-agent-llm-half-open-lazy-test.php
+          php source-php/wp-content/mu-plugins/tests/esc-agent-llm-fail-closed-test.php
+          python3 -m py_compile scripts/ptscps-php-live-release.py scripts/ptscps-agent-independent-fact-sample.py scripts/ptscps-agent-semantic-paraphrase-qa.py
+      - name: Deploy Qwen provider config through protected FTPS readback
+        env:
+          PTSCPS_AGENT_PROVIDER_ROUTING_ONLY: '1'
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+        run: python3 scripts/ptscps-php-live-release.py
+      - name: Deploy compact Planner runtime through protected FTPS readback
+        env:
+          PTSCPS_AGENT_LLM_PROBE_ONLY: '1'
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+        run: python3 scripts/ptscps-php-live-release.py
+  postrelease-qa:
+    needs: [guarded-php]
+    if: needs.guarded-php.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Recheck eight source-grounded ordinal facts
+        id: ordinal
+        continue-on-error: true
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: python3 scripts/ptscps-agent-independent-fact-sample.py
+      - name: Preserve paraphrase consistency in VI and EN
+        id: semantic
+        continue-on-error: true
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: python3 scripts/ptscps-agent-semantic-paraphrase-qa.py
+      - name: Upload sanitized regression summaries
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ptscps-qwen-planner-fallback-regression
+          path: |
+            audit/ptscps-agent-independent-fact-summary.json
+            audit/ptscps-agent-semantic-paraphrase-summary.json
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Enforce regression acceptance
+        if: always()
+        shell: bash
+        run: |
+          test '${{ steps.ordinal.outcome }}' = 'success'
+          test '${{ steps.semantic.outcome }}' = 'success'
