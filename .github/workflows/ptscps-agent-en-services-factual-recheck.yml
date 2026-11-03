@@ -1,0 +1,66 @@
+name: PTSCPS EN services factual coverage one-case recheck
+on:
+  push:
+    branches: [main]
+    paths: [audit/ptscps-agent-en-services-factual-recheck.ready]
+permissions:
+  contents: read
+concurrency:
+  group: ptscps-en-services-factual-one-case
+  cancel-in-progress: false
+jobs:
+  check:
+    if: >-
+      github.repository == 'ngocnhanvo/ptscps-actions'
+      && github.event.head_commit.message == 'test(ptscps): verify one EN service collection after transient 503'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify one-case-only scope
+        run: |
+          set -euo pipefail
+          test "$(cat audit/ptscps-agent-en-services-factual-recheck.ready)" = 'PTSCPS_EN_SERVICES_SINGLE_CASE source=cb612e024a946b3d87b775a31f8ca70a48aae331'
+          python3 -m py_compile scripts/ptscps-agent-factual-acceptance.py
+      - name: Compare EN service answer to published CMS labels
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: |
+          python3 - <<'PY'
+          import importlib.util
+          import json
+          import sys
+          from pathlib import Path
+          path = Path('scripts/ptscps-agent-factual-acceptance.py')
+          spec = importlib.util.spec_from_file_location('factual_qa', path)
+          module = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+          # Preserve original source-derived acceptance rules; run only one failed case.
+          module.CASES = tuple(x for x in module.CASES if x[0] == 'en_services')
+          if len(module.CASES) != 1:
+              raise RuntimeError('Unexpected factual case scope')
+          report = module.run()
+          if len(report.get('cases', [])) != 1:
+              raise RuntimeError('Missing source-grounded English case')
+          case = report['cases'][0]
+          fields = ('id', 'status', 'source_rows', 'expected_count', 'agent_http',
+                    'coverage', 'unlabelled_rows', 'locale_fail', 'fallback')
+          sanitized = {'schema': 1, 'case_count': 1,
+                       'metrics': {k: case.get(k) for k in fields},
+                       'note': 'No CMS labels, answers, prompts, sessions or credentials retained.'}
+          Path('audit/ptscps-en-services-single-result.json').write_text(
+              json.dumps(sanitized, indent=2) + '\n')
+          print('PTSCPS_EN_SINGLE_FACTUAL=' + str(sanitized['metrics']))
+          if case.get('status') != 'PASS':
+              sys.exit(1)
+          PY
+      - name: Preserve aggregate only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ptscps-en-services-single-result
+          path: audit/ptscps-en-services-single-result.json
+          if-no-files-found: warn
+          retention-days: 7
