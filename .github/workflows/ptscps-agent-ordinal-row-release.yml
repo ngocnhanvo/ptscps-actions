@@ -1,4 +1,4 @@
-name: PTSCPS ordinal logical-row guarded PHP release and targeted QA
+name: PTSCPS canonical TablePress metadata guarded PHP release and targeted QA
 on:
   push:
     branches: [main]
@@ -12,7 +12,7 @@ jobs:
   guarded-php:
     if: >-
       github.repository == 'ngocnhanvo/ptscps-actions'
-      && github.event.head_commit.message == 'deploy(ptscps): ordinal logical-row PHP and two-case QA'
+      && github.event.head_commit.message == 'deploy(ptscps): canonical TablePress metadata PHP and two-case QA'
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
@@ -22,7 +22,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: ngocnhanvo/ptscps-php
-          ref: c1421e897127f58e5a23ac771608028f7a22ab18
+          ref: b229f7fd9e18b91879a6599315ae087786543a24
           token: ${{ secrets.SOURCE_REPO_PAT }}
           path: source-php
           persist-credentials: false
@@ -30,17 +30,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(cat audit/ptscps-agent-ordinal-row-release.ready)" = 'PTSCPS_ORDINAL_ROWS source=c1421e897127f58e5a23ac771608028f7a22ab18 files=2 qa=2'
-          test "$(git -C source-php rev-parse HEAD)" = 'c1421e897127f58e5a23ac771608028f7a22ab18'
-          php -l source-php/wp-content/mu-plugins/esc-agent/src/Knowledge/KnowledgeRetriever.php
+          test "$(cat audit/ptscps-agent-ordinal-row-release.ready)" = 'PTSCPS_CANONICAL_TABLEPRESS source=b229f7fd9e18b91879a6599315ae087786543a24 files=1 qa=2'
+          test "$(git -C source-php rev-parse HEAD)" = 'b229f7fd9e18b91879a6599315ae087786543a24'
           php -l source-php/wp-content/mu-plugins/esc-agent/src/Knowledge/KnowledgeIndex.php
           php source-php/wp-content/mu-plugins/tests/esc-agent-ordinal-original-query-test.php
           php source-php/wp-content/mu-plugins/tests/esc-agent-ordinal-collection-test.php
           php source-php/wp-content/mu-plugins/tests/esc-agent-collection-source-registry-test.php
           python3 -m py_compile scripts/ptscps-php-live-release.py scripts/ptscps-agent-second-row-only-retest.py
-      - name: Deploy only the two changed retrieval files via protected FTPS with readback
+      - name: Deploy only KnowledgeIndex via protected FTPS with readback
         env:
-          PTSCPS_AGENT_ORDINAL_ROWS_ONLY: '1'
+          PTSCPS_AGENT_COLLECTION_METADATA_ONLY: '1'
           ENV_FILE: ${{ secrets.ENV_FILE }}
           FTP_SERVER: ${{ secrets.FTP_SERVER }}
           FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
@@ -63,7 +62,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ptscps-ordinal-row-targeted-qa
+          name: ptscps-canonical-tablepress-targeted-qa
           path: audit/ptscps-agent-second-row-only-summary.json
           if-no-files-found: warn
           retention-days: 7
