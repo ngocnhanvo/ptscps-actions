@@ -1,0 +1,47 @@
+name: PTSCPS RAG RUN03 natural-case retrieval read-only diagnosis
+on:
+  push:
+    branches: [main]
+    paths: [audit/ptscps-agent-rag-run03-natural.ready]
+permissions:
+  contents: read
+concurrency:
+  group: ptscps-rag-run03-natural-readonly
+  cancel-in-progress: false
+jobs:
+  natural-diagnostics:
+    if: >-
+      github.repository == 'ngocnhanvo/ptscps-actions'
+      && github.event.head_commit.message == 'audit(ptscps): attribute RUN03 four natural questions read-only'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate fixed read-only scope
+        run: |
+          set -euo pipefail
+          test "$(cat audit/ptscps-agent-rag-run03-natural.ready)" = 'PTSCPS_RUN03_NATURAL_READ_ONLY source=0b96275c0da1b249ef3956a4b19188162eb0e2f7'
+          node --check scripts/ptscps-agent-rag-run03-natural.mjs
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install Playwright Chromium
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Classify four natural questions through WordPress admin read-only endpoint
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+          WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
+          WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
+        run: node scripts/ptscps-agent-rag-run03-natural.mjs
+      - name: Upload sanitized aggregate
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ptscps-rag-run03-natural-summary
+          path: audit/ptscps-agent-rag-run03-natural-summary.json
+          if-no-files-found: warn
+          retention-days: 14
