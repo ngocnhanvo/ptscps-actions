@@ -1,0 +1,49 @@
+name: PTSCPS RUN03 retrieval after metadata release (read-only)
+on:
+  push:
+    branches: [main]
+    paths:
+      - audit/ptscps-agent-run03-post-metadata.ready
+permissions:
+  contents: read
+concurrency:
+  group: ptscps-run03-post-metadata-observe
+  cancel-in-progress: false
+jobs:
+  compare-current-production:
+    if: >-
+      github.repository == 'ngocnhanvo/ptscps-actions'
+      && github.event.head_commit.message == 'audit(ptscps): remeasure RUN03 retrieval after metadata PHP release'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check scope and syntax
+        run: |
+          set -euo pipefail
+          test "$(cat audit/ptscps-agent-run03-post-metadata.ready)" = 'PTSCPS_RUN03_POST_METADATA source=cb612e024a946b3d87b775a31f8ca70a48aae331 read_only=1'
+          node --check scripts/ptscps-agent-rag-run03-mode-compare.mjs
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install Playwright Chromium
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Remeasure four existing natural queries, without deployment
+        env:
+          PTSCPS_SOURCE_SHA: cb612e024a946b3d87b775a31f8ca70a48aae331
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+          WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
+          WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
+        run: node scripts/ptscps-agent-rag-run03-mode-compare.mjs
+      - name: Preserve aggregate-only read-only evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ptscps-run03-post-metadata-retrieval
+          path: audit/ptscps-agent-rag-run03-mode-compare-summary.json
+          if-no-files-found: error
+          retention-days: 14
