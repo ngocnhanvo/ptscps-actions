@@ -103,7 +103,76 @@ async function readTable(id) {
   return response.json();
 }
 
+async function listTablesForRecovery() {
+  const collected = [];
+  for (let pageNo = 1; pageNo <= 20; pageNo++) {
+    const response = await page.request.get(uri(`/wp-json/tablepress/v1/tables/prefix/all?per_page=50&page=${pageNo}`), {
+      timeout: 25000,
+      headers: { 'Cache-Control': 'no-cache' },
+    });
+    if (!response.ok()) return collected;
+    const rows = await response.json();
+    if (!Array.isArray(rows)) return collected;
+    collected.push(...rows);
+    const totalPages = Number(response.headers()['x-wp-totalpages'] || 1);
+    if (pageNo >= totalPages) break;
+  }
+  return collected;
+}
+
+async function renameOpenTable(currentId, spec) {
+  const idInput = page.locator('#table-id');
+  assert(await idInput.count() === 1, 'Native ESC Table ID field unavailable');
+  const beforeId = await idInput.inputValue();
+  assert(String(beforeId) === String(currentId), `Unexpected native ESC Table ID: ${beforeId}`);
+  let confirmationSeen = false;
+  page.once('dialog', async (dialog) => {
+    assert(dialog.type() === 'confirm', 'Unexpected dialog while renaming ESC Table');
+    confirmationSeen = true;
+    await dialog.accept();
+  });
+  await idInput.fill(spec.id);
+  // TablePress 3.x only commits an edited ID from the React field on blur,
+  // after the native confirmation dialog is accepted.
+  await page.locator('#table-name').click();
+  for (let i = 0; i < 10 && !confirmationSeen; i++) await sleep(100);
+  assert(confirmationSeen, 'Native ESC Table ID confirmation was not shown');
+  assert(await idInput.inputValue() === spec.id, 'Native ESC Table ID did not update after confirmation');
+  const save = page.getByRole('button', { name: /^(Save Changes|Lưu thay đổi)$/i });
+  assert(await save.count() > 0, 'Native ESC Table Save Changes unavailable');
+  await save.last().click();
+  for (let i = 0; i < 12; i++) {
+    await sleep(700);
+    const created = await readTable(spec.id).catch(() => null);
+    if (created?.id === spec.id) return created;
+  }
+  throw Error('Native ESC Table rename did not persist ' + spec.id);
+}
+
+async function findRecoverableEmptyTable(spec) {
+  const tables = await listTablesForRecovery();
+  const candidates = tables.filter((table) => {
+    const fields = Array.isArray(table?.fields) ? table.fields : [];
+    const items = Array.isArray(table?.items) ? table.items : [];
+    const noConfiguredFields = fields.every((field) => !String(field?.key || '').trim());
+    return String(table?.id || '') !== spec.id
+      && String(table?.name || '').trim() === spec.title
+      && String(table?.description || '').trim() === spec.description
+      && noConfiguredFields
+      && items.length === 0;
+  });
+  assert(candidates.length <= 1, `Ambiguous recoverable ESC Tables for ${spec.id}: ${candidates.length}`);
+  return candidates[0] || null;
+}
+
 async function createEmptyTable(spec) {
+  const recoverable = await findRecoverableEmptyTable(spec);
+  if (recoverable) {
+    console.log(`INTRO_TABLE=${spec.id} RECOVER_EXISTING_EMPTY source_id=${recoverable.id}`);
+    await page.goto(uri(`/wp-admin/admin.php?page=tablepress&action=edit&table_id=${recoverable.id}`), { waitUntil: 'domcontentloaded', timeout: 45000 });
+    return renameOpenTable(recoverable.id, spec);
+  }
+
   await page.goto(uri('/wp-admin/admin.php?page=tablepress&action=add'), { waitUntil: 'domcontentloaded', timeout: 45000 });
   await page.locator('input[name="table[name]"]').fill(spec.title);
   await page.locator('textarea[name="table[description]"]').fill(spec.description);
@@ -111,16 +180,9 @@ async function createEmptyTable(spec) {
   await page.locator('input[name="table[columns]"]').fill(String(tableFields.length));
   await page.getByRole('button', { name: /^(Add Table|Thêm bảng)$/i }).click();
   await page.waitForURL(/page=tablepress.*action=edit|action=edit.*page=tablepress/, { timeout: 45000 });
-  await page.locator('#table-id').fill(spec.id);
-  const save = page.getByRole('button', { name: /^(Save Changes|Lưu thay đổi)$/i });
-  assert(await save.count() > 0, 'Native ESC Table Save Changes unavailable');
-  await save.last().click();
-  for (let i = 0; i < 10; i++) {
-    await sleep(700);
-    const created = await readTable(spec.id).catch(() => null);
-    if (created?.id === spec.id) return created;
-  }
-  throw Error('Native ESC Table creation did not persist ' + spec.id);
+  const currentId = new URL(page.url()).searchParams.get('table_id') || await page.locator('#table-id').inputValue();
+  assert(currentId, 'Native ESC Table creation did not expose generated ID');
+  return renameOpenTable(currentId, spec);
 }
 
 function rowObject(row) {
