@@ -32,8 +32,8 @@ jobs:
           wp,front=origin('WC_URL'),origin('WC_URL_CLIENT')
           if wp==front: raise SystemExit('WordPress/frontend origins collide')
           with open(os.environ['GITHUB_ENV'],'a') as f:
-              f.write('WP_ORIGIN='+wp+'\\n')
-              f.write('FRONT_ORIGIN='+front+'\\n')
+              f.write('WP_ORIGIN='+wp+'\n')
+              f.write('FRONT_ORIGIN='+front+'\n')
           print('ABOUT_PREFLIGHT_ORIGINS=PASS')
           PY
       - name: Install Playwright Chromium
