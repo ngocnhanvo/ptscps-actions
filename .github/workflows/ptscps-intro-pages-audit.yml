@@ -1,0 +1,40 @@
+name: PTSCPS introduction pages CMS audit (read-only)
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'audit/ptscps-intro-pages-audit-20261104.ready'
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Resolve configured origins
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os,re
+          from urllib.parse import urlsplit
+          vals=dict(re.findall(r'^\s*(?:export\s+)?(WC_URL|WC_URL_CLIENT)\s*=\s*(.+)\s*$',os.environ.get('ENV_FILE',''),re.M))
+          def norm(k):
+              u=urlsplit(vals.get(k,'').strip().strip('"\''))
+              if u.scheme!='https' or not u.hostname or u.path not in ('','/') or u.query or u.fragment or u.username or u.password or u.port not in (None,443):
+                  raise SystemExit('INVALID_ORIGIN '+k)
+              return 'https://'+u.hostname
+          wp,front=norm('WC_URL'),norm('WC_URL_CLIENT')
+          if wp==front: raise SystemExit('ORIGIN_COLLISION')
+          with open(os.environ['GITHUB_ENV'],'a') as f:
+              f.write('WP_ORIGIN='+wp+'\nFRONT_ORIGIN='+front+'\n')
+          print('INTRO_AUDIT_ORIGINS=PASS')
+          PY
+      - name: Audit current target pages, ESC tables and Header menu
+        run: node scripts/ptscps-intro-pages-audit.mjs
