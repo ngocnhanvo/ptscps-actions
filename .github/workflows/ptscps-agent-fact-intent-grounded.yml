@@ -1,0 +1,40 @@
+name: PTSCPS fact-intent source-grounded QA (four limited cases)
+on:
+  push:
+    branches: [main]
+    paths:
+      - audit/ptscps-agent-fact-intent.ready
+permissions:
+  contents: read
+concurrency:
+  group: ptscps-agent-fact-intent-four
+  cancel-in-progress: false
+jobs:
+  fact-intent:
+    if: >-
+      github.repository == 'ngocnhanvo/ptscps-actions'
+      && github.event.head_commit.message == 'test(ptscps): evaluate four published factual first-item queries'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate bounded scope and offline assertions
+        run: |
+          set -euo pipefail
+          test "$(cat audit/ptscps-agent-fact-intent.ready)" = 'PTSCPS_FACT_INTENT php=cb612e024a946b3d87b775a31f8ca70a48aae331 limited=4'
+          python3 -m py_compile scripts/ptscps-agent-fact-intent-grounded.py
+          python3 scripts/ptscps-agent-fact-intent-grounded.py --self-test
+      - name: Verify actual published first-item facts with four live LLM questions
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: python3 scripts/ptscps-agent-fact-intent-grounded.py
+      - name: Retain sanitized facts-only metrics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ptscps-agent-fact-intent-four-summary
+          path: audit/ptscps-agent-fact-intent-summary.json
+          if-no-files-found: warn
+          retention-days: 7
