@@ -83,12 +83,22 @@ try {
       const firstRowY = metrics[0]?.y;
       assert.equal(metrics.filter((item) => Math.abs(item.y - firstRowY) <= 4).length, 3, 'desktop service detail should use three project columns');
       assert(metrics.every((item) => item.width >= 330), 'desktop service project cards are too narrow');
+      const lastCard = metrics.at(-1);
+      assert(lastCard && Math.abs((lastCard.x + lastCard.width / 2) - viewport.width / 2) <= 60, 'desktop incomplete project row should be centered');
     } else {
       assert(metrics.every((item) => item.width >= 340), 'mobile service project cards should use the full content width');
       assert(metrics.length < 2 || metrics[1].y > metrics[0].y + 100, 'mobile service detail should use one project column');
     }
     const mediaBox = await page.locator('[data-service-projects-heading] + div article > a > div').first().boundingBox();
     assert(mediaBox && mediaBox.width / mediaBox.height > 1.25 && mediaBox.width / mediaBox.height < 1.42, `${viewport.name} project media is not approximately 4:3`);
+    const projectImages = projectCards.locator('img');
+    for (let i = 0; i < await projectImages.count(); i += 1) {
+      await projectImages.nth(i).scrollIntoViewIfNeeded();
+      await page.waitForFunction((index) => {
+        const image = document.querySelectorAll('[data-service-projects-heading] + div article img')[index];
+        return image && image.complete && image.naturalWidth > 0;
+      }, i, { timeout: 12000 });
+    }
     const detailOverflow = await page.evaluate(() => ({ client: document.documentElement.clientWidth, scroll: document.documentElement.scrollWidth }));
     assert(detailOverflow.scroll <= detailOverflow.client + 2, `${viewport.name} detail horizontal overflow`);
     noAdminOrigin(await page.content(), `${viewport.name}-service-detail`);
