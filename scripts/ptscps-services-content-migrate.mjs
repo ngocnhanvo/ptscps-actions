@@ -81,7 +81,21 @@ async function login(){
   await page.goto(`${wp}/wp-login.php`,{waitUntil:'domcontentloaded',timeout:50000});
   await page.locator('#user_login').fill(user);
   await page.locator('#user_pass').fill(pass);
-  await Promise.all([page.waitForURL(/\/wp-admin\//,{timeout:50000}),page.locator('#wp-submit').click()]);
+  await Promise.all([page.waitForLoadState('domcontentloaded'),page.locator('#wp-submit').click()]);
+  if(new URL(page.url()).searchParams.get('action')==='confirm_admin_email'){
+    const skip=page.locator('a.skip-confirmation-button').first();
+    const confirm=page.locator('#correct-admin-email').first();
+    if(await skip.count()){
+      await Promise.all([page.waitForURL(/\/wp-admin\//,{timeout:50000}),skip.click()]);
+    }else if(await confirm.count()){
+      await Promise.all([page.waitForURL(/\/wp-admin\//,{timeout:50000}),confirm.click()]);
+    }else{
+      throw Error('WordPress admin email confirmation controls unavailable');
+    }
+  }else if(!/\/wp-admin\//.test(page.url())){
+    await page.waitForURL(/\/wp-admin\//,{timeout:50000});
+  }
+  assert(new URL(page.url()).origin===wp && /\/wp-admin\//.test(page.url()),'WordPress admin login did not reach configured admin');
   report('ADMIN_AUTH','PASS');
 }
 async function restNonce(){
