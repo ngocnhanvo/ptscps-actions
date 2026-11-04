@@ -613,13 +613,47 @@ async function ensureMenu(nonce){
 async function buildViaWordPress(){
   await page.goto(uri('/wp-admin/admin.php?page=vcs-build-trigger'),{waitUntil:'domcontentloaded',timeout:50000});
   const button=page.locator('#vcs-build-btn-main');
-  assert(await button.count()===1,'WordPress Build Website tool unavailable');
-  let state=await page.evaluate(()=>({configured:globalThis.vcsBuild?.build_configured,active:globalThis.vcsBuild?.initial_active,pending:globalThis.vcsBuild?.pending_count,disabled:document.querySelector('#vcs-build-btn-main')?.disabled}));
-  report('BUILD_STATE',state);
-  assert(state.configured===true||state.configured==='1'||state.configured===1,'WordPress build not configured');
-  if(state.active){report('BUILD','OTHER_BUILD_RUNNING_SKIP_DUPLICATE');return;}
   const force=page.locator('#vcs-force-build');
-  if(await button.isDisabled()){assert(await force.count()&&!await force.isDisabled(),'Build disabled and force unavailable');await force.check();}
+  assert(await button.count()===1,'WordPress Build Website tool unavailable');
+  assert(await force.count()===1,'WordPress Build Website force control unavailable');
+  const configured=await page.evaluate(()=>globalThis.vcsBuild?.build_configured);
+  assert(configured===true||configured==='1'||configured===1,'WordPress build not configured');
+
+  let state=await page.evaluate(()=>({
+    active:Boolean(globalThis.vcsBuild?.initial_active),
+    pending:Number(globalThis.vcsBuild?.pending_count||0),
+    disabled:Boolean(document.querySelector('#vcs-build-btn-main')?.disabled),
+    forceDisabled:Boolean(document.querySelector('#vcs-force-build')?.disabled),
+  }));
+  report('BUILD_STATE',state);
+
+  if(state.active){
+    await page.waitForFunction(()=>{
+      const button=document.querySelector('#vcs-build-btn-main');
+      const force=document.querySelector('#vcs-force-build');
+      return Boolean(button)&&Boolean(force)&&(!button.disabled||!force.disabled);
+    },null,{timeout:20000}).catch(()=>null);
+
+    state=await page.evaluate(()=>({
+      pending:Number(document.querySelector('#vcs-pending-count')?.textContent||0),
+      disabled:Boolean(document.querySelector('#vcs-build-btn-main')?.disabled),
+      forceDisabled:Boolean(document.querySelector('#vcs-force-build')?.disabled),
+      status:String(document.querySelector('#vcs-status-text')?.textContent||'').trim(),
+    }));
+    report('BUILD_STATE_REFRESHED',state);
+
+    if(state.disabled&&state.forceDisabled){
+      report('BUILD','OTHER_BUILD_RUNNING_SKIP_DUPLICATE');
+      return;
+    }
+
+    if(await isProductionReady()){
+      report('BUILD','ACTIVE_BUILD_COMPLETED_AND_PRODUCTION_READY');
+      return;
+    }
+  }
+
+  if(await button.isDisabled()){assert(!await force.isDisabled(),'Build disabled and force unavailable');await force.check();}
   const ackPromise=page.waitForResponse(r=>r.url().startsWith(wp+'/wp-admin/admin-ajax.php')&&r.request().method()==='POST'&&String(r.request().postData()||'').includes('action=vcs_trigger_build'),{timeout:45000});
   await button.click(); const ack=await ackPromise; assert(ack.ok(),`Build trigger HTTP ${ack.status()}`); const body=await ack.json(); assert(body?.success,'WordPress build rejected'); report('BUILD','TRIGGERED_VIA_WORDPRESS');
 }
