@@ -411,6 +411,21 @@ async function ensurePage(spec, original) {
       }
       await sleep(800*Math.min(attempt,4));
     }
+    if(!(readback?.status==='publish'&&readback.slug===spec.slug)){
+      for(let attempt=1;attempt<=6;attempt++){
+        const publicResponse=await page.request.get(uri(`/wp-json/wp/v2/pages?status=publish&slug=${encodeURIComponent(spec.slug)}&per_page=20&_fields=id,slug,status,acf,content,title`),{timeout:30000,headers:{'Cache-Control':'no-cache'}}).catch(()=>null);
+        if(publicResponse?.ok()){
+          const rows=await publicResponse.json().catch(()=>[]);
+          const exact=Array.isArray(rows)?rows.find(item=>Number(item?.id)===id&&item?.slug===spec.slug&&item?.status==='publish'):null;
+          if(exact){
+            readback=exact;
+            report('PAGE_PUBLISH_PUBLIC_READBACK_RECOVERED',{slug:spec.slug,id,attempt});
+            break;
+          }
+        }
+        await sleep(1000*Math.min(attempt,3));
+      }
+    }
     if(readback?.status==='publish'&&readback.slug===spec.slug)break;
     if(publishAttempt<2){
       report('PAGE_PUBLISH_READBACK_RETRY',{slug:spec.slug,status:readback?.status||'unknown'});
