@@ -43,7 +43,9 @@ try {
     assert.deepEqual(names, expectedTitles, `${viewport.name} category order mismatch`);
 
     const hrefs = await cards.evaluateAll((nodes) => nodes.map((node) => node.getAttribute('href') || ''));
-    assert.deepEqual(hrefs, services.map((item) => `/dich-vu/${item.slug}`), `${viewport.name} category href mismatch`);
+    const destinations = hrefs.map((href) => new URL(href, frontUrl.origin));
+    assert(destinations.every((url) => url.origin === frontUrl.origin), `${viewport.name} category link leaves frontend origin`);
+    assert.deepEqual(destinations.map((url) => url.pathname), services.map((item) => `/dich-vu/${item.slug}`), `${viewport.name} category href mismatch`);
     assert((await cards.evaluateAll((nodes) => nodes.map((node) => node.getAttribute('target') || ''))).every((target) => target !== '_blank'), `${viewport.name} category link opens new tab`);
 
     const images = cards.locator('img');
