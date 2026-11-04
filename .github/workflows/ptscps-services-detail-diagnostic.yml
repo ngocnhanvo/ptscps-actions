@@ -1,0 +1,50 @@
+name: PTSCPS services detail production diagnostic
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'audit/ptscps-services-detail-diagnostic.ready'
+      - 'scripts/ptscps-services-detail-diagnostic.mjs'
+      - '.github/workflows/ptscps-services-detail-diagnostic.yml'
+permissions:
+  contents: read
+concurrency:
+  group: ptscps-services-detail-diagnostic
+  cancel-in-progress: false
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Resolve configured PTSCPS origins
+        shell: bash
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          from urllib.parse import urlsplit
+          vals={}
+          for raw in os.environ.get('ENV_FILE','').splitlines():
+              line=raw.strip()
+              if line.startswith('export '): line=line[7:].strip()
+              if '=' not in line: continue
+              k,v=line.split('=',1); vals[k.strip()]=v.strip().strip('"').strip("'")
+          for key,out_key in (('WC_URL','WP_ORIGIN'),('WC_URL_CLIENT','FRONT_ORIGIN')):
+              u=urlsplit(vals.get(key,''))
+              if not (u.scheme=='https' and u.hostname and u.port in (None,443) and u.path in ('','/') and not u.username and not u.password and not u.query and not u.fragment):
+                  raise SystemExit('invalid '+key)
+              with open(os.environ['GITHUB_ENV'],'a',encoding='utf8') as out:
+                  out.write(out_key+'=https://'+u.hostname+'\n')
+          PY
+      - name: Validate diagnostic syntax
+        run: node --check scripts/ptscps-services-detail-diagnostic.mjs
+      - name: Diagnose production service detail
+        run: node scripts/ptscps-services-detail-diagnostic.mjs
