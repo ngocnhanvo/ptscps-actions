@@ -34,13 +34,21 @@ async function getOriginal() {
   assert(awards.length === 2 && awards.every(row => /<img\b/i.test(String(row.img || ''))), 'Source award images are missing');
   for (const award of awards) {
     const src = /\bsrc=["']([^"']+)["']/i.exec(String(award.img || ''))?.[1] || '';
-    assert(src.startsWith('/wp-content/uploads/'), 'Source award image is not a relative local Media Library path');
+    const mediaUrl = new URL(src, wp);
+    assert(mediaUrl.origin === wp && mediaUrl.pathname.startsWith('/wp-content/uploads/'), 'Source award image is not a local Media Library asset');
   }
   console.log('EN_TOP_SOURCE=PASS original_id=' + pages[0].id + ' awards=2');
   return { original: pages[0], source: table, awards };
 }
 function translatedRows(awards) {
-  const image = (award, title) => String(award.img).replace(/\balt=(?:"[^"]*"|'[^']*')/i, `alt="${title} - PTSC PPS"`);
+  // Native Insert Image can store the WordPress admin origin; output a relative
+  // media path so the Astro build localizes the asset instead of leaking it.
+  const image = (award, title) => {
+    const src = /\bsrc=["']([^"']+)["']/i.exec(String(award.img))?.[1] || '';
+    const parsed = new URL(src, wp);
+    assert(parsed.origin === wp && parsed.pathname.startsWith('/wp-content/uploads/'), 'Award image escaped Media Library');
+    return `<img src="${parsed.pathname}${parsed.search}" alt="${title} - PTSC PPS">`;
+  };
   return [
     ['prose','','','Over nearly 25 years of development alongside PetroVietnam Technical Services Corporation (PTSC) and the Vietnam National Industry–Energy Group, PTSC Production Services JSC has successfully delivered safe and efficient operation and maintenance services for FPSO/FSO projects in Vietnam and the region.','','',''],
     ['prose','','','Our mission is to provide operation and maintenance services of the highest quality, with safety and efficiency at the forefront of everything we do, earning the recognition and trust of our clients.','','',''],
@@ -224,8 +232,7 @@ async function ensurePage(original) {
   }else {await page.locator('#post_name').fill(target.slug);}
   const pre=await page.evaluate(() => ({slug:document.querySelector('#editable-post-name-full')?.textContent?.trim()||document.querySelector('#post_name')?.value,lang:document.querySelector('[data-name="product_lang"] select')?.value||document.querySelector('[data-name="product_lang"] input:checked')?.value,origin:document.querySelector('[data-name="origin_page_id"] select')?.value||document.querySelector('[data-name="origin_page_id"] input')?.value,key:document.querySelector('[data-name="key"] input')?.value,action:document.querySelector('[data-name="action"] input')?.value,content:document.querySelector('#content')?.value}));
   assert(pre.slug===target.slug && pre.lang==='en' && String(pre.origin)===String(original.id) && pre.key===target.key && pre.action==='IntroPage' && String(pre.content).includes(target.id),'English draft ACF/slug/shortcode preflight failed');
-  await page.locator('#publish').click();
-  await page.waitForNavigation({waitUntil:'domcontentloaded',timeout:45000});
+  await Promise.all([page.waitForNavigation({waitUntil:'domcontentloaded',timeout:45000}), page.locator('#publish').click()]);
   const res=await page.request.get(uri('/wp-json/wp/v2/pages/'+id+'?_fields=id,slug,status,acf,content'),{timeout:30000});
   assert(res.ok(),'Cannot verify WordPress EN page after publication');
   const publishedPage=await res.json();
