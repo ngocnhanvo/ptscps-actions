@@ -355,7 +355,7 @@ async function readGalleryIds(productId) {
   return raw.split(',').map((v) => Number(v.trim())).filter((v) => v > 0);
 }
 
-async function setProductAdminFields(productId, galleryIds) {
+async function setProductAdminFields(productId, galleryIds, menuOrder) {
   await page.goto(`${wp}/wp-admin/post.php?post=${productId}&action=edit&esc_full_admin=1`, { waitUntil: 'domcontentloaded', timeout: 50000 });
   const row = page.locator('[data-name="product_lang"]').first();
   assert(await row.count() === 1, `product_lang ACF missing product ${productId}`);
@@ -366,6 +366,9 @@ async function setProductAdminFields(productId, galleryIds) {
     assert(await input.count(), `product_lang input missing ${productId}`);
     await input.fill('vi');
   }
+  const menuOrderInput = page.locator('#menu_order, input[name="menu_order"]').first();
+  assert(await menuOrderInput.count() === 1, `Product menu_order input missing ${productId}`);
+  await menuOrderInput.fill(String(menuOrder));
   const galleryInput = page.locator('#product_image_gallery, input[name="product_image_gallery"]').first();
   assert(await galleryInput.count() === 1, `WooCommerce product gallery input missing product ${productId}`);
   await galleryInput.evaluate((el, value) => {
@@ -418,7 +421,7 @@ async function ensureProject(nonce, category, project) {
     product = create.body;
     state = 'CREATED_VERIFIED';
   }
-  await setProductAdminFields(Number(product.id), galleryIds);
+  await setProductAdminFields(Number(product.id), galleryIds, project.order);
   const readback = await productBySlug(nonce, project.slug);
   assert(readback && readback.status === 'publish', `Product readback missing ${project.slug}`);
   const cats = (readback.product_categories || []).map((x) => Number(x.id));
