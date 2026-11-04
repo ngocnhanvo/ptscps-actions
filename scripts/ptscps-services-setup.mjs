@@ -14,6 +14,8 @@ const services = [
   { key:'manpower', title:'Cung ứng nhân lực kỹ thuật vận hành và bảo dưỡng', slug:'cung-ung-nhan-luc-ky-thuat-van-hanh-va-bao-duong', file:'ptscps-dich-vu-nhan-luc.jpg' },
   { key:'repair', title:'Dịch vụ sửa chữa bảo dưỡng các thiết bị và công trình công nghiệp', slug:'dich-vu-sua-chua-bao-duong-cac-thiet-bi-va-cong-trinh-cong-nghiep', file:'ptscps-dich-vu-sua-chua.jpg' },
 ];
+const serviceTableId='services_00_vi';
+let servicesContentChanged=false;
 const artifactDir='artifacts/ptscps-services';
 await mkdir(artifactDir,{recursive:true});
 const sleep = ms => new Promise(r=>setTimeout(r,ms));
@@ -236,6 +238,120 @@ async function ensureCategoryOrder(rootId,rows){
   throw Error(`Product category order mismatch actual=${JSON.stringify(await readOrder())}`);
 }
 
+
+async function readServicesTable(){
+  const res=await page.request.get(uri(`/wp-json/tablepress/v1/table/${serviceTableId}?_services_table=${Date.now()}`),{timeout:30000,headers:{'Cache-Control':'no-cache'}});
+  if(res.status()===404)return null;
+  assert(res.ok(),`ESC Table lookup HTTP ${res.status()}`);
+  return res.json();
+}
+
+function servicesTableMatches(table,rootId){
+  const row=Array.isArray(table?.items)?table.items[0]:null;
+  return String(table?.meta?.api||'')==='ProductCategory'
+    && String(row?.['api-key']||'')===String(rootId)
+    && String(row?.['api-children']||'')==='children';
+}
+
+async function ensureServicesTable(rootId){
+  let table=await readServicesTable();
+  if(table&&servicesTableMatches(table,rootId)){
+    report('ESC_TABLE',{id:serviceTableId,state:'ALREADY_CORRECT_SKIP_WRITE',api:'ProductCategory',rootId});
+    return false;
+  }
+
+  let currentId=serviceTableId;
+  if(!table){
+    await page.goto(uri('/wp-admin/admin.php?page=tablepress_add&esc_full_admin=1'),{waitUntil:'domcontentloaded',timeout:50000});
+    await page.locator('input[name="table[name]"]').fill('Dịch vụ');
+    await page.locator('textarea[name="table[description]"]').fill('Landing Dịch vụ dùng ProductCategory');
+    await page.locator('input[name="table[rows]"]').fill('3');
+    await page.locator('input[name="table[columns]"]').fill('2');
+    const addButton=page.getByRole('button',{name:/Add Table|Thêm bảng/i}).first();
+    assert(await addButton.count()===1,'ESC Table Add Table button missing');
+    await Promise.all([
+      page.waitForURL(/table_id=[a-zA-Z0-9_-]+/,{timeout:45000}),
+      addButton.click(),
+    ]);
+    currentId=new URL(page.url()).searchParams.get('table_id')||'';
+    assert(currentId,'New ESC Table ID missing');
+  }
+
+  await page.goto(uri(`/wp-admin/admin.php?page=tablepress&action=edit&table_id=${encodeURIComponent(currentId)}&esc_full_admin=1`),{waitUntil:'load',timeout:50000});
+  await page.waitForFunction(()=>Boolean(globalThis.tp?.editor?.options?.data),null,{timeout:30000});
+  const dims=await page.evaluate(()=>({rows:globalThis.tp.editor.options.data.length,cols:globalThis.tp.editor.options.columns.length}));
+  assert(dims.rows===3&&dims.cols===2,`ESC Table ${currentId} must be 3x2, got ${dims.rows}x${dims.cols}`);
+
+  await page.locator('#table-name').fill('Dịch vụ');
+  await page.locator('#table-description').fill('Landing Dịch vụ dùng ProductCategory');
+  await page.locator('#js_custom_api').waitFor({state:'visible',timeout:15000});
+  await page.locator('#js_custom_api').fill('ProductCategory');
+
+  if(currentId!==serviceTableId){
+    page.once('dialog',dialog=>dialog.accept());
+    const idInput=page.locator('#table-id');
+    await idInput.fill(serviceTableId);
+    await idInput.press('Tab');
+  }
+
+  await page.evaluate(({rootId})=>{
+    const editor=globalThis.tp.editor;
+    const values=[
+      ['api-key','api-children'],
+      ['Danh mục gốc','Danh mục dịch vụ'],
+      [String(rootId),'children'],
+    ];
+    values.forEach((row,y)=>row.forEach((value,x)=>editor.setValueFromCoords(x,y,value)));
+  },{rootId});
+
+  const saveButton=page.getByRole('button',{name:/Save Changes|Lưu thay đổi|Lưu các thay đổi/i}).first();
+  assert(await saveButton.count()===1,'ESC Table Save Changes button missing');
+  const ackPromise=page.waitForResponse(resp=>resp.url().startsWith(wp+'/wp-admin/admin-ajax.php')&&String(resp.request().postData()||'').includes('action=tablepress_save_table'),{timeout:45000});
+  await saveButton.click();
+  const ack=await ackPromise;
+  assert(ack.ok(),`ESC Table save HTTP ${ack.status()}`);
+  const saved=await ack.json();
+  assert(saved?.success===true&&saved?.table_id===serviceTableId,'ESC Table save response mismatch');
+
+  for(let attempt=0;attempt<8;attempt++){
+    await sleep(600);
+    table=await readServicesTable();
+    if(table&&servicesTableMatches(table,rootId)){
+      report('ESC_TABLE',{id:serviceTableId,state:'SAVED_VERIFIED',api:'ProductCategory',rootId});
+      return true;
+    }
+  }
+  throw Error('ESC Table ProductCategory readback mismatch');
+}
+
+async function insertServicesTableWithNativePicker(tableId){
+  const textTab=page.locator('#content-html');
+  if(await textTab.isVisible().catch(()=>false))await textTab.click();
+  const editor=page.locator('#content');
+  assert(await editor.count()===1,'WordPress content editor missing');
+  await editor.evaluate(el=>{el.focus();const end=el.value.length;el.setSelectionRange(end,end);});
+
+  const nativeInsert=page.locator('#qt_content_tablepress_quicktags_button');
+  assert(await nativeInsert.count()===1,'Native ESC Table Insert Code button missing');
+  await nativeInsert.click();
+  await page.locator('#TB_iframeContent').waitFor({state:'visible',timeout:20000});
+  const frame=page.frameLocator('#TB_iframeContent');
+  let insert=frame.locator(`.insert-shortcode[title*="id=${tableId}"]`).first();
+  if(await insert.count()===0){
+    const search=frame.locator('input[name="s"]').first();
+    assert(await search.count()===1,'ESC Table picker search field missing');
+    await search.fill(tableId);
+    const submit=frame.locator('#search-submit').first();
+    assert(await submit.count()===1,'ESC Table picker search button missing');
+    await submit.click();
+    await sleep(700);
+    insert=frame.locator(`.insert-shortcode[title*="id=${tableId}"]`).first();
+  }
+  assert(await insert.count()===1,`ESC Table ${tableId} missing from native picker`);
+  await insert.click();
+  await page.locator('#TB_window').waitFor({state:'hidden',timeout:15000}).catch(()=>null);
+}
+
 async function setAcf(name,value){
   const row=page.locator(`[data-name="${name}"]`).first();
   assert(await row.count()===1,`ACF field missing ${name}`);
@@ -247,8 +363,14 @@ async function setAcf(name,value){
 }
 
 async function ensurePage(){
+  const categoryRows=await categoryFeed();
+  const serviceRoot=categoryRows.find(x=>x.slug==='dich-vu'&&Number(x.parent||0)===0);
+  assert(serviceRoot,'Root service category missing before ESC Table setup');
+  const tableChanged=await ensureServicesTable(serviceRoot.id);
+  if(tableChanged) servicesContentChanged=true;
+  const tableId=serviceTableId;
   const nonce=await restNonce();
-  const {res,body}=await jsonRequest('GET','/wp-json/wp/v2/pages?context=edit&status=publish,draft,pending,private&slug=dich-vu&per_page=20&_fields=id,slug,status,title,acf',nonce);
+  const {res,body}=await jsonRequest('GET','/wp-json/wp/v2/pages?context=edit&status=publish,draft,pending,private&slug=dich-vu&per_page=20&_fields=id,slug,status,title,acf,content',nonce);
   assert(res.ok(),`Service Page lookup HTTP ${res.status()}`);
   assert(body.length<=1,'Duplicate WordPress Page slug dich-vu');
   let id=Number(body[0]?.id||0);
@@ -274,16 +396,23 @@ async function ensurePage(){
     if(await edit.isVisible().catch(()=>false)){await edit.click();await page.locator('#new-post-slug').fill('dich-vu');await page.locator('#edit-slug-buttons .save').click();}
     else if(await page.locator('#post_name').count()) await page.locator('#post_name').fill('dich-vu');
   }
+  const rawBefore=String(body[0]?.content?.raw??body[0]?.content?.rendered??'');
+  const hasTableBefore=rawBefore.includes(tableId);
+  if(!hasTableBefore){
+    await insertServicesTableWithNativePicker(tableId);
+    servicesContentChanged=true;
+  }
   const button=page.locator('#publish');
   assert(await button.count(),'Page publish/update button missing');
   await Promise.all([page.waitForNavigation({waitUntil:'domcontentloaded',timeout:45000}).catch(()=>null),button.click()]);
   for(let attempt=0;attempt<8;attempt++){
-    const check=await page.request.get(uri(`/wp-json/wp/v2/pages/${id}?_fields=id,slug,status,title,acf`),{timeout:30000});
+    const check=await page.request.get(uri(`/wp-json/wp/v2/pages/${id}?context=edit&_fields=id,slug,status,title,acf,content`),{timeout:30000});
     if(check.ok()){
       const p=await check.json();
       const lang=p.acf?.product_lang?.value??p.acf?.product_lang;
-      if(p.status==='publish'&&p.slug==='dich-vu'&&p.acf?.key==='ssr-products'&&p.acf?.action==='ProductsSSRPage'&&lang==='vi'){
-        report('PAGE',{id,state:body.length?'UPDATED_VERIFIED':'CREATED_VERIFIED'});return id;
+      const raw=String(p.content?.raw??p.content?.rendered??'');
+      if(p.status==='publish'&&p.slug==='dich-vu'&&p.acf?.key==='ssr-products'&&p.acf?.action==='ProductsSSRPage'&&lang==='vi'&&raw.includes(tableId)){
+        report('PAGE',{id,state:body.length?'UPDATED_VERIFIED':'CREATED_VERIFIED',tableId,nativeInsert:true});return id;
       }
     }
     await sleep(700);
@@ -493,10 +622,11 @@ async function buildViaWordPress(){
 }
 
 async function isProductionReady(){
+  if(servicesContentChanged)return false;
   const res=await context.request.get(`${front}/dich-vu?_services_ready=${Date.now()}`,{timeout:30000,headers:{'Cache-Control':'no-cache'}}).catch(()=>null);
   if(res?.status()!==200)return false;
   const html=await res.text();
-  return html.includes('data-services-category-grid')&&services.every(x=>html.includes(x.title))&&html.includes('Dịch vụ')&&html.includes('Tất cả');
+  return html.includes('data-services-category-grid')&&html.includes('data-services-source="ProductCategory"')&&services.every(x=>html.includes(x.title))&&html.includes('Dịch vụ')&&html.includes('Tất cả');
 }
 
 async function qa(){
@@ -508,7 +638,7 @@ async function qa(){
     const names=await cards.locator('h2').allTextContents(); assert.deepEqual(names.map(clean),expected,`${viewport.name} category order mismatch`);
     const imgs=cards.locator('img');
     for(let i=0;i<4;i++){await imgs.nth(i).scrollIntoViewIfNeeded();await p.waitForFunction(i=>{const img=document.querySelectorAll('[data-services-category-grid] img')[i];return img&&img.complete&&img.naturalWidth>0;},i,{timeout:12000});}
-    const srcs=await imgs.evaluateAll(nodes=>nodes.map(img=>img.getAttribute('src')||'')); assert(srcs.every(src=>src.startsWith('/wp-content/uploads/')),`${viewport.name} category images not relative uploads`);
+    const srcs=await imgs.evaluateAll(nodes=>nodes.map(img=>img.getAttribute('src')||'')); assert(srcs.every(src=>src.startsWith('/images/')),`${viewport.name} category images did not use processed ESC image objects`);
     assert(!((await p.content()).includes('admin-ptscps.thegioihosting.io.vn')),`${viewport.name} admin origin leaked`);
     const overflow=await p.evaluate(()=>({w:document.documentElement.clientWidth,s:document.documentElement.scrollWidth})); assert(overflow.s<=overflow.w+2,`${viewport.name} horizontal overflow`);
     await p.screenshot({path:`${artifactDir}/${viewport.name}-dich-vu.png`,fullPage:true});
