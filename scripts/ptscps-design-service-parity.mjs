@@ -347,6 +347,15 @@ async function productBySlug(nonce, slug) {
   return body[0] || null;
 }
 
+async function wcProduct(nonce, productId, data) {
+  const method = data === undefined ? 'GET' : 'POST';
+  const path = `/wp-json/wc/v3/products/${productId}${data === undefined ? '?context=edit' : ''}`;
+  const { res, body } = await jsonRequest(method, path, nonce, data);
+  assert(res.ok(), `WooCommerce product REST HTTP ${res.status()} product=${productId}`);
+  assert(Number(body?.id) === Number(productId), `WooCommerce product REST identity mismatch ${productId}`);
+  return body;
+}
+
 async function readGalleryIds(productId) {
   await page.goto(`${wp}/wp-admin/post.php?post=${productId}&action=edit&esc_full_admin=1`, { waitUntil: 'domcontentloaded', timeout: 50000 });
   const input = page.locator('#product_image_gallery, input[name="product_image_gallery"]').first();
@@ -433,59 +442,50 @@ async function ensureProjectOrder(nonce) {
   const expected = service.projects.map((project) => project.slug);
   const readRows = async () => {
     const rows = [];
-    for (const project of service.projects) {
+    for (let index = 0; index < service.projects.length; index++) {
+      const project = service.projects[index];
       const product = await productBySlug(nonce, project.slug);
       assert(product && Number(product.id) > 0, `Product order lookup missing ${project.slug}`);
+      const wc = await wcProduct(nonce, Number(product.id));
       rows.push({
         id: Number(product.id),
         slug: project.slug,
-        title: project.title,
-        menuOrder: Number(product.menu_order || 0),
+        expectedOrder: index + 1,
+        wpMenuOrder: Number(product.menu_order || 0),
+        wcMenuOrder: Number(wc.menu_order || 0),
       });
     }
     return rows;
   };
-  const orderedSlugs = (rows) => [...rows]
-    .sort((a, b) => (a.menuOrder - b.menuOrder) || a.title.localeCompare(b.title, 'vi'))
-    .map((row) => row.slug);
 
   let rows = await readRows();
-  if (rows.every((row) => row.menuOrder > 0) && JSON.stringify(orderedSlugs(rows)) === JSON.stringify(expected)) {
-    report('PRODUCT_ORDER', { state: 'ALREADY_CORRECT_SKIP_WRITE', slugs: expected });
+  if (rows.every((row) => row.wpMenuOrder === row.expectedOrder && row.wcMenuOrder === row.expectedOrder)) {
+    report('PRODUCT_ORDER', {
+      state: 'ALREADY_CORRECT_SKIP_WRITE',
+      slugs: expected,
+      menuOrder: Object.fromEntries(rows.map((row) => [row.slug, row.expectedOrder])),
+    });
     return false;
   }
 
-  await page.goto(`${wp}/wp-admin/edit.php?post_type=product&orderby=${encodeURIComponent('menu_order title')}&order=asc&esc_full_admin=1`, { waitUntil: 'domcontentloaded', timeout: 50000 });
-  const security = await page.evaluate(() => String(globalThis.woocommerce_product_ordering_params?.nonce || '').trim());
-  assert(security, 'WooCommerce product ordering nonce missing');
   const bySlug = Object.fromEntries(rows.map((row) => [row.slug, row]));
-
-  for (let index = service.projects.length - 2; index >= 0; index--) {
-    const current = bySlug[service.projects[index].slug];
-    const next = bySlug[service.projects[index + 1].slug];
-    const response = await page.request.post(`${wp}/wp-admin/admin-ajax.php`, {
-      form: {
-        action: 'woocommerce_product_ordering',
-        security,
-        id: String(current.id),
-        previd: '',
-        nextid: String(next.id),
-      },
-      timeout: 30000,
-    });
-    const raw = (await response.text()).trim();
-    assert(response.ok() && raw && raw !== '-1' && raw !== '0', `WooCommerce product ordering failed ${current.slug} HTTP ${response.status()}`);
-    await sleep(350);
+  for (let index = 0; index < service.projects.length; index++) {
+    const project = service.projects[index];
+    const row = bySlug[project.slug];
+    const expectedOrder = index + 1;
+    if (row.wcMenuOrder === expectedOrder) continue;
+    const updated = await wcProduct(nonce, row.id, { menu_order: expectedOrder });
+    assert(Number(updated.menu_order) === expectedOrder, `WooCommerce menu_order update mismatch ${project.slug}`);
+    await sleep(250);
   }
 
   rows = await readRows();
-  const actual = orderedSlugs(rows);
-  assert(rows.every((row) => row.menuOrder > 0), `Product menu_order readback missing ${JSON.stringify(rows)}`);
-  assert.deepEqual(actual, expected, `Product order mismatch ${JSON.stringify(actual)}`);
+  assert(rows.every((row) => row.wcMenuOrder === row.expectedOrder), `WooCommerce menu_order readback mismatch ${JSON.stringify(rows)}`);
+  assert(rows.every((row) => row.wpMenuOrder === row.expectedOrder), `WordPress product menu_order REST mismatch ${JSON.stringify(rows)}`);
   report('PRODUCT_ORDER', {
     status: 'PASS',
-    slugs: actual,
-    menuOrder: Object.fromEntries(rows.map((row) => [row.slug, row.menuOrder])),
+    slugs: expected,
+    menuOrder: Object.fromEntries(rows.map((row) => [row.slug, row.expectedOrder])),
   });
   return true;
 }
