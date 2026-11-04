@@ -117,6 +117,9 @@ try {
       assert.equal(response.status(), 200, `Category route HTTP ${response.status()} ${service.slug}`);
       const html = await response.text();
       assert(html.includes(service.title), `Category route heading missing ${service.slug}`);
+      const titleMatch = html.match(/<title>([^<]*)<\/title>/i);
+      assert(titleMatch, `Category route document title missing ${service.slug}`);
+      assert.equal(clean(titleMatch[1]), service.title, `Category route document title mismatch ${service.slug}`);
       noAdminOrigin(html, service.slug);
       console.log(`SERVICES_READONLY_QA_CATEGORY=${service.slug}:PASS`);
     }
