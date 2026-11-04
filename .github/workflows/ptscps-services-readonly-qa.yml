@@ -1,0 +1,68 @@
+name: PTSCPS services production read-only QA
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'audit/ptscps-services-readonly-qa.ready'
+      - 'scripts/ptscps-services-readonly-qa.mjs'
+      - '.github/workflows/ptscps-services-readonly-qa.yml'
+permissions:
+  contents: read
+concurrency:
+  group: ptscps-services-readonly-qa
+  cancel-in-progress: false
+jobs:
+  qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Resolve configured PTSCPS origins
+        shell: bash
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os,re
+          from urllib.parse import urlsplit
+          vals={}
+          for raw in os.environ.get('ENV_FILE','').splitlines():
+              line=raw.strip()
+              if line.startswith('export '): line=line[7:].strip()
+              if '=' not in line: continue
+              key,value=line.split('=',1); vals[key.strip()]=value.strip().strip('"').strip("'")
+          resolved={}
+          for key in ('WC_URL','WC_URL_CLIENT'):
+              u=urlsplit(vals.get(key,''))
+              if not (u.scheme=='https' and u.hostname and u.port in (None,443) and u.path in ('','/') and not u.username and not u.password and not u.query and not u.fragment):
+                  raise SystemExit('invalid '+key)
+              resolved[key]='https://'+u.hostname
+          if resolved['WC_URL']==resolved['WC_URL_CLIENT']:
+              raise SystemExit('WordPress/frontend origins must differ')
+          with open(os.environ['GITHUB_ENV'],'a',encoding='utf8') as out:
+              out.write('WP_ORIGIN='+resolved['WC_URL']+'\n')
+              out.write('FRONT_ORIGIN='+resolved['WC_URL_CLIENT']+'\n')
+          print('SERVICES_READONLY_QA_ORIGINS=PASS')
+          PY
+      - name: Validate read-only QA script syntax
+        run: node --check scripts/ptscps-services-readonly-qa.mjs
+      - name: Install Playwright Chromium
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Verify Dịch vụ production without WordPress writes or build triggers
+        run: node scripts/ptscps-services-readonly-qa.mjs
+      - name: Upload read-only QA screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ptscps-services-readonly-qa-${{ github.run_id }}
+          path: artifacts/ptscps-services-readonly-qa/
+          if-no-files-found: warn
+          retention-days: 14
