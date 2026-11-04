@@ -94,51 +94,29 @@ async function ensureCat(nonce,spec,parent){
 }
 
 async function legacyImages(){
-  const legacyContext=await browser.newContext({viewport:{width:1440,height:1000}});
-  const legacy=await legacyContext.newPage();
-  const response=await legacy.goto('https://ptscps.com.vn/dich-vu',{waitUntil:'load',timeout:50000});
-  assert(response?.status()===200,`Legacy services HTTP ${response?.status()}`);
+  // Locked to the exact card media observed by the successful read-only
+  // legacy inventory. The old page reuses the FPSO image for manpower, so
+  // neither DOM adjacency nor image uniqueness is a valid invariant here.
+  const inventoryPaths={
+    fpso:'/wp-content/uploads/2019/10/dichvufpso.jpg',
+    design:'/wp-content/uploads/2019/10/dichvucungungktcao-1.jpg',
+    manpower:'/wp-content/uploads/2019/10/dichvufpso.jpg',
+    repair:'/wp-content/uploads/2019/10/giacong1.jpg',
+  };
   const found={};
   for(const spec of services){
-    const result=await legacy.evaluate((slug)=>{
-      const target=`/dich-vu/${slug}`.replace(/\/+$/,'');
-      const hrefPath=a=>{
-        try{return new URL(a.getAttribute('href')||'',location.origin).pathname.replace(/\/+$/,'');}
-        catch{return '';}
-      };
-      const imageSrc=img=>img.currentSrc
-        || img.getAttribute('data-src')
-        || img.getAttribute('data-lazy-src')
-        || img.getAttribute('data-original')
-        || img.getAttribute('src')
-        || '';
-      const links=[...document.querySelectorAll('a[href]')].filter(a=>hrefPath(a)===target);
-      for(const a of links){
-        const img=a.querySelector('img');
-        const src=img?imageSrc(img):'';
-        if(src && !/logo|sprite|icon/i.test(src)) return {href:a.href,src};
-      }
-      for(const a of links){
-        let node=a.parentElement;
-        for(let depth=0;node&&node!==document.body&&depth<7;depth++,node=node.parentElement){
-          const imageLink=[...node.querySelectorAll('a[href]')].find(link=>hrefPath(link)===target && link.querySelector('img'));
-          if(imageLink){
-            const img=imageLink.querySelector('img');
-            const src=img?imageSrc(img):'';
-            if(src && !/logo|sprite|icon/i.test(src)) return {href:imageLink.href,src};
-          }
-        }
-      }
-      return null;
-    },spec.slug);
-    assert(result?.src,`Legacy service card image not found ${spec.title}`);
-    const u=new URL(result.src,'https://ptscps.com.vn');
-    assert(u.hostname==='ptscps.com.vn' && u.pathname.startsWith('/wp-content/uploads/'),`Unexpected legacy media origin ${spec.key}`);
-    found[spec.key]=u.toString();
+    const pathname=inventoryPaths[spec.key];
+    assert(pathname?.startsWith('/wp-content/uploads/'),`Legacy inventory media missing ${spec.key}`);
+    const sourceUrl=new URL(pathname,'https://ptscps.com.vn').toString();
+    const response=await fetch(sourceUrl,{headers:{'User-Agent':'PTSCPS migration QA'}});
+    assert(response.ok,`Legacy service image HTTP ${response.status} ${spec.key}`);
+    const contentType=String(response.headers.get('content-type')||'').toLowerCase();
+    assert(contentType.startsWith('image/'),`Legacy service media is not an image ${spec.key}: ${contentType}`);
+    const bytes=Buffer.from(await response.arrayBuffer());
+    assert(bytes.length>5000,`Legacy service image unexpectedly small ${spec.key}`);
+    found[spec.key]=sourceUrl;
   }
   report('LEGACY_MEDIA',Object.fromEntries(Object.entries(found).map(([k,v])=>[k,new URL(v).pathname])));
-  assert(new Set(Object.values(found)).size===services.length,'Legacy service card images are not four unique media assets');
-  await legacyContext.close();
   return found;
 }
 
