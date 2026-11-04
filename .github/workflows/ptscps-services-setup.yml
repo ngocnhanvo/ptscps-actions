@@ -16,6 +16,9 @@ jobs:
   services:
     if: github.repository == 'ngocnhanvo/ptscps-actions'
     runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.0-noble
+      options: --ipc=host
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
@@ -69,10 +72,9 @@ jobs:
               if not (u.scheme=='https' and u.hostname and u.port in (None,443) and u.path in ('','/') and not u.username and not u.password and not u.query and not u.fragment): raise SystemExit('invalid '+key)
               print(out+'='+u.geturl().rstrip('/'))
           PY
-      - name: Install Playwright Chromium
+      - name: Install Playwright driver (Chromium preinstalled)
         run: |
-          npm install --no-save --no-audit --no-fund playwright@1.56.1
-          npx playwright install --with-deps chromium
+          npm install --no-save --no-package-lock --ignore-scripts --no-audit --no-fund playwright@1.64.0
       - name: Create service taxonomy, Page and Header.vi, then build and QA
         env:
           WP_ORIGIN: ${{ steps.origins.outputs.wp }}

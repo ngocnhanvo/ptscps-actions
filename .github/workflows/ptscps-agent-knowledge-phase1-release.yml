@@ -15,6 +15,9 @@ jobs:
       github.repository == 'ngocnhanvo/ptscps-actions'
       && github.event.head_commit.message == 'deploy(ptscps): Agent knowledge phase 1 inventory only'
     runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.0-noble
+      options: --ipc=host
     timeout-minutes: 20
     steps:
       - name: Checkout controlled release tooling
@@ -64,11 +67,10 @@ jobs:
         run: |
           set -euo pipefail
           python3 scripts/ptscps-php-live-release.py
-      - name: Install headless Chromium for read-only audit
+      - name: Install Playwright driver (Chromium preinstalled)
         shell: bash
         run: |
-          npm install --no-save --no-audit --no-fund playwright@1.56.1
-          npx playwright install --with-deps chromium
+          npm install --no-save --no-package-lock --ignore-scripts --no-audit --no-fund playwright@1.64.0
       - name: Export authenticated read-only inventory (no reindex)
         shell: bash
         env:

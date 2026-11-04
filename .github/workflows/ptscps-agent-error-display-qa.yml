@@ -11,6 +11,9 @@ jobs:
       github.repository == 'ngocnhanvo/ptscps-actions'
       && github.event.head_commit.message == 'test(ptscps): verify real LLM errors appear on live UI'
     runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.0-noble
+      options: --ipc=host
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
@@ -25,10 +28,9 @@ jobs:
           set -euo pipefail
           test "$(cat audit/ptscps-agent-error-display-qa.ready)" = 'PTSCPS_AGENT_ERROR_UI source=28ae46057de761bc3ae8c4a2a3abe660a6043e1a mode=read-only'
           node --check scripts/ptscps-agent-error-display-qa.mjs
-      - name: Install headless Playwright
+      - name: Install Playwright driver (Chromium preinstalled)
         run: |
-          npm install --no-save --no-audit --no-fund playwright@1.56.1
-          npx playwright install --with-deps chromium
+          npm install --no-save --no-package-lock --ignore-scripts --no-audit --no-fund playwright@1.64.0
       - name: Verify synthetic LLM 503 is shown as error in VI and EN chat
         env:
           FRONTEND_ORIGIN: https://ptscps.thegioihosting.io.vn

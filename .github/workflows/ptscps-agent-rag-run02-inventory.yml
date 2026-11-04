@@ -14,6 +14,9 @@ jobs:
       github.repository == 'ngocnhanvo/ptscps-actions'
       && github.event.head_commit.message == 'audit(ptscps): run02 read-only production CMS census'
     runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.0-noble
+      options: --ipc=host
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -22,10 +25,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Install Playwright Chromium
+      - name: Install Playwright driver (Chromium preinstalled)
         run: |
-          npm install --no-save --no-audit --no-fund playwright@1.56.1
-          npx playwright install --with-deps chromium
+          npm install --no-save --no-package-lock --ignore-scripts --no-audit --no-fund playwright@1.64.0
       - name: Validate read-only audit script
         run: |
           test "$(cat audit/ptscps-agent-rag-run02-inventory.ready)" = 'PTSCPS_RAG_RUN02_CENSUS=READ_ONLY'

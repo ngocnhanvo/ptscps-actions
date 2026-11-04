@@ -12,6 +12,9 @@ permissions:
 jobs:
   bind-homepage-media:
     runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.0-noble
+      options: --ipc=host
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -35,10 +38,9 @@ jobs:
           with open(os.environ['GITHUB_ENV'],'a') as f:f.write('WP_ORIGIN=https://'+wp.hostname+'\n')
           print('WP_ORIGIN_VALIDATED=PASS')
           PY
-      - name: Install Playwright Chromium
+      - name: Install Playwright driver (Chromium preinstalled)
         run: |
-          npm install --no-save --no-audit --no-fund playwright@1.56.1
-          npx playwright install --with-deps chromium
+          npm install --no-save --no-package-lock --ignore-scripts --no-audit --no-fund playwright@1.64.0
       - name: Bind verified legacy images through native TablePress Insert Image and read back
         env:
           WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}

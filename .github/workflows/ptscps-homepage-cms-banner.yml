@@ -8,6 +8,9 @@ permissions:
 jobs:
   banner:
     runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.0-noble
+      options: --ipc=host
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
@@ -32,10 +35,9 @@ jobs:
               f.write('WP_ORIGIN=https://'+wp.hostname+'\n')
           print('WP_ORIGIN_VALIDATED=PASS')
           PYCODE
-      - name: Install browser
+      - name: Install Playwright driver (Chromium preinstalled)
         run: |
-          npm install --no-save --no-audit --no-fund playwright@1.56.1
-          npx playwright install --with-deps chromium
+          npm install --no-save --no-package-lock --ignore-scripts --no-audit --no-fund playwright@1.64.0
       - name: Configure three Home_00 images and device audience via WordPress editor
         env:
           WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}

@@ -14,6 +14,9 @@ jobs:
       github.repository == 'ngocnhanvo/ptscps-actions'
       && github.event.head_commit.message == 'audit(ptscps): compare RUN03 natural fact vs collection with guarded PHP'
     runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.0-noble
+      options: --ipc=host
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
@@ -54,10 +57,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Install Playwright Chromium
+      - name: Install Playwright driver (Chromium preinstalled)
         run: |
-          npm install --no-save --no-audit --no-fund playwright@1.56.1
-          npx playwright install --with-deps chromium
+          npm install --no-save --no-package-lock --ignore-scripts --no-audit --no-fund playwright@1.64.0
       - name: Compare real natural probes through admin read-only endpoint
         env:
           PTSCPS_SOURCE_SHA: e5620533b0a1b315b81592c9d5798692fe72a9d5

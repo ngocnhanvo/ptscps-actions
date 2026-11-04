@@ -13,6 +13,9 @@ permissions:
 jobs:
   native-header:
     runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.0-noble
+      options: --ipc=host
     timeout-minutes: 18
     steps:
       - uses: actions/checkout@v4
@@ -38,10 +41,9 @@ jobs:
           with open(os.environ['GITHUB_ENV'],'a') as f:f.write('WP_ORIGIN='+wp+'\nFRONT_ORIGIN='+front+'\n')
           print('ORIGIN_VALIDATION=PASS')
           PY
-      - name: Install Playwright Chromium
+      - name: Install Playwright driver (Chromium preinstalled)
         run: |
-          npm install --no-save --no-audit --no-fund playwright@1.56.1
-          npx playwright install --with-deps chromium
+          npm install --no-save --no-package-lock --ignore-scripts --no-audit --no-fund playwright@1.64.0
       - name: Create only missing native Header.vi using verified live homepage
         env:
           WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}

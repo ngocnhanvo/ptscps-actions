@@ -15,6 +15,9 @@ jobs:
       github.repository == 'ngocnhanvo/ptscps-actions'
       && github.event.head_commit.message == 'test(ptscps): verify post-backfill bilingual Agent on production'
     runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.0-noble
+      options: --ipc=host
     timeout-minutes: 18
     steps:
       - uses: actions/checkout@v4
@@ -29,10 +32,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Install Playwright Chromium
+      - name: Install Playwright driver (Chromium preinstalled)
         run: |
-          npm install --no-save --no-audit --no-fund playwright@1.56.1
-          npx playwright install --with-deps chromium
+          npm install --no-save --no-package-lock --ignore-scripts --no-audit --no-fund playwright@1.64.0
       - name: Read-only authenticated inventory and limited bilingual factual smoke
         env:
           ENV_FILE: ${{ secrets.ENV_FILE }}
