@@ -344,9 +344,12 @@ async function insertServicesTableWithNativePicker(tableId){
     await search.fill(tableId);
     const submit=frame.locator('#search-submit').first();
     assert(await submit.count()===1,'ESC Table picker search button missing');
-    await submit.click();
-    await sleep(700);
+    await Promise.all([
+      frame.locator('.subtitle').filter({hasText:tableId}).waitFor({state:'visible',timeout:15000}),
+      submit.click(),
+    ]);
     insert=frame.locator(`.insert-shortcode[title*="id=${tableId}"]`).first();
+    await insert.waitFor({state:'visible',timeout:15000});
   }
   assert(await insert.count()===1,`ESC Table ${tableId} missing from native picker`);
   await insert.click();
