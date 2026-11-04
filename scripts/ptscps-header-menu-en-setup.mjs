@@ -383,8 +383,10 @@ async function menuIsLive(desired) {
   const response = await context.request.get(`${front}/top-message?_en_header=${Date.now()}`, { timeout:30000, headers:{'Cache-Control':'no-cache'} }).catch(()=>null);
   if (response?.status() !== 200) return false;
   const html = await response.text();
+  const hasLabel = label => html.includes(label)
+    || html.includes(String(label).replaceAll('&', '&amp;'));
   return html.includes('About Us') && html.includes('Top Message') && html.includes('Company Brochure')
-    && desired.about.every(entry => html.includes(entry.title));
+    && desired.about.every(entry => hasLabel(entry.title));
 }
 
 async function verifyProduction(desired) {
