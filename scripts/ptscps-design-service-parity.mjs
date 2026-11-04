@@ -15,6 +15,12 @@ const service = {
     ['epci-3', 'Skid và hệ thống thiết bị EPCI', 'https://ptscps.com.vn/wp-content/uploads/2019/12/EPC2.jpg'],
     ['epci-4', 'Cụm thiết bị và đường ống công nghiệp', 'https://ptscps.com.vn/wp-content/uploads/2019/10/muasamgiacong1.jpg'],
   ],
+  capabilities: [
+    { title: 'Skid fabrication (including valve, pump, process skid…)', slug: 'epci-skid-fabrication', mediaKey: 'epci-1' },
+    { title: 'Piping and structural fabrication', slug: 'epci-piping-structural-fabrication', mediaKey: 'epci-2' },
+    { title: 'Pressure vessel, tank fabrication', slug: 'epci-pressure-vessel-tank-fabrication', mediaKey: 'epci-3' },
+    { title: 'E&I system (Metering, ICSS, cathodic protection)', slug: 'epci-ei-system', mediaKey: 'epci-4' },
+  ],
   projects: [
     {
       title: 'Dự án Trạm Thu gom và phân phối khí Thái Bình – Hàm Rồng',
@@ -117,6 +123,122 @@ async function findCategory(nonce, slug) {
   assert(res.ok(), `Category lookup HTTP ${res.status()} ${slug}`);
   assert(Array.isArray(body) && body.length === 1, `Category lookup mismatch ${slug}`);
   return body[0];
+}
+
+async function listCategories(nonce) {
+  const { res, body } = await jsonRequest('GET', '/wp-json/wp/v2/product_cat?context=edit&hide_empty=false&per_page=100&_fields=id,name,slug,parent', nonce);
+  assert(res.ok(), `Category list HTTP ${res.status()}`);
+  return Array.isArray(body) ? body : [];
+}
+
+async function ensureChildCategory(nonce, parentId, spec) {
+  let rows = await listCategories(nonce);
+  const matches = rows.filter((item) => item.slug === spec.slug);
+  assert(matches.length <= 1, `Duplicate capability category ${spec.slug}`);
+  if (matches.length === 1) {
+    const item = matches[0];
+    assert(clean(item.name) === clean(spec.title), `Capability category name mismatch ${spec.slug}`);
+    assert(Number(item.parent || 0) === Number(parentId), `Capability category parent mismatch ${spec.slug}`);
+    report('CAPABILITY_CATEGORY', { slug: spec.slug, id: item.id, state: 'ALREADY_PRESENT_SKIP_WRITE' });
+    return { item, changed: false };
+  }
+  const { res, body } = await jsonRequest('POST', '/wp-json/wp/v2/product_cat', nonce, {
+    name: spec.title,
+    slug: spec.slug,
+    parent: Number(parentId),
+  });
+  assert(res.ok() && Number(body?.id) > 0, `Capability category create HTTP ${res.status()} ${spec.slug}`);
+  rows = await listCategories(nonce);
+  const item = rows.find((row) => Number(row.id) === Number(body.id));
+  assert(item && Number(item.parent || 0) === Number(parentId), `Capability category readback failed ${spec.slug}`);
+  report('CAPABILITY_CATEGORY', { slug: spec.slug, id: item.id, state: 'CREATED_VERIFIED' });
+  return { item, changed: true };
+}
+
+async function categoryFeed() {
+  const res = await page.request.get(`${wp}/wp-json/astro/v1/get-product-categories?_design_parity=${Date.now()}`, {
+    timeout: 30000,
+    headers: { 'Cache-Control': 'no-cache' },
+  });
+  assert(res.ok(), `Product category feed HTTP ${res.status()}`);
+  return await res.json();
+}
+
+async function ensureCategoryThumbnail(termId, mediaId, spec) {
+  const mediaSlug = `ptscps-design-${spec.mediaKey}`;
+  const feed = await categoryFeed();
+  const current = feed.find((item) => Number(item.id) === Number(termId));
+  if (String(current?.image?.url || '').includes(mediaSlug)) {
+    report('CAPABILITY_THUMBNAIL', { slug: spec.slug, state: 'ALREADY_PRESENT_SKIP_WRITE' });
+    return false;
+  }
+  await page.goto(`${wp}/wp-admin/term.php?taxonomy=product_cat&tag_ID=${termId}&post_type=product&esc_full_admin=1`, { waitUntil: 'domcontentloaded', timeout: 50000 });
+  const input = page.locator('#product_cat_thumbnail_id');
+  assert(await input.count() === 1, `WooCommerce thumbnail field missing ${spec.slug}`);
+  await input.evaluate((el, id) => {
+    el.value = String(id);
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  }, mediaId);
+  const form = page.locator('form#edittag').first();
+  assert(await form.count() === 1, `Native term edit form missing ${spec.slug}`);
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => null),
+    form.evaluate((el) => {
+      if (!(el instanceof HTMLFormElement)) throw Error('Invalid term edit form');
+      el.requestSubmit();
+    }),
+  ]);
+  for (let attempt = 0; attempt < 8; attempt++) {
+    await sleep(500);
+    const rows = await categoryFeed();
+    const item = rows.find((row) => Number(row.id) === Number(termId));
+    if (String(item?.image?.url || '').includes(mediaSlug)) {
+      report('CAPABILITY_THUMBNAIL', { slug: spec.slug, state: 'UPDATED_VERIFIED', url: item.image.url });
+      return true;
+    }
+  }
+  throw Error(`Capability thumbnail readback failed ${spec.slug}`);
+}
+
+async function ensureCapabilityOrder(parentId, rows) {
+  const expected = service.capabilities.map((item) => item.slug);
+  const readOrder = async () => {
+    const feed = await categoryFeed();
+    return feed.filter((item) => Number(item.parent || 0) === Number(parentId)).map((item) => item.slug);
+  };
+  if (JSON.stringify(await readOrder()) === JSON.stringify(expected)) {
+    report('CAPABILITY_ORDER', 'ALREADY_CORRECT_SKIP_WRITE');
+    return false;
+  }
+  await page.goto(`${wp}/wp-admin/edit-tags.php?taxonomy=product_cat&post_type=product&esc_full_admin=1`, { waitUntil: 'domcontentloaded', timeout: 50000 });
+  const security = await page.evaluate(() => String(globalThis.woocommerce_term_ordering_params?.nonce || '').trim());
+  assert(security, 'WooCommerce term ordering nonce missing');
+  const bySlug = Object.fromEntries(rows.map((item) => [item.slug, item]));
+  const reverse = [...service.capabilities].reverse();
+  for (let i = 0; i < reverse.length; i++) {
+    const current = reverse[i];
+    const next = i === 0 ? null : reverse[i - 1];
+    const res = await page.request.post(`${wp}/wp-admin/admin-ajax.php`, {
+      form: {
+        action: 'woocommerce_term_ordering',
+        security,
+        id: String(bySlug[current.slug].id),
+        nextid: next ? String(bySlug[next.slug].id) : '',
+        thetaxonomy: 'product_cat',
+      },
+      timeout: 30000,
+    });
+    assert(res.ok(), `WooCommerce term ordering HTTP ${res.status()} ${current.slug}`);
+  }
+  for (let attempt = 0; attempt < 8; attempt++) {
+    await sleep(600);
+    const actual = await readOrder();
+    if (JSON.stringify(actual) === JSON.stringify(expected)) {
+      report('CAPABILITY_ORDER', { status: 'PASS', slugs: actual });
+      return true;
+    }
+  }
+  throw Error(`Capability order mismatch ${JSON.stringify(await readOrder())}`);
 }
 
 function extensionFrom(url, contentType = '') {
@@ -310,8 +432,17 @@ try {
   const introMedia = [];
   for (const [key, alt, sourceUrl] of service.introImages) introMedia.push(await ensureMedia(nonce, key, alt, sourceUrl));
   changed = (await ensureDescription(nonce, category, designDescription())) || changed;
+  const capabilityRows = [];
+  for (let index = 0; index < service.capabilities.length; index++) {
+    const spec = service.capabilities[index];
+    const child = await ensureChildCategory(nonce, category.id, spec);
+    capabilityRows.push(child.item);
+    changed = child.changed || changed;
+    changed = (await ensureCategoryThumbnail(child.item.id, introMedia[index].id, spec)) || changed;
+  }
+  changed = (await ensureCapabilityOrder(category.id, capabilityRows)) || changed;
   for (const project of service.projects) changed = (await ensureProject(nonce, category, project)) || changed;
-  report('RESULT', { status: 'PASS', introImages: introMedia.length, projects: service.projects.length, projectImages: service.projects.reduce((sum, p) => sum + p.images.length, 0), changed });
+  report('RESULT', { status: 'PASS', introImages: introMedia.length, capabilities: capabilityRows.length, projects: service.projects.length, projectImages: service.projects.reduce((sum, p) => sum + p.images.length, 0), changed });
 } finally {
   await browser.close();
 }
