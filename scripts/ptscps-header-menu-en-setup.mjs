@@ -251,39 +251,87 @@ async function ensureMenuItems(menuId, desired, restHeaders) {
     report('ITEMS', { state:'ALREADY_CORRECT_SKIP_WRITE', roots:current.items.length, about_children:current.items.find(x=>x.label==='About Us')?.children?.length || 0 });
     return false;
   }
-  assert((current?.items || []).length === 0, 'Existing Header.en has partial or unexpected items; refusing destructive overwrite');
 
   const batch = [
     ...desired.roots.map((item, index) => ({ ...item, parentTitle:'', menuOrder:index + 1 })),
     { title:'About Us', url:'#', target:'', parentTitle:'', menuOrder:desired.roots.length + 1 },
     ...[...desired.about, desired.brochure].map((item, index) => ({ ...item, parentTitle:'About Us', menuOrder:desired.roots.length + 2 + index })),
   ];
-
-  async function create(item, parent) {
-    const response = await page.request.post(uri('/wp-json/wp/v2/menu-items'), {
+  const titleOf = item => clean(item?.title?.raw ?? item?.title?.rendered ?? item?.title ?? '');
+  const listNative = async () => {
+    const response = await page.request.get(uri('/wp-json/wp/v2/menu-items?context=edit&status=publish&per_page=100&_fields=id,title,url,status,menus,parent,menu_order,type,target'), {
       headers:restHeaders,
       timeout:30000,
-      data:{ title:item.title, type:'custom', url:item.url, menus:menuId, status:'publish', parent, menu_order:item.menuOrder, target:item.target || '' },
     });
-    const body = await response.json().catch(()=>({}));
-    assert(response.ok() && Number(body?.id) > 0, `Menu item create failed ${item.title}: HTTP ${response.status()} code=${body?.code || 'unknown'}`);
-    return Number(body.id);
+    assert(response.ok(), `Cannot inspect published menu items: HTTP ${response.status()}`);
+    const rows = await response.json();
+    return rows.filter(item => Number(item?.menus) === menuId);
+  };
+  const urlMatches = (actual, expected) => {
+    const a = new URL(String(actual || ''), wp);
+    const e = new URL(String(expected || ''), wp);
+    return a.origin === e.origin && a.pathname === e.pathname && a.search === e.search && a.hash === e.hash;
+  };
+  const findExact = (items, expected, parentId) => items.filter(item =>
+    titleOf(item) === expected.title
+    && String(item?.type || '') === 'custom'
+    && Number(item?.parent || 0) === Number(parentId || 0)
+    && urlMatches(item?.url, expected.url)
+    && String(item?.target || '') === String(expected.target || '')
+  );
+  const expectedTitles = new Set(batch.map(item => item.title));
+  let items = await listNative();
+  const unexpected = items.filter(item => !expectedTitles.has(titleOf(item)));
+  assert(unexpected.length === 0, `Header.en contains unexpected native items: ${unexpected.map(item=>titleOf(item)).join(', ')}`);
+  for (const title of expectedTitles) {
+    assert(items.filter(item => titleOf(item) === title).length <= 1, `Duplicate Header.en item ${title}`);
+  }
+  if (items.length) report('PARTIAL_RECOVERY', items.map(item => ({ id:item.id, title:titleOf(item), url:item.url, parent:item.parent, target:item.target })));
+
+  async function ensureOne(expected, parentId) {
+    items = await listNative();
+    let exact = findExact(items, expected, parentId);
+    if (exact.length === 1) return Number(exact[0].id);
+    assert(exact.length === 0, `Duplicate exact Header.en item ${expected.title}`);
+    const sameTitle = items.filter(item => titleOf(item) === expected.title);
+    assert(sameTitle.length === 0, `Existing Header.en item differs for ${expected.title}; refusing overwrite`);
+
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const response = await page.request.post(uri('/wp-json/wp/v2/menu-items'), {
+          headers:restHeaders,
+          timeout:30000,
+          data:{ title:expected.title, type:'custom', url:expected.url, menus:menuId, status:'publish', parent:parentId, menu_order:expected.menuOrder, target:expected.target || '' },
+        });
+        const body = await response.json().catch(()=>({}));
+        if (response.ok() && Number(body?.id) > 0) return Number(body.id);
+        report('ITEM_CREATE_RETRY', { title:expected.title, attempt, http:response.status(), code:body?.code || '' });
+      } catch (error) {
+        report('ITEM_CREATE_RETRY', { title:expected.title, attempt, transport:error?.message || error?.name || 'error' });
+      }
+      await sleep(1200 * attempt);
+      items = await listNative();
+      exact = findExact(items, expected, parentId);
+      if (exact.length === 1) {
+        report('ITEM_CREATE_READBACK_RECOVERED', { title:expected.title, id:exact[0].id, attempt });
+        return Number(exact[0].id);
+      }
+      assert(items.filter(item => titleOf(item) === expected.title).length === 0, `Ambiguous readback after failed create ${expected.title}`);
+    }
+    throw Error(`WordPress menu-item create failed after retry: ${expected.title}`);
   }
 
-  for (const item of desired.roots) {
-    const row = batch.find(x => x.title === item.title && !x.parentTitle);
-    await create(row, 0);
-  }
+  for (const item of batch.filter(x => !x.parentTitle && x.title !== 'About Us')) await ensureOne(item, 0);
   const parent = batch.find(x => x.title === 'About Us' && !x.parentTitle);
-  const parentId = await create(parent, 0);
-  for (const item of batch.filter(x => x.parentTitle === 'About Us')) await create(item, parentId);
+  const parentId = await ensureOne(parent, 0);
+  for (const item of batch.filter(x => x.parentTitle === 'About Us')) await ensureOne(item, parentId);
 
   for (let attempt = 1; attempt <= 14; attempt++) {
     await sleep(850);
     menus = await readMenus();
     const header = menus?.Header?.en;
     if (exactHeader(header, desired)) {
-      report('ITEMS', { state:'PASS_CREATED', roots:header.items.length, about_children:header.items.find(x=>x.label==='About Us')?.children?.length || 0 });
+      report('ITEMS', { state:'PASS_RECONCILED', roots:header.items.length, about_children:header.items.find(x=>x.label==='About Us')?.children?.length || 0 });
       return true;
     }
   }
