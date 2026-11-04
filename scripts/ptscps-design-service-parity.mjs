@@ -185,18 +185,15 @@ function relativeMediaPath(media) {
   return parsed.origin === new URL(wp).origin ? `${parsed.pathname}${parsed.search}` : parsed.href;
 }
 
-function designDescription(introMedia) {
-  const gallery = introMedia.map((media, index) => `<figure><img src="${relativeMediaPath(media)}" alt="${service.introImages[index][1]}" loading="lazy" /></figure>`).join('');
-  return `${service.intro}<div class="service-intro-gallery">${gallery}</div>`;
+function designDescription() {
+  // Product-category descriptions are sanitized by WordPress and cannot
+  // reliably retain image tags. Keep the editorial intro here; legacy
+  // imagery is migrated into Media Library and project product galleries.
+  return service.intro;
 }
 
 function normalizeDescription(value) {
-  const raw = String(value ?? '');
-  const text = clean(raw);
-  const images = [...raw.matchAll(/<img[^>]+src=["']([^"']+)["']/gi)].map((match) => {
-    try { return new URL(match[1], wp).pathname; } catch { return match[1]; }
-  }).sort();
-  return JSON.stringify({ text, images });
+  return clean(String(value ?? ''));
 }
 
 async function ensureDescription(nonce, category, html) {
@@ -308,7 +305,7 @@ try {
   let changed = false;
   const introMedia = [];
   for (const [key, alt, sourceUrl] of service.introImages) introMedia.push(await ensureMedia(nonce, key, alt, sourceUrl));
-  changed = (await ensureDescription(nonce, category, designDescription(introMedia))) || changed;
+  changed = (await ensureDescription(nonce, category, designDescription())) || changed;
   for (const project of service.projects) changed = (await ensureProject(nonce, category, project)) || changed;
   report('RESULT', { status: 'PASS', introImages: introMedia.length, projects: service.projects.length, projectImages: service.projects.reduce((sum, p) => sum + p.images.length, 0), changed });
 } finally {
