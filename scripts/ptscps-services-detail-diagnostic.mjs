@@ -29,6 +29,8 @@ const categoriesRes = await fetch(`${wp}/wp-json/astro/v1/get-product-categories
 });
 const categories = categoriesRes.ok ? await categoriesRes.json() : [];
 const category = Array.isArray(categories) ? categories.find((x) => x?.slug === slug) : null;
+const designSlug = 'dich-vu-thiet-ke-mua-sam-gia-cong-che-tao';
+const designCategory = Array.isArray(categories) ? categories.find((x) => x?.slug === designSlug) : null;
 
 const productsRes = await fetch(`${wp}/wp-json/wp/v2/product?status=publish&per_page=100&_fields=id,slug,title,product_categories&_services_diag=${Date.now()}`, {
   headers: { 'Cache-Control': 'no-cache' },
@@ -61,6 +63,7 @@ const result = {
 };
 
 console.log('SERVICES_DETAIL_DIAGNOSTIC=' + JSON.stringify(result));
+console.log('SERVICES_DETAIL_DIAGNOSTIC_DESIGN_DESCRIPTION=' + JSON.stringify(String(designCategory?.description || '')));
 assert.equal(landing.status, 200, 'Landing HTTP not 200');
 assert.equal(detail.status, 200, 'Detail HTTP not 200');
 assert(result.landing.grid && result.landing.source, 'Landing ProductCategory grid not ready');
