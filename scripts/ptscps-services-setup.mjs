@@ -100,32 +100,44 @@ async function legacyImages(){
   assert(response?.status()===200,`Legacy services HTTP ${response?.status()}`);
   const found={};
   for(const spec of services){
-    const result=await legacy.evaluate((title)=>{
-      const norm=s=>String(s||'').replace(/\s+/g,' ').trim().toLowerCase();
-      const want=norm(title);
-      const links=[...document.querySelectorAll('a[href]')].filter(a=>norm(a.textContent).includes(want) || want.includes(norm(a.textContent)));
+    const result=await legacy.evaluate((slug)=>{
+      const target=`/dich-vu/${slug}`.replace(/\/+$/,'');
+      const hrefPath=a=>{
+        try{return new URL(a.getAttribute('href')||'',location.origin).pathname.replace(/\/+$/,'');}
+        catch{return '';}
+      };
+      const imageSrc=img=>img.currentSrc
+        || img.getAttribute('data-src')
+        || img.getAttribute('data-lazy-src')
+        || img.getAttribute('data-original')
+        || img.getAttribute('src')
+        || '';
+      const links=[...document.querySelectorAll('a[href]')].filter(a=>hrefPath(a)===target);
       for(const a of links){
-        let node=a;
-        for(let depth=0;node&&node!==document.body&&depth<8;depth++,node=node.parentElement){
-          const imgs=[...node.querySelectorAll('img')].filter(img=>{
-            const src=img.currentSrc||img.getAttribute('src')||img.getAttribute('data-src')||'';
-            return src && !/logo/i.test(src) && !/sprite|icon/i.test(src);
-          });
-          if(imgs.length){
-            const img=imgs[0];
-            return {href:a.href,src:img.currentSrc||img.getAttribute('src')||img.getAttribute('data-src')||''};
+        const img=a.querySelector('img');
+        const src=img?imageSrc(img):'';
+        if(src && !/logo|sprite|icon/i.test(src)) return {href:a.href,src};
+      }
+      for(const a of links){
+        let node=a.parentElement;
+        for(let depth=0;node&&node!==document.body&&depth<7;depth++,node=node.parentElement){
+          const imageLink=[...node.querySelectorAll('a[href]')].find(link=>hrefPath(link)===target && link.querySelector('img'));
+          if(imageLink){
+            const img=imageLink.querySelector('img');
+            const src=img?imageSrc(img):'';
+            if(src && !/logo|sprite|icon/i.test(src)) return {href:imageLink.href,src};
           }
         }
       }
       return null;
-    },spec.title);
+    },spec.slug);
     assert(result?.src,`Legacy service card image not found ${spec.title}`);
     const u=new URL(result.src,'https://ptscps.com.vn');
     assert(u.hostname==='ptscps.com.vn' && u.pathname.startsWith('/wp-content/uploads/'),`Unexpected legacy media origin ${spec.key}`);
     found[spec.key]=u.toString();
   }
-  assert(new Set(Object.values(found)).size===4,'Legacy service card images are not four unique media assets');
   report('LEGACY_MEDIA',Object.fromEntries(Object.entries(found).map(([k,v])=>[k,new URL(v).pathname])));
+  assert(new Set(Object.values(found)).size===services.length,'Legacy service card images are not four unique media assets');
   await legacyContext.close();
   return found;
 }
