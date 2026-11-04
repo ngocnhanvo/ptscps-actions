@@ -465,9 +465,19 @@ async function cmsPhase() {
 
 async function assertImgLoaded(locator, label) {
   await locator.scrollIntoViewIfNeeded();
-  await locator.evaluate(img => img.loading='eager');
   await locator.waitFor({state:'visible',timeout:12000});
-  const ok=await locator.evaluate(img=>img instanceof HTMLImageElement && img.complete && img.naturalWidth>80 && img.naturalHeight>60);
+  const ok=await locator.evaluate(async img=>{
+    if(!(img instanceof HTMLImageElement))return false;
+    img.loading='eager';
+    if(img.complete&&img.naturalWidth>80&&img.naturalHeight>60)return true;
+    await new Promise(resolve=>{
+      const done=()=>resolve();
+      img.addEventListener('load',done,{once:true});
+      img.addEventListener('error',done,{once:true});
+      setTimeout(done,8000);
+    });
+    return img.complete&&img.naturalWidth>80&&img.naturalHeight>60;
+  });
   assert(ok,`Broken production image ${label}`);
 }
 
