@@ -1,0 +1,54 @@
+name: PTSCPS public WordPress upload proxy QA
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'audit/ptscps-public-upload-proxy-qa.ready'
+permissions:
+  contents: read
+jobs:
+  qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Resolve isolated WordPress and frontend origins
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os,re
+          from urllib.parse import urlsplit
+          vals=dict(re.findall(r'^\s*(?:export\s+)?(WC_URL|WC_URL_CLIENT)\s*=\s*(.+)\s*$',os.environ.get('ENV_FILE',''),re.M))
+          def origin(key):
+              p=urlsplit(vals.get(key,'').strip().strip('"\''))
+              if p.scheme!='https' or not p.hostname or p.username or p.password or p.port not in (None,443) or p.path not in ('','/') or p.query or p.fragment:
+                  raise SystemExit('INVALID_ORIGIN '+key)
+              return 'https://'+p.hostname
+          wp,front=origin('WC_URL'),origin('WC_URL_CLIENT')
+          if wp==front: raise SystemExit('ORIGIN_COLLISION')
+          with open(os.environ['GITHUB_ENV'],'a',encoding='utf8') as f:
+              f.write('WP_ORIGIN='+wp+'\nFRONT_ORIGIN='+front+'\n')
+          print('PTSCPS_PUBLIC_UPLOAD_QA_ORIGINS=PASS')
+          PY
+      - name: Install Playwright Chromium
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Verify same-origin PDF proxy, byte ranges and public menu link
+        run: node scripts/ptscps-public-upload-proxy-qa.mjs
+      - name: Upload QA screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ptscps-public-upload-proxy-qa-${{ github.run_id }}
+          path: artifacts/ptscps-public-upload-proxy/
+          if-no-files-found: warn
+          retention-days: 14
