@@ -1,0 +1,55 @@
+name: PTSCPS design service legacy parity migration
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'audit/ptscps-design-service-parity.ready'
+      - 'scripts/ptscps-design-service-parity.mjs'
+      - '.github/workflows/ptscps-design-service-parity.yml'
+permissions:
+  contents: read
+concurrency:
+  group: ptscps-design-service-parity
+  cancel-in-progress: false
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Resolve configured PTSCPS WordPress origin
+        shell: bash
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          from urllib.parse import urlsplit
+          vals={}
+          for raw in os.environ.get('ENV_FILE','').splitlines():
+              line=raw.strip()
+              if line.startswith('export '): line=line[7:].strip()
+              if '=' not in line: continue
+              k,v=line.split('=',1); vals[k.strip()]=v.strip().strip('"').strip("'")
+          u=urlsplit(vals.get('WC_URL',''))
+          if not (u.scheme=='https' and u.hostname and u.port in (None,443) and u.path in ('','/') and not u.username and not u.password and not u.query and not u.fragment):
+              raise SystemExit('invalid WC_URL')
+          with open(os.environ['GITHUB_ENV'],'a') as out: out.write('WP_ORIGIN=https://'+u.hostname+'\n')
+          PY
+      - name: Validate migration script syntax
+        run: node --check scripts/ptscps-design-service-parity.mjs
+      - name: Install Playwright Chromium
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Migrate design service images and project data into WordPress
+        env:
+          WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
+          WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
+        run: node scripts/ptscps-design-service-parity.mjs
