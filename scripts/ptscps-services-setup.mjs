@@ -336,10 +336,11 @@ async function insertServicesTableWithNativePicker(tableId){
   await nativeInsert.click();
   await page.locator('#TB_iframeContent').waitFor({state:'visible',timeout:20000});
   const frame=page.frameLocator('#TB_iframeContent');
+  await frame.locator('#tablepress-page').waitFor({state:'visible',timeout:20000});
   let insert=frame.locator(`.insert-shortcode[title*="id=${tableId}"]`).first();
   if(await insert.count()===0){
-    const search=frame.locator('input[name="s"]').first();
-    assert(await search.count()===1,'ESC Table picker search field missing');
+    const search=frame.locator('#tables_search-search-input, input[type="search"][name="s"], input[name="s"]').first();
+    await search.waitFor({state:'visible',timeout:15000});
     await search.fill(tableId);
     const submit=frame.locator('#search-submit').first();
     assert(await submit.count()===1,'ESC Table picker search button missing');
