@@ -56,9 +56,18 @@ async function login(){
   report('ADMIN_AUTH','PASS');
 }
 async function restNonce(){
-  await page.goto(`${wp}/wp-admin/edit.php?post_type=product&esc_full_admin=1`,{waitUntil:'domcontentloaded',timeout:50000});
-  const nonce=await page.evaluate(()=>String(globalThis.wpApiSettings?.nonce||'').trim());
-  assert(nonce,'REST nonce missing'); return nonce;
+  const candidates=['/wp-admin/nav-menus.php?esc_full_admin=1','/wp-admin/edit-tags.php?taxonomy=product_cat&post_type=product&esc_full_admin=1'];
+  for(const path of candidates){
+    await page.goto(`${wp}${path}`,{waitUntil:'domcontentloaded',timeout:50000});
+    const nonce=await page.evaluate(()=>String(globalThis.wpApiSettings?.nonce||'').trim());
+    if(/^[A-Za-z0-9_-]{8,32}$/.test(nonce))return nonce;
+  }
+  const res=await page.request.post(`${wp}/wp-admin/admin-ajax.php`,{form:{action:'rest-nonce'},timeout:30000});
+  if(res.ok()){
+    const nonce=(await res.text()).trim();
+    if(/^[A-Za-z0-9_-]{8,32}$/.test(nonce))return nonce;
+  }
+  throw Error('WordPress REST nonce unavailable');
 }
 async function jsonRequest(method,path,nonce,data){
   const opts={method,headers:{'X-WP-Nonce':nonce,'Cache-Control':'no-cache'},timeout:45000};
