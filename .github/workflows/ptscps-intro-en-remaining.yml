@@ -1,0 +1,67 @@
+name: PTSCPS remaining English introduction pages, menu, build and QA
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'audit/ptscps-intro-en-remaining.ready'
+permissions:
+  contents: read
+jobs:
+  cms-menu-build-qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 38
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Resolve configured PTSCPS origins
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os,re
+          from urllib.parse import urlsplit
+          vals=dict(re.findall(r'^\s*(?:export\s+)?(WC_URL|WC_URL_CLIENT)\s*=\s*(.+)\s*$',os.environ.get('ENV_FILE',''),re.M))
+          def origin(key):
+              url=urlsplit(vals.get(key,'').strip().strip('"\''))
+              if url.scheme!='https' or not url.hostname or url.path not in ('','/') or url.port not in (None,443) or url.username or url.password or url.query or url.fragment:
+                  raise SystemExit('INVALID_ORIGIN '+key)
+              return 'https://'+url.hostname
+          wp,front=origin('WC_URL'),origin('WC_URL_CLIENT')
+          if wp==front: raise SystemExit('ORIGIN_COLLISION')
+          with open(os.environ['GITHUB_ENV'],'a') as f:
+              f.write('WP_ORIGIN='+wp+'\nFRONT_ORIGIN='+front+'\n')
+          print('EN_REMAINING_ORIGINS=PASS')
+          PY
+      - name: Install Playwright Chromium
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Create and verify remaining English CMS pages and ESC Tables
+        env:
+          WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
+          WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
+          EN_REMAINING_PHASE: cms
+        run: node scripts/ptscps-intro-en-remaining.mjs
+      - name: Reconcile Header.en, build through WordPress and verify menu
+        env:
+          WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
+          WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
+        run: node scripts/ptscps-header-menu-en-setup.mjs
+      - name: Final production QA for all English introduction pages
+        env:
+          WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
+          WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
+          EN_REMAINING_PHASE: qa
+        run: node scripts/ptscps-intro-en-remaining.mjs
+      - name: Upload English introduction QA screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ptscps-intro-en-remaining-${{ github.run_id }}
+          path: artifacts/ptscps-intro-en-remaining/
+          if-no-files-found: warn
+          retention-days: 14
