@@ -43,6 +43,7 @@ const services = [
 ];
 
 const clean = (v) => String(v ?? '').replace(/<[^>]+>/g,'').replace(/\s+/g,' ').trim();
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const report = (k,v) => console.log(`SERVICES_CONTENT_${k}=${typeof v==='string'?v:JSON.stringify(v)}`);
 const browser = await chromium.launch({headless:true});
 const context = await browser.newContext({viewport:{width:1440,height:1000}});
@@ -97,10 +98,35 @@ async function ensureMedia(nonce,project){
   let existing=await findMedia(nonce,file); if(existing){report('MEDIA',{slug:project.slug,id:existing.id,state:'ALREADY_PRESENT_SKIP_WRITE'});return existing;}
   const source=await fetch(project.image,{headers:{'User-Agent':'PTSCPS migration'}}); assert(source.ok,`Legacy image HTTP ${source.status} ${project.slug}`);
   const bytes=Buffer.from(await source.arrayBuffer()); assert(bytes.length>3000,`Legacy image too small ${project.slug}`);
-  const upload=await page.request.post(`${wp}/wp-json/wp/v2/media`,{headers:{'X-WP-Nonce':nonce,'Content-Type':source.headers.get('content-type')?.split(';')[0]||'image/jpeg','Content-Disposition':`attachment; filename="${file}"`},data:bytes,timeout:60000});
-  const body=await upload.json().catch(()=>({})); assert(upload.ok()&&body.id,`Media upload failed ${project.slug}`);
-  const meta=await jsonRequest('POST',`/wp-json/wp/v2/media/${body.id}`,nonce,{alt_text:project.title,title:project.title,caption:''}); assert(meta.res.ok(),`Media metadata failed ${project.slug}`);
-  existing=await findMedia(nonce,file); assert(existing&&Number(existing.id)===Number(body.id),`Media readback failed ${project.slug}`);
+  const contentType=source.headers.get('content-type')?.split(';')[0]||'image/jpeg';
+  let created=null;
+  for(let attempt=1;attempt<=3&&!created;attempt++){
+    try{
+      const upload=await page.request.post(`${wp}/wp-json/wp/v2/media`,{headers:{'X-WP-Nonce':nonce,'Content-Type':contentType,'Content-Disposition':`attachment; filename="${file}"`},data:bytes,timeout:60000});
+      const body=await upload.json().catch(()=>({}));
+      if(upload.ok()&&Number(body?.id)>0){created=body;break;}
+      report('MEDIA_UPLOAD_RETRY',{slug:project.slug,attempt,http:upload.status()});
+    }catch(error){
+      report('MEDIA_UPLOAD_RETRY',{slug:project.slug,attempt,transport:error?.message||'error'});
+    }
+    for(let readAttempt=1;readAttempt<=4&&!created;readAttempt++){
+      await sleep(700*readAttempt);
+      const recovered=await findMedia(nonce,file).catch(()=>null);
+      if(recovered){created=recovered;report('MEDIA_UPLOAD_READBACK_RECOVERED',{slug:project.slug,id:recovered.id,attempt,readAttempt});}
+    }
+  }
+  assert(created&&Number(created.id)>0,`Media upload failed ${project.slug} after retries`);
+  let metadataUpdated=false;
+  for(let attempt=1;attempt<=3&&!metadataUpdated;attempt++){
+    try{
+      const meta=await jsonRequest('POST',`/wp-json/wp/v2/media/${created.id}`,nonce,{alt_text:project.title,title:project.title,caption:''});
+      if(meta.res.ok()){metadataUpdated=true;break;}
+      report('MEDIA_META_RETRY',{slug:project.slug,attempt,http:meta.res.status()});
+    }catch(error){report('MEDIA_META_RETRY',{slug:project.slug,attempt,transport:error?.message||'error'});}
+    await sleep(700*attempt);
+  }
+  assert(metadataUpdated,`Media metadata failed ${project.slug}`);
+  existing=await findMedia(nonce,file); assert(existing&&Number(existing.id)===Number(created.id),`Media readback failed ${project.slug}`);
   report('MEDIA',{slug:project.slug,id:existing.id,state:'CREATED'}); return existing;
 }
 const detailHtml=(project)=>`<table><tbody>${project.details.map(([k,v])=>`<tr><th>${k}</th><td>${v}</td></tr>`).join('')}</tbody></table>`;
