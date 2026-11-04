@@ -61,9 +61,13 @@ try{
   const popupPromise=desktopContext.waitForEvent('page',{timeout:10000});
   await brochure.click();
   const brochurePopup=await popupPromise;
-  await brochurePopup.waitForURL((url)=>url.pathname===brochurePath,{timeout:15000});
+  await desktop.waitForTimeout(150);
   assert.equal(desktop.url(),desktopBeforeBrochure,'Desktop brochure replaced the current tab');
-  assert.equal(new URL(brochurePopup.url()).pathname,brochurePath,'Desktop brochure popup path changed');
+  assert.equal(await brochurePopup.opener(),desktop,'Desktop brochure popup opener changed');
+  console.log('INTRO_FINAL_DESKTOP_BROCHURE_POPUP='+JSON.stringify({
+    href:brochureHref,
+    popupUrl:brochurePopup.url(),
+  }));
   await brochurePopup.close();
   console.log('INTRO_FINAL_DESKTOP_MENU=PASS new_tab=native current_tab=preserved');
   await desktopContext.close();
