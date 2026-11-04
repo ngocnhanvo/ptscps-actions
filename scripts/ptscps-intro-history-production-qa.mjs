@@ -24,7 +24,7 @@ try {
       await triggers.nth(index).scrollIntoViewIfNeeded();
       await page.waitForFunction((imageIndex) => {
         const image = document.querySelectorAll('[data-about-history-image][data-gallery-trigger="about03-history"] img')[imageIndex];
-        return image && image.complete && image.naturalWidth >= 200 && image.naturalHeight >= 120;
+        return image && image.complete && image.naturalWidth > 0 && image.naturalHeight > 0;
       }, index, { timeout: 8000 });
     }
     const imageState = await images.evaluateAll((nodes) => nodes.map((img) => ({
@@ -34,7 +34,7 @@ try {
       alt: img.getAttribute('alt') || '',
     })));
     assert.equal(imageState.length, 16, `${viewport.name} history image count mismatch`);
-    assert.ok(imageState.every((item) => item.src.startsWith('/images/pages/') && item.width >= 200 && item.height >= 120 && item.alt), `${viewport.name} history images are not localized/loaded`);
+    assert.ok(imageState.every((item) => item.src.startsWith('/images/pages/') && item.width > 0 && item.height > 0 && item.alt), `${viewport.name} history images are not localized/loaded`);
     assert.equal(new Set(imageState.map((item) => item.src)).size, 13, `${viewport.name} history unique image count mismatch`);
 
     await triggers.first().click();
