@@ -484,7 +484,7 @@ async function qaPhase() {
     assert.equal(await desktop.locator('main aside').count(),0,`Side menu leaked into ${spec.slug}`);
     assert((await desktop.locator('main').innerText()).includes(spec.snippet),`Production content snippet missing ${spec.slug}`);
     assert.equal(await desktop.evaluate(()=>document.documentElement.lang),'en',`HTML lang mismatch ${spec.slug}`);
-    const language=desktop.locator('details[data-header-language]').first();
+    const language=desktop.locator('#header-navrow details[data-header-language]:visible').first();
     await language.locator('summary').click();
     const viLink=language.getByRole('link',{name:'Tiếng Việt',exact:true});
     assert(await viLink.count()===1,`Vietnamese language link missing ${spec.slug}`);
