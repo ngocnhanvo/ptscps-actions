@@ -410,9 +410,8 @@ async function ensurePage(){
   assert(await button.count(),'Page publish/update button missing');
   await Promise.all([page.waitForNavigation({waitUntil:'domcontentloaded',timeout:45000}).catch(()=>null),button.click()]);
   for(let attempt=0;attempt<8;attempt++){
-    const check=await page.request.get(uri(`/wp-json/wp/v2/pages/${id}?context=edit&_fields=id,slug,status,title,acf,content`),{timeout:30000});
+    const {res:check,body:p}=await jsonRequest('GET',`/wp-json/wp/v2/pages/${id}?context=edit&_fields=id,slug,status,title,acf,content`,nonce);
     if(check.ok()){
-      const p=await check.json();
       const lang=p.acf?.product_lang?.value??p.acf?.product_lang;
       const raw=String(p.content?.raw??p.content?.rendered??'');
       if(p.status==='publish'&&p.slug==='dich-vu'&&p.acf?.key==='ssr-products'&&p.acf?.action==='ProductsSSRPage'&&lang==='vi'&&raw.includes(tableId)){
