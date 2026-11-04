@@ -218,7 +218,7 @@ async function ensureCategoryOrder(rootId,rows){
   };
   if(JSON.stringify(await readOrder())===JSON.stringify(expected)){report('CATEGORY_ORDER','ALREADY_CORRECT_SKIP_WRITE');return;}
   await page.goto(uri('/wp-admin/edit-tags.php?taxonomy=product_cat&post_type=product&esc_full_admin=1'),{waitUntil:'domcontentloaded',timeout:50000});
-  const security=await page.evaluate(()=>String(globalThis.woocommerce_term_order_params?.nonce||'').trim());
+  const security=await page.evaluate(()=>String(globalThis.woocommerce_term_ordering_params?.nonce||'').trim());
   assert(security,'WooCommerce term ordering nonce missing');
   const bySlug=Object.fromEntries(rows.map(x=>[x.slug,x]));
   const reverse=[...services].reverse();
