@@ -1,0 +1,35 @@
+name: PTSCPS services taxonomy inventory
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'audit/ptscps-services-inventory.ready'
+permissions:
+  contents: read
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Resolve configured PTSCPS WordPress origin
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os,re
+          from urllib.parse import urlsplit
+          vals=dict(re.findall(r'^\s*(?:export\s+)?(WC_URL)\s*=\s*(.+)\s*$',os.environ.get('ENV_FILE',''),re.M))
+          url=urlsplit(vals.get('WC_URL','').strip().strip('"\''))
+          if url.scheme!='https' or not url.hostname or url.path not in ('','/') or url.port not in (None,443) or url.username or url.password or url.query or url.fragment:
+              raise SystemExit('INVALID_ORIGIN WC_URL')
+          with open(os.environ['GITHUB_ENV'],'a') as f: f.write('WP_ORIGIN=https://'+url.hostname+'\n')
+          print('SERVICE_INVENTORY_ORIGIN=PASS')
+          PY
+      - name: Inventory current service candidates, products, categories and Header.vi
+        run: node scripts/ptscps-services-inventory.mjs
