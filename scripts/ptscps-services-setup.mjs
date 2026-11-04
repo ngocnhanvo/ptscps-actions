@@ -663,7 +663,12 @@ async function isProductionReady(){
   const res=await context.request.get(`${front}/dich-vu?_services_ready=${Date.now()}`,{timeout:30000,headers:{'Cache-Control':'no-cache'}}).catch(()=>null);
   if(res?.status()!==200)return false;
   const html=await res.text();
-  return html.includes('data-services-category-grid')&&html.includes('data-services-source="ProductCategory"')&&services.every(x=>html.includes(x.title))&&html.includes('Dịch vụ')&&html.includes('Tất cả');
+  const landingReady=html.includes('data-services-category-grid')&&html.includes('data-services-source="ProductCategory"')&&services.every(x=>html.includes(x.title))&&html.includes('Dịch vụ')&&html.includes('Tất cả');
+  if(!landingReady)return false;
+  const detail=await context.request.get(`${front}/dich-vu/${services[0].slug}?_services_detail_ready=${Date.now()}`,{timeout:30000,headers:{'Cache-Control':'no-cache'}}).catch(()=>null);
+  if(detail?.status()!==200)return false;
+  const detailHtml=await detail.text();
+  return !detailHtml.includes('data-services-category-grid');
 }
 
 async function qa(){
@@ -681,7 +686,7 @@ async function qa(){
     await p.screenshot({path:`${artifactDir}/${viewport.name}-dich-vu.png`,fullPage:true});
     report('QA_ROUTE',{viewport:viewport.name,status:'PASS'}); await ctx.close();
   }
-  for(const spec of services){const res=await context.request.get(`${front}/dich-vu/${spec.slug}?_qa=${Date.now()}`,{timeout:30000,headers:{'Cache-Control':'no-cache'}});assert(res.status()===200,`Category route HTTP ${res.status()} ${spec.slug}`);const html=await res.text();assert(html.includes(spec.title),`Category route heading missing ${spec.slug}`);}
+  for(const spec of services){const res=await context.request.get(`${front}/dich-vu/${spec.slug}?_qa=${Date.now()}`,{timeout:30000,headers:{'Cache-Control':'no-cache'}});assert(res.status()===200,`Category route HTTP ${res.status()} ${spec.slug}`);const html=await res.text();assert(html.includes(spec.title),`Category route heading missing ${spec.slug}`);assert(!html.includes('data-services-category-grid'),`Category route leaked services landing grid ${spec.slug}`);}
   const desktop=await browser.newContext({viewport:{width:1440,height:900}}); const p=await desktop.newPage(); await p.goto(`${front}/dich-vu?_menu=${Date.now()}`,{waitUntil:'load',timeout:50000});
   const serviceButton=p.locator('#header-navrow button').filter({hasText:'Dịch vụ'}).first(); assert(await serviceButton.isVisible(),'Desktop Dịch vụ menu button missing'); await serviceButton.click();
   for(const title of ['Tất cả',...expected]) assert(await p.locator('#header-navrow a').filter({hasText:title}).first().isVisible(),`Desktop service submenu missing ${title}`);
