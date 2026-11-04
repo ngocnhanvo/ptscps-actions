@@ -186,10 +186,14 @@ function relativeMediaPath(media) {
 }
 
 function designDescription() {
-  // Product-category descriptions are sanitized by WordPress and cannot
-  // reliably retain image tags. Keep the editorial intro here; legacy
-  // imagery is migrated into Media Library and project product galleries.
-  return service.intro;
+  // Product-category descriptions are sanitized by WordPress. Use the same
+  // taxonomy-safe formatting already verified by the service migration.
+  return `Công ty cung cấp các dịch vụ EPCI (engineering, procurement, construction and installation) cho các cấu kiện như:
+
+• Skid fabrication (including valve, pump, process skid…);
+• Piping and structural fabrication;
+• Pressure vessel, tank fabrication;
+• E&I system (Metering, ICSS, cathodic protection).`;
 }
 
 function normalizeDescription(value) {
