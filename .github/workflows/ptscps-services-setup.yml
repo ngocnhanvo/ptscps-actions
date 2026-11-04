@@ -70,7 +70,9 @@ jobs:
               print(out+'='+u.geturl().rstrip('/'))
           PY
       - name: Install Playwright Chromium
-        run: npx --yes playwright@1.56.1 install --with-deps chromium
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium
       - name: Create service taxonomy, Page and Header.vi, then build and QA
         env:
           WP_ORIGIN: ${{ steps.origins.outputs.wp }}
