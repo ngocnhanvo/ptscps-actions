@@ -161,6 +161,26 @@ async function uploadCurrent(page, file) {
   return Number(mediaId);
 }
 
+async function insertKnownRelative(page, spec, relativeSrc) {
+  await page.evaluate(() => window.wp?.media?.frame?.close?.());
+  await page.locator('.media-modal').waitFor({ state: 'hidden', timeout: 20000 });
+  await page.waitForTimeout(200);
+  const bridge = await page.evaluate(({ relativeSrc, alt }) => {
+    const helper = document.querySelector('#textarea-insert-helper');
+    const callback = window.tp?.helpers?.editor?.insert_from_helper_textarea;
+    if (!helper || typeof callback !== 'function') throw new Error('Native TablePress image bridge unavailable');
+    const image = document.createElement('img');
+    image.setAttribute('src', relativeSrc);
+    image.setAttribute('alt', alt);
+    image.setAttribute('loading', 'lazy');
+    helper.value = image.outerHTML;
+    callback.call(helper);
+    return image.outerHTML;
+  }, { relativeSrc, alt: spec.alt });
+  assert.ok(bridge.includes(relativeSrc), 'Native TablePress known-image bridge failed');
+  return relativeSrc;
+}
+
 async function finishSelection(page, spec, mediaId) {
   const modal = page.locator('.media-modal:visible').last();
   const altInput = modal.locator('input[data-setting="alt"], textarea[data-setting="alt"]').last();
@@ -245,15 +265,23 @@ try {
   const imageCol = await ensureImageColumn(page, table);
   table = await readTable(page);
 
-  const mediaByUrl = new Map();
+  const canonicalByUrl = new Map();
   let writes = 0;
   for (const spec of history) {
     const row = (table.items || []).findIndex((item) => String(item?.type || '') === 'timeline' && String(item?.meta || '') === spec.year);
     assert.ok(row >= 0, `Timeline row not found for ${spec.year}`);
     const currentHtml = String(table.items?.[row]?.img || '');
     const currentSrc = currentHtml.match(/\bsrc\s*=\s*["']([^"']+)["']/i)?.[1] || '';
-    if (imageHtml(currentHtml) && currentHtml.includes(spec.alt) && currentSrc.startsWith('/wp-content/uploads/')) {
-      console.log(`INTRO_HISTORY_ROW=ALREADY_READY year=${spec.year} row=${row}`);
+    const currentReady = imageHtml(currentHtml) && currentHtml.includes(spec.alt) && currentSrc.startsWith('/wp-content/uploads/');
+    const canonicalSrc = canonicalByUrl.get(spec.url) || '';
+
+    if (currentReady && !canonicalSrc) {
+      canonicalByUrl.set(spec.url, currentSrc);
+      console.log(`INTRO_HISTORY_ROW=ALREADY_READY year=${spec.year} row=${row} canonical=YES`);
+      continue;
+    }
+    if (currentReady && canonicalSrc === currentSrc) {
+      console.log(`INTRO_HISTORY_ROW=ALREADY_READY year=${spec.year} row=${row} canonical=REUSED`);
       continue;
     }
 
@@ -261,31 +289,34 @@ try {
     await page.waitForFunction(() => Boolean(window.tp?.editor?.options?.data), null, { timeout: 30000 });
     await openPicker(page, row, imageCol);
 
-    const asset = assets.get(spec.url);
-    assert.ok(asset, `Downloaded asset missing for ${spec.year}`);
-    let mediaId = mediaByUrl.get(spec.url) || 0;
-    let reused = Boolean(mediaId);
-    if (!mediaId) {
-      const candidates = await mediaCandidates(page, asset.basename);
-      const wantedStem = asset.basename.replace(/\.[^.]+$/, '').toLowerCase();
-      const exact = candidates.find((item) => {
-        try {
-          const filename = decodeURIComponent(new URL(item.source_url).pathname.split('/').pop() || '').toLowerCase();
-          return filename === asset.basename.toLowerCase() || filename.startsWith(`${wantedStem}-`);
-        } catch { return false; }
-      });
-      if (exact?.id) {
-        reused = await selectExisting(page, exact.id, asset.basename);
-        if (reused) mediaId = Number(exact.id);
-      }
-      if (!mediaId) mediaId = await uploadCurrent(page, asset.file);
-      mediaByUrl.set(spec.url, mediaId);
-    } else {
-      reused = await selectExisting(page, mediaId, asset.basename);
-      assert.equal(reused, true, `Cached WordPress media not selectable for ${spec.year}`);
+    if (canonicalSrc) {
+      const relativeSrc = await insertKnownRelative(page, spec, canonicalSrc);
+      table = await saveAndVerifyRow(page, row, spec, relativeSrc);
+      writes++;
+      console.log(`INTRO_HISTORY_ROW=PASS year=${spec.year} row=${row} reused=CANONICAL src=${relativeSrc}`);
+      continue;
     }
 
+    const asset = assets.get(spec.url);
+    assert.ok(asset, `Downloaded asset missing for ${spec.year}`);
+    const candidates = await mediaCandidates(page, asset.basename);
+    const wantedStem = asset.basename.replace(/\.[^.]+$/, '').toLowerCase();
+    const exact = candidates.find((item) => {
+      try {
+        const filename = decodeURIComponent(new URL(item.source_url).pathname.split('/').pop() || '').toLowerCase();
+        return filename === asset.basename.toLowerCase() || filename.startsWith(`${wantedStem}-`);
+      } catch { return false; }
+    });
+    let reused = false;
+    let mediaId = 0;
+    if (exact?.id) {
+      reused = await selectExisting(page, exact.id, asset.basename);
+      if (reused) mediaId = Number(exact.id);
+    }
+    if (!mediaId) mediaId = await uploadCurrent(page, asset.file);
+
     const relativeSrc = await finishSelection(page, spec, mediaId);
+    canonicalByUrl.set(spec.url, relativeSrc);
     table = await saveAndVerifyRow(page, row, spec, relativeSrc);
     writes++;
     console.log(`INTRO_HISTORY_ROW=PASS year=${spec.year} row=${row} reused=${reused ? 'YES' : 'NO'} src=${relativeSrc}`);
