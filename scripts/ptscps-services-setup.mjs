@@ -291,6 +291,96 @@ async function ensurePage(){
   throw Error('Service Page readback mismatch');
 }
 
+const productRouteSpecs=[
+  {title:'PTSCPS Product SSR list',from:'^/([^/]+)$',to:'/ssr/products/$1/null',priority:400,conditions:[{type:'page_key',capture:1,value:'ssr-products'}]},
+  {title:'PTSCPS Product SSR category',from:'^/([^/]+)/([^/]+)$',to:'/ssr/products/$1/null?catSlug=$2',priority:405,conditions:[{type:'page_key',capture:1,value:'ssr-products'},{type:'product_category',capture:2,value:''}]},
+  {title:'PTSCPS Product SSR category page',from:'^/([^/]+)/([^/]+)/([0-9]+)$',to:'/ssr/products/$1/$3?catSlug=$2',priority:405,conditions:[{type:'page_key',capture:1,value:'ssr-products'},{type:'product_category',capture:2,value:''}]},
+  {title:'PTSCPS Product SSR pagination',from:'^/([^/]+)/([0-9]+)$',to:'/ssr/products/$1/$2',priority:410,conditions:[{type:'page_key',capture:1,value:'ssr-products'}]},
+  {title:'PTSCPS Product SSR detail',from:'^/([^/]+)/([^/]+)$',to:'/ssr/products/$2/detail',priority:420,conditions:[{type:'page_key',capture:1,value:'ssr-products'}]},
+  {title:'PTSCPS Product SSR nested detail',from:'^/([^/]+)/(?:[^/]+/)+([^/]+)$',to:'/ssr/products/$2/detail',priority:430,conditions:[{type:'page_key',capture:1,value:'ssr-products'}]},
+];
+
+async function redirectFeed(){
+  const res=await page.request.get(uri(`/wp-json/astro/v1/get-redirect-logs?_services_routes=${Date.now()}`),{timeout:30000,headers:{'Cache-Control':'no-cache'}});
+  assert(res.ok(),`Redirect feed HTTP ${res.status()}`);
+  const body=await res.json();
+  assert(Array.isArray(body),'Unexpected redirect feed payload');
+  return body.filter(x=>x?.action==='modify'&&x?.redirect);
+}
+
+function normalizedConditions(value){
+  return (Array.isArray(value)?value:[]).map(x=>({type:String(x?.type||''),capture:Number(x?.capture||0),value:String(x?.value||'')}));
+}
+
+function routeMatches(row,spec){
+  const route=row?.redirect||{};
+  return String(route.from_link||'')===spec.from
+    && String(route.to_link||'')===spec.to
+    && String(route.type||'').toLowerCase()==='rewrite'
+    && String(route.match_type||'').toLowerCase()==='regex'
+    && Number(route.priority||0)===spec.priority
+    && JSON.stringify(normalizedConditions(route.conditions))===JSON.stringify(spec.conditions);
+}
+
+async function setRouteAcf(name,value){
+  const row=page.locator(`[data-name="${name}"]`).first();
+  assert(await row.count()===1,`Route ACF field missing ${name}`);
+  const select=row.locator('select').first();
+  if(await select.count()){await select.selectOption(String(value));return;}
+  const checkbox=row.locator('input[type="checkbox"]').first();
+  if(typeof value==='boolean'&&await checkbox.count()){
+    if(value) await checkbox.check(); else await checkbox.uncheck();
+    return;
+  }
+  const input=row.locator('input[type="text"],input:not([type])').first();
+  assert(await input.count(),`Route ACF input missing ${name}`);
+  await input.fill(String(value));
+}
+
+async function createProductRoute(spec){
+  await page.goto(uri('/wp-admin/post-new.php?post_type=chuyen-huong-link&esc_full_admin=1'),{waitUntil:'domcontentloaded',timeout:50000});
+  await page.locator('#title').fill(spec.title);
+  await setRouteAcf('from_link',spec.from);
+  await setRouteAcf('to_link',spec.to);
+  await setRouteAcf('type','Rewrite');
+  await setRouteAcf('match_type','Regex');
+  await setRouteAcf('enable',true);
+  const priority=page.locator('#esc-route-priority');
+  assert(await priority.count()===1,'Route priority field missing');
+  await priority.fill(String(spec.priority));
+  for(const condition of spec.conditions){
+    await page.locator('#esc-route-add-condition').click();
+    const row=page.locator('#esc-route-condition-rows tr').last();
+    await row.locator('select[name="esc_route_condition_type[]"]').selectOption(condition.type);
+    await row.locator('input[name="esc_route_condition_capture[]"]').fill(String(condition.capture));
+    await row.locator('input[name="esc_route_condition_value[]"]').fill(condition.value);
+  }
+  const publish=page.locator('#publish');
+  assert(await publish.count()===1,`Route publish button missing ${spec.title}`);
+  await Promise.all([page.waitForNavigation({waitUntil:'domcontentloaded',timeout:45000}).catch(()=>null),publish.click()]);
+  const id=Number(await page.locator('#post_ID').inputValue());
+  assert(id>0,`Route post ID missing ${spec.title}`);
+  for(let attempt=0;attempt<8;attempt++){
+    await sleep(600);
+    const exact=(await redirectFeed()).filter(x=>routeMatches(x,spec));
+    if(exact.length===1){report('ROUTE',{title:spec.title,id,state:'CREATED_VERIFIED'});return;}
+    assert(exact.length<=1,`Duplicate route after create ${spec.title}`);
+  }
+  throw Error(`Route readback failed ${spec.title}`);
+}
+
+async function ensureProductRoutes(){
+  let changed=false;
+  for(const spec of productRouteSpecs){
+    const exact=(await redirectFeed()).filter(x=>routeMatches(x,spec));
+    assert(exact.length<=1,`Duplicate product SSR route ${spec.title}`);
+    if(exact.length===1){report('ROUTE',{title:spec.title,id:exact[0].id,state:'ALREADY_PRESENT_SKIP_WRITE'});continue;}
+    await createProductRoute(spec); changed=true;
+  }
+  report('ROUTES',{status:'PASS',count:productRouteSpecs.length,changed});
+  return changed;
+}
+
 async function readMenus(){
   const res=await page.request.get(uri(`/wp-json/esc-api/v1/menus?_services_menu=${Date.now()}`),{timeout:30000,headers:{'Cache-Control':'no-cache'}});
   assert(res.ok(),`Menu API HTTP ${res.status()}`);
@@ -399,8 +489,8 @@ try{
   const feed=await categoryFeed();
   const rootFeed=feed.find(x=>x.slug==='dich-vu'&&Number(x.parent||0)===0); assert(rootFeed,'Root service category missing from Astro feed');
   const childFeed=feed.filter(x=>Number(x.parent||0)===Number(rootFeed.id)); assert.deepEqual(childFeed.map(x=>x.slug),services.map(x=>x.slug),'Final category feed order mismatch');
-  await ensurePage(); const menuChanged=await ensureMenu(nonce);
+  await ensurePage(); const routesChanged=await ensureProductRoutes(); const menuChanged=await ensureMenu(nonce);
   const readyBefore=await isProductionReady();
-  if(readyBefore&&!menuChanged){report('BUILD','ALREADY_DEPLOYED_SKIP_TRIGGER');}else{await buildViaWordPress();for(let attempt=1;attempt<=52;attempt++){if(await isProductionReady()){report('PRODUCTION_READY',{attempt});break;}if(attempt===52)throw Error('Services production did not become ready after WordPress build');await sleep(15000);}}
+  if(readyBefore&&!routesChanged&&!menuChanged){report('BUILD','ALREADY_DEPLOYED_SKIP_TRIGGER');}else{await buildViaWordPress();for(let attempt=1;attempt<=52;attempt++){if(await isProductionReady()){report('PRODUCTION_READY',{attempt});break;}if(attempt===52)throw Error('Services production did not become ready after WordPress build');await sleep(15000);}}
   await qa(); report('RESULT','PASS');
 } finally {await browser.close();}
