@@ -65,6 +65,35 @@ try {
     assert(overflow.scroll <= overflow.client + 2, `${viewport.name} horizontal overflow`);
     await page.screenshot({ path: `${artifactDir}/${viewport.name}-dich-vu.png`, fullPage: true });
     console.log(`SERVICES_READONLY_QA_ROUTE=${viewport.name}:PASS`);
+
+    const detail = services[0];
+    const detailResponse = await page.goto(`${front}/dich-vu/${detail.slug}?_detail_visual_qa=${Date.now()}`, { waitUntil: 'load', timeout: 50000 });
+    assert(detailResponse?.status() === 200, `${viewport.name} service detail HTTP ${detailResponse?.status()}`);
+    assert(await page.locator('[data-service-category-description]').isVisible(), `${viewport.name} service intro missing`);
+    assert(await page.locator('[data-service-projects-heading]').isVisible(), `${viewport.name} projects heading missing`);
+    const searchForm = page.locator('#search-form');
+    if (await searchForm.count()) assert(!(await searchForm.isVisible()), `${viewport.name} catalog search/filter leaked into service detail`);
+    const projectCards = page.locator('[data-service-projects-heading] + div article');
+    assert.equal(await projectCards.count(), 7, `${viewport.name} featured project card count mismatch`);
+    const metrics = await projectCards.evaluateAll((nodes) => nodes.map((node) => {
+      const rect = node.getBoundingClientRect();
+      return { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width) };
+    }));
+    if (viewport.name === 'desktop') {
+      const firstRowY = metrics[0]?.y;
+      assert.equal(metrics.filter((item) => Math.abs(item.y - firstRowY) <= 4).length, 3, 'desktop service detail should use three project columns');
+      assert(metrics.every((item) => item.width >= 330), 'desktop service project cards are too narrow');
+    } else {
+      assert(metrics.every((item) => item.width >= 340), 'mobile service project cards should use the full content width');
+      assert(metrics.length < 2 || metrics[1].y > metrics[0].y + 100, 'mobile service detail should use one project column');
+    }
+    const mediaBox = await page.locator('[data-service-projects-heading] + div article > a > div').first().boundingBox();
+    assert(mediaBox && mediaBox.width / mediaBox.height > 1.25 && mediaBox.width / mediaBox.height < 1.42, `${viewport.name} project media is not approximately 4:3`);
+    const detailOverflow = await page.evaluate(() => ({ client: document.documentElement.clientWidth, scroll: document.documentElement.scrollWidth }));
+    assert(detailOverflow.scroll <= detailOverflow.client + 2, `${viewport.name} detail horizontal overflow`);
+    noAdminOrigin(await page.content(), `${viewport.name}-service-detail`);
+    await page.screenshot({ path: `${artifactDir}/${viewport.name}-dich-vu-fpso-detail.png`, fullPage: true });
+    console.log(`SERVICES_READONLY_QA_DETAIL=${viewport.name}:PASS`);
     await context.close();
   }
 
@@ -116,7 +145,7 @@ try {
     await desktop.close();
   }
 
-  console.log('SERVICES_READONLY_QA=PASS categories=4 desktop=PASS mobile=PASS menu=PASS admin_origin=HIDDEN');
+  console.log('SERVICES_READONLY_QA=PASS categories=4 desktop=PASS mobile=PASS detail_layout=PASS menu=PASS admin_origin=HIDDEN');
 } finally {
   await browser.close();
 }
