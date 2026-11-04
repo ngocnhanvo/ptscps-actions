@@ -455,7 +455,7 @@ async function ensureProjectOrder(nonce) {
     return false;
   }
 
-  await page.goto(`${wp}/wp-admin/edit.php?post_type=product&orderby=menu_order&order=asc&esc_full_admin=1`, { waitUntil: 'domcontentloaded', timeout: 50000 });
+  await page.goto(`${wp}/wp-admin/edit.php?post_type=product&orderby=${encodeURIComponent('menu_order title')}&order=asc&esc_full_admin=1`, { waitUntil: 'domcontentloaded', timeout: 50000 });
   const security = await page.evaluate(() => String(globalThis.woocommerce_product_ordering_params?.nonce || '').trim());
   assert(security, 'WooCommerce product ordering nonce missing');
   const bySlug = Object.fromEntries(rows.map((row) => [row.slug, row]));
