@@ -12,10 +12,18 @@ try {
   await page.goto(`${origin}/wp-login.php`, { waitUntil: 'domcontentloaded', timeout: 45000 });
   await page.locator('#user_login').fill(username);
   await page.locator('#user_pass').fill(password);
-  await Promise.all([
-    page.waitForURL(url => url.origin === origin && url.pathname.startsWith('/wp-admin/'), { timeout: 45000 }),
-    page.locator('#wp-submit').click(),
-  ]);
+  await page.locator('#wp-submit').click();
+  await page.waitForURL(url => {
+    if (url.origin !== origin) return false;
+    if (url.pathname.startsWith('/wp-admin/')) return true;
+    return url.pathname === '/wp-login.php' && url.searchParams.get('action') === 'confirm_admin_email';
+  }, { timeout: 45000 });
+  const postLoginUrl = new URL(page.url());
+  if (postLoginUrl.pathname === '/wp-login.php' && postLoginUrl.searchParams.get('action') === 'confirm_admin_email') {
+    console.log('WP_BUILD_ADMIN_EMAIL_CONFIRMATION=SKIPPED_WITH_AUTHENTICATED_ADMIN_NAVIGATION');
+    await page.goto(`${origin}/wp-admin/`, { waitUntil: 'domcontentloaded', timeout: 45000 });
+    await page.waitForURL(url => url.origin === origin && url.pathname.startsWith('/wp-admin/'), { timeout: 45000 });
+  }
   await page.goto(`${origin}/wp-admin/admin.php?page=vcs-build-trigger`, { waitUntil: 'domcontentloaded', timeout: 45000 });
   await page.locator('#vcs-build-btn-main').waitFor({ state: 'attached', timeout: 30000 });
   let initial = await page.evaluate(() => {
