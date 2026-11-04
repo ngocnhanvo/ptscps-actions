@@ -1,0 +1,88 @@
+name: PTSCPS services taxonomy, menu, build and QA
+on:
+  push:
+    branches: [main]
+    paths:
+      - audit/ptscps-services-setup.ready
+      - scripts/ptscps-services-setup.mjs
+      - scripts/ptscps-php-live-release.py
+      - .github/workflows/ptscps-services-setup.yml
+permissions:
+  contents: read
+concurrency:
+  group: ptscps-services-setup
+  cancel-in-progress: false
+jobs:
+  services:
+    if: github.repository == 'ngocnhanvo/ptscps-actions'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Checkout pinned PTSCPS PHP source
+        uses: actions/checkout@v4
+        with:
+          repository: ngocnhanvo/ptscps-php
+          ref: master
+          token: ${{ secrets.SOURCE_REPO_PAT }}
+          path: source-php
+          persist-credentials: false
+      - name: Verify source checkpoints and PHP patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C source-php rev-parse HEAD)" = 'b6b2d2e88ccfb2ccd479dd914511182d2978b77e'
+          php -l source-php/wp-content/plugins/github-trigger/product-categories/endpoint.php
+          php source-php/wp-content/plugins/github-trigger/tests/product-category-public-media-url-test.php
+          python3 -m py_compile scripts/ptscps-php-live-release.py
+      - name: Release only product-category endpoint PHP with protected FTPS
+        env:
+          PTSCPS_PRODUCT_CATEGORY_MEDIA_ONLY: '1'
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+        run: python3 scripts/ptscps-php-live-release.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Resolve configured PTSCPS origins
+        id: origins
+        shell: bash
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import os
+          from urllib.parse import urlsplit
+          vals={}
+          for raw in os.environ['ENV_FILE'].splitlines():
+              line=raw.strip()
+              if line.startswith('export '): line=line[7:].strip()
+              if '=' not in line: continue
+              k,v=line.split('=',1); vals[k.strip()]=v.strip().strip('"').strip("'")
+          for key,out in [('WC_URL','wp'),('WC_URL_CLIENT','front')]:
+              u=urlsplit(vals.get(key,''))
+              if not (u.scheme=='https' and u.hostname and u.port in (None,443) and u.path in ('','/') and not u.username and not u.password and not u.query and not u.fragment): raise SystemExit('invalid '+key)
+              print(out+'='+u.geturl().rstrip('/'))
+          PY
+      - name: Install Playwright Chromium
+        run: npx --yes playwright@1.56.1 install --with-deps chromium
+      - name: Create service taxonomy, Page and Header.vi, then build and QA
+        env:
+          WP_ORIGIN: ${{ steps.origins.outputs.wp }}
+          FRONT_ORIGIN: ${{ steps.origins.outputs.front }}
+          WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
+          WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
+        run: node scripts/ptscps-services-setup.mjs
+      - name: Upload service QA screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ptscps-services-${{ github.run_id }}
+          path: artifacts/ptscps-services/
+          if-no-files-found: warn
+          retention-days: 14

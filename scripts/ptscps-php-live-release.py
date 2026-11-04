@@ -159,6 +159,10 @@ if os.environ.get("PTSCPS_AGENT_RAG_RUN02_ONLY") == "1":
         "wp-content/mu-plugins/esc-agent/src/Knowledge/ProductKnowledgeSource.php",
     )
 
+# Product-category media URL normalization is a one-file WordPress API release.
+if os.environ.get("PTSCPS_PRODUCT_CATEGORY_MEDIA_ONLY") == "1":
+    FILES = ("wp-content/plugins/github-trigger/product-categories/endpoint.php",)
+
 raw = os.environ.get("FTP_SERVER", "").strip()
 if "://" not in raw:
     raw = "ftp://" + raw
