@@ -113,18 +113,80 @@ try {
     assert(await designDescription.isVisible(), `${viewport.name} design service description missing`);
     const designText = clean(await designDescription.textContent());
     assert(designText.includes('dịch vụ EPCI'), `${viewport.name} design EPCI introduction missing`);
-    assert(designText.includes('Các dự án đã thực hiện'), `${viewport.name} design completed-projects heading missing`);
-    for (const expected of [
-      'Trạm Thu gom và phân phối khí Thái Bình – Hàm Rồng',
-      'Metering Skid thuộc Dự án thu gom khí Đại Hùng',
-      'Chemical injection Skid cho giàn Đông Đô',
-      'Condensate Tank TK-8040 for NPK Project',
-      'cung cấp năng lượng sạch và chiếu sáng cho Quần đảo Trường Sa',
-    ]) assert(designText.includes(expected), `${viewport.name} design legacy project missing: ${expected}`);
-    assert.equal(await page.locator('[data-service-projects-heading]').count(), 0, `${viewport.name} design service should not render duplicate featured-project cards`);
+
+    const expectedCapabilities = [
+      'Skid fabrication (including valve, pump, process skid…)',
+      'Piping and structural fabrication',
+      'Pressure vessel, tank fabrication',
+      'E&I system (Metering, ICSS, cathodic protection)',
+    ];
+    const capabilityGallery = page.locator('[data-service-capability-gallery]');
+    assert(await capabilityGallery.isVisible(), `${viewport.name} design capability gallery missing`);
+    const capabilityFigures = capabilityGallery.locator('figure');
+    assert.equal(await capabilityFigures.count(), 4, `${viewport.name} design capability count mismatch`);
+    assert.deepEqual((await capabilityFigures.locator('figcaption').allTextContents()).map(clean), expectedCapabilities, `${viewport.name} design capability labels mismatch`);
+    const capabilityImages = capabilityFigures.locator('img');
+    assert.equal(await capabilityImages.count(), 4, `${viewport.name} design capability image count mismatch`);
+    for (let i = 0; i < 4; i += 1) {
+      await capabilityImages.nth(i).scrollIntoViewIfNeeded();
+      await page.waitForFunction((index) => {
+        const image = document.querySelectorAll('[data-service-capability-gallery] img')[index];
+        return image && image.complete && image.naturalWidth > 0;
+      }, i, { timeout: 12000 });
+    }
+
+    const expectedProjects = [
+      {
+        title: 'Dự án Trạm Thu gom và phân phối khí Thái Bình – Hàm Rồng',
+        slug: 'tram-thu-gom-va-phan-phoi-khi-thai-binh-ham-rong',
+        scope: 'Thiết kế, mua sắm, thi công chế tạo chạy thử cho 18 gói cụm, hệ thống thiết bị cho dự án trạm thu gom và phân phối khí Thái Bình – Hàm Rồng bao gồm hệ thống Corrosion Inhibitor Skid, Pig Launcher – Pig Receiver, Piping system of platform, Hot tap flange, Piping on GDC-LFS, Valve skid, Fire fighting system, Hydrate system, Separator, Heat Exchanger, Flare, Truck Loading System, Oil Water Treatment, ICSS, Metering System, Electrical System và Cathodic Protection.',
+      },
+      {
+        title: 'Dự án Metering Skid – Thu gom khí Đại Hùng',
+        slug: 'metering-skid-thu-gom-khi-dai-hung',
+        scope: 'Thiết kế, mua sắm, chế tạo và chạy thử 01 hệ thống Gas Custody Metering (Tag. No 36A001).',
+      },
+      {
+        title: 'Dự án Chemical Injection Skid – Giàn Đông Đô',
+        slug: 'chemical-injection-skid-gian-dong-do',
+        scope: 'Thiết kế, mua sắm, chế tạo, lắp đặt chạy thử 01 hệ thống bơm H2 Scavenger Injection Pump trên giàn Đông Đô.',
+      },
+      {
+        title: 'Dự án Condensate Tank TK-8040 for NPK Project',
+        slug: 'condensate-tank-tk-8040-npk-project',
+        scope: 'Thiết kế, mua sắm, chế tạo 01 condensate tank (TK-8040).',
+      },
+      {
+        title: 'Dự án cung cấp năng lượng sạch và chiếu sáng cho Quần đảo Trường Sa',
+        slug: 'nang-luong-sach-chieu-sang-quan-dao-truong-sa',
+        scope: 'Mua sắm, chế tạo, lắp đặt các kết cấu thép cho dự án cấp năng lượng và chiếu sáng cho Quần đảo Trường Sa.',
+      },
+    ];
+    assert(await page.locator('[data-service-projects-heading]').isVisible(), `${viewport.name} design project heading missing`);
+    const designProjectCards = page.locator('[data-service-projects-heading] + div article');
+    assert.equal(await designProjectCards.count(), 5, `${viewport.name} design project card count mismatch`);
+    assert.deepEqual((await designProjectCards.locator('h2').allTextContents()).map(clean), expectedProjects.map((item) => item.title), `${viewport.name} design project titles mismatch`);
+    const designScopes = (await designProjectCards.locator('[data-service-project-scope]').allTextContents()).map(clean);
+    assert.deepEqual(designScopes, expectedProjects.map((item) => item.scope), `${viewport.name} design project scopes mismatch`);
+    const designProjectImages = designProjectCards.locator('img');
+    assert.equal(await designProjectImages.count(), 11, `${viewport.name} design project image count mismatch`);
+    assert.equal(await designProjectCards.locator('[data-service-project-gallery]').count(), 4, `${viewport.name} design gallery group count mismatch`);
+    for (let i = 0; i < await designProjectImages.count(); i += 1) {
+      await designProjectImages.nth(i).scrollIntoViewIfNeeded();
+      await page.waitForFunction((index) => {
+        const image = document.querySelectorAll('[data-service-projects-heading] + div article img')[index];
+        return image && image.complete && image.naturalWidth > 0;
+      }, i, { timeout: 12000 });
+    }
+    const designHrefs = await designProjectCards.evaluateAll((nodes) => nodes.map((node) => node.querySelector('a')?.getAttribute('href') || ''));
+    assert.deepEqual(designHrefs.map((href) => new URL(href, frontUrl.origin).pathname), expectedProjects.map((item) => `/dich-vu/${item.slug}`), `${viewport.name} design project href mismatch`);
+    assert(designHrefs.every((href) => new URL(href, frontUrl.origin).origin === frontUrl.origin), `${viewport.name} design project link leaves frontend origin`);
+    assert(!designText.includes(expectedProjects[0].title), `${viewport.name} design project data duplicated in category description`);
+    const designOverflow = await page.evaluate(() => ({ client: document.documentElement.clientWidth, scroll: document.documentElement.scrollWidth }));
+    assert(designOverflow.scroll <= designOverflow.client + 2, `${viewport.name} design detail horizontal overflow`);
     noAdminOrigin(await page.content(), `${viewport.name}-design-service-detail`);
     await page.screenshot({ path: `${artifactDir}/${viewport.name}-dich-vu-thiet-ke-detail.png`, fullPage: true });
-    console.log(`SERVICES_READONLY_QA_DESIGN=${viewport.name}:PASS`);
+    console.log(`SERVICES_READONLY_QA_DESIGN=${viewport.name}:PASS capabilities=4 projects=5 project_images=11`);
     await context.close();
   }
 
