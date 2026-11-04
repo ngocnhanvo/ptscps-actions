@@ -136,14 +136,41 @@ async function ensureMedia(nonce,spec,sourceUrl){
   const bytes=Buffer.from(await source.arrayBuffer());
   assert(bytes.length>5000,`Legacy image unexpectedly small ${spec.key}`);
   const contentType=source.headers.get('content-type')?.split(';')[0]||'image/jpeg';
-  const upload=await page.request.post(uri('/wp-json/wp/v2/media'),{
-    headers:{'X-WP-Nonce':nonce,'Content-Type':contentType,'Content-Disposition':`attachment; filename="${spec.file}"`},
-    data:bytes,timeout:60000,
-  });
-  const created=await upload.json().catch(()=>({}));
-  assert(upload.ok()&&Number(created?.id)>0,`Media upload failed ${spec.key} HTTP ${upload.status()}`);
-  const update=await jsonRequest('POST',`/wp-json/wp/v2/media/${created.id}`,nonce,{alt_text:spec.title,title:spec.title,caption:''});
-  assert(update.res.ok(),`Media metadata update failed ${spec.key}`);
+  let created=null;
+  for(let attempt=1;attempt<=3&&!created;attempt++){
+    try{
+      const upload=await page.request.post(uri('/wp-json/wp/v2/media'),{
+        headers:{'X-WP-Nonce':nonce,'Content-Type':contentType,'Content-Disposition':`attachment; filename="${spec.file}"`},
+        data:bytes,timeout:60000,
+      });
+      const body=await upload.json().catch(()=>({}));
+      if(upload.ok()&&Number(body?.id)>0){created=body;break;}
+      report('MEDIA_UPLOAD_RETRY',{key:spec.key,attempt,http:upload.status()});
+    }catch(error){
+      report('MEDIA_UPLOAD_RETRY',{key:spec.key,attempt,transport:error?.message||'error'});
+    }
+    for(let readAttempt=1;readAttempt<=4&&!created;readAttempt++){
+      await sleep(700*readAttempt);
+      const recovered=await findMedia(nonce,spec.file).catch(()=>null);
+      if(recovered){
+        created=recovered;
+        report('MEDIA_UPLOAD_READBACK_RECOVERED',{key:spec.key,id:recovered.id,attempt,readAttempt});
+      }
+    }
+  }
+  assert(created&&Number(created.id)>0,`Media upload failed ${spec.key} after retries`);
+  let metadataUpdated=false;
+  for(let attempt=1;attempt<=3&&!metadataUpdated;attempt++){
+    try{
+      const update=await jsonRequest('POST',`/wp-json/wp/v2/media/${created.id}`,nonce,{alt_text:spec.title,title:spec.title,caption:''});
+      if(update.res.ok()){metadataUpdated=true;break;}
+      report('MEDIA_META_RETRY',{key:spec.key,attempt,http:update.res.status()});
+    }catch(error){
+      report('MEDIA_META_RETRY',{key:spec.key,attempt,transport:error?.message||'error'});
+    }
+    await sleep(700*attempt);
+  }
+  assert(metadataUpdated,`Media metadata update failed ${spec.key}`);
   existing=await findMedia(nonce,spec.file);
   assert(existing&&Number(existing.id)===Number(created.id),`Media readback failed ${spec.key}`);
   report('MEDIA',{key:spec.key,id:existing.id,state:'CREATED'});
