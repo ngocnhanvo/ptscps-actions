@@ -42,7 +42,35 @@ const services = [
   },
 ];
 
+const taxonomySafeDescription = (service) => {
+  if (service.slug !== 'dich-vu-thiet-ke-mua-sam-gia-cong-che-tao') return service.description;
+  return `Công ty cung cấp các dịch vụ EPCI (engineering, procurement, construction and installation) cho các cấu kiện như:
+
+• Skid fabrication (including valve, pump, process skid…);
+• Piping and structural fabrication;
+• Pressure vessel, tank fabrication;
+• E&I system (Metering, ICSS, cathodic protection).
+
+<strong>Các dự án đã thực hiện</strong>
+
+<strong>1. Dự án thiết kế, mua sắm, thi công chế tạo chạy thử hệ thống, cụm thiết bị thuộc dự án Trạm Thu gom và phân phối khí Thái Bình – Hàm Rồng</strong>
+Phạm vi công việc: Thiết kế, mua sắm, thi công chế tạo chạy thử cho 18 gói cụm, hệ thống thiết bị cho dự án trạm thu gom và phân phối khí Thái Bình – Hàm Rồng bao gồm hệ thống Corrosion Inhibitor Skid, Pig Launcher – Pig Receiver, Piping system of platform, Hot tap flange, Piping on GDC-LFS, Valve skid, Fire fighting system, Hydrate system, Separator, Heat Exchanger, Flare, Truck Loading System, Oil Water Treatment, ICSS, Metering System, Electrical System và Cathodic Protection.
+
+<strong>2. Dự án thiết kế, mua sắm, thi công chế tạo chạy thử hệ thống Metering Skid thuộc Dự án thu gom khí Đại Hùng</strong>
+Phạm vi công việc: Thiết kế, mua sắm, chế tạo và chạy thử 01 hệ thống Gas Custody Metering (Tag. No 36A001).
+
+<strong>3. Dự án thiết kế, mua sắm, thi công chế tạo chạy thử hệ thống Chemical injection Skid cho giàn Đông Đô – PVEP Block 01/97 & 02/97</strong>
+Phạm vi công việc: Thiết kế, mua sắm, chế tạo, lắp đặt chạy thử 01 hệ thống bơm H2 Scavenger Injection Pump trên giàn Đông Đô.
+
+<strong>4. Dự án chế tạo Condensate Tank TK-8040 for NPK Project</strong>
+Phạm vi công việc: Thiết kế, mua sắm, chế tạo 01 condensate tank (TK-8040).
+
+<strong>5. Dự án cung cấp năng lượng sạch và chiếu sáng cho Quần đảo Trường Sa</strong>
+Phạm vi công việc: Mua sắm, chế tạo, lắp đặt các kết cấu thép cho dự án cấp năng lượng và chiếu sáng cho Quần đảo Trường Sa.`;
+};
+
 const clean = (v) => String(v ?? '').replace(/<[^>]+>/g,'').replace(/\s+/g,' ').trim();
+const cleanDescription = (v) => String(v ?? '').replace(/<[^>]+>/g,'').replace(/\r\n?/g,'\n').split('\n').map(line=>line.replace(/[ \t]+/g,' ').trim()).join('\n').replace(/\n{3,}/g,'\n\n').trim();
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const report = (k,v) => console.log(`SERVICES_CONTENT_${k}=${typeof v==='string'?v:JSON.stringify(v)}`);
 const browser = await chromium.launch({headless:true});
@@ -82,10 +110,10 @@ async function findCategory(nonce,slug){
 }
 async function ensureDescription(nonce,category,html){
   const current=String(category.description?.raw ?? category.description ?? '');
-  if(clean(current)===clean(html)){report('DESCRIPTION',{slug:category.slug,state:'ALREADY_CORRECT_SKIP_WRITE'});return false;}
+  if(cleanDescription(current)===cleanDescription(html)){report('DESCRIPTION',{slug:category.slug,state:'ALREADY_CORRECT_SKIP_WRITE'});return false;}
   const {res,body}=await jsonRequest('POST',`/wp-json/wp/v2/product_cat/${category.id}`,nonce,{description:html});
   assert(res.ok(),`Category description update HTTP ${res.status()} ${category.slug}`);
-  assert(clean(body.description?.raw ?? body.description ?? '')===clean(html),`Category description readback mismatch ${category.slug}`);
+  assert(cleanDescription(body.description?.raw ?? body.description ?? '')===cleanDescription(html),`Category description readback mismatch ${category.slug}`);
   report('DESCRIPTION',{slug:category.slug,state:'UPDATED_VERIFIED'}); return true;
 }
 async function findMedia(nonce,file){
@@ -166,7 +194,8 @@ async function ensureProduct(nonce,category,project){
 try{
   await login(); const nonce=await restNonce(); let changed=false; let projectCount=0;
   for(const service of services){
-    const category=await findCategory(nonce,service.slug); changed=(await ensureDescription(nonce,category,service.description))||changed;
+    const category=await findCategory(nonce,service.slug); const description=taxonomySafeDescription(service);
+    changed=(await ensureDescription(nonce,category,description))||changed;
     for(const project of service.projects){changed=(await ensureProduct(nonce,category,project))||changed; projectCount++;}
   }
   report('RESULT',{status:'PASS',categories:services.length,projects:projectCount,changed});
