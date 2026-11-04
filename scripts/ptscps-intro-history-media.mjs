@@ -159,8 +159,19 @@ async function finishSelection(page, spec, mediaId) {
   const altInput = modal.locator('input[data-setting="alt"], textarea[data-setting="alt"]').last();
   if (await altInput.count()) await altInput.fill(spec.alt);
 
-  const response = await page.request.get(`${wp}/wp-json/wp/v2/media/${mediaId}?_fields=id,source_url,mime_type`, { timeout: 20000 });
-  assert.ok(response.ok(), `Selected history media REST HTTP ${response.status()}`);
+  let response = null;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      response = await page.request.get(`${wp}/wp-json/wp/v2/media/${mediaId}?_fields=id,source_url,mime_type`, { timeout: 20000 });
+      if (response.ok()) break;
+      if (attempt === 3) break;
+    } catch (error) {
+      if (attempt === 3) throw error;
+      console.log(`INTRO_HISTORY_MEDIA_RETRY media_id=${mediaId} attempt=${attempt}`);
+      await page.waitForTimeout(attempt * 1000);
+    }
+  }
+  assert.ok(response?.ok(), `Selected history media REST HTTP ${response?.status() ?? 'unavailable'}`);
   const media = await response.json();
   assert.match(String(media?.mime_type || ''), /^image\//, 'Selected history media is not image');
   const mediaUrl = new URL(String(media?.source_url || ''), wp);
