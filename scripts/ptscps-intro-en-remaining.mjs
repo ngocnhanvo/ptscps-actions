@@ -365,7 +365,11 @@ async function ensurePage(spec, original) {
   await insertNativeShortcode(spec);
   const saveDraft=page.locator('#save-post');
   assert(await saveDraft.count(),`WordPress Save Draft missing ${spec.slug}`);
-  await Promise.all([page.waitForLoadState('domcontentloaded'),saveDraft.click()]);
+  if (draft) {
+    await Promise.all([page.waitForNavigation({waitUntil:'domcontentloaded',timeout:45000}),saveDraft.click()]);
+  } else {
+    await Promise.all([page.waitForURL(/post\.php\?post=\d+&action=edit/,{timeout:45000}),saveDraft.click()]);
+  }
   const id=Number(await page.locator('#post_ID').inputValue());
   assert(id>0,`English draft ID missing ${spec.slug}`);
   await page.goto(uri(`/wp-admin/post.php?post=${id}&action=edit`),{waitUntil:'domcontentloaded',timeout:45000});
@@ -380,16 +384,38 @@ async function ensurePage(spec, original) {
   await setAcf('product_lang','en');
   await ensureTranslationOrigin(spec,original);
   if(!(await page.locator('#content').inputValue()).includes(spec.id))await insertNativeShortcode(spec);
-  const publish=page.locator('#publish');
-  assert(await publish.count(),`WordPress Publish button missing ${spec.slug}`);
-  await publish.click();
-  await page.waitForLoadState('domcontentloaded');
-  await sleep(900);
+  const pre=await page.evaluate(() => ({
+    slug:document.querySelector('#editable-post-name-full')?.textContent?.trim()||document.querySelector('#post_name')?.value||'',
+    lang:document.querySelector('[data-name="product_lang"] select')?.value||document.querySelector('[data-name="product_lang"] input:checked')?.value||'',
+    origin:document.querySelector('[data-name="origin_page_id"] select')?.value||document.querySelector('[data-name="origin_page_id"] input')?.value||'',
+    key:document.querySelector('[data-name="key"] input')?.value||'',
+    action:document.querySelector('[data-name="action"] input')?.value||'',
+    content:document.querySelector('#content')?.value||'',
+  }));
+  assert(pre.slug===spec.slug && pre.lang==='en' && String(pre.origin)===String(original.id) && pre.key===spec.key && pre.action==='IntroPage' && String(pre.content).includes(spec.id),`English draft preflight failed ${spec.slug}`);
+
   let readback=null;
-  for(let attempt=1;attempt<=10;attempt++){
-    const response=await page.request.get(uri(`/wp-json/wp/v2/pages/${id}?context=edit&_fields=id,slug,status,acf,content,title`),{timeout:30000}).catch(()=>null);
-    if(response?.ok()){readback=await response.json();if(readback.status==='publish'&&readback.slug===spec.slug)break;}
-    await sleep(900*attempt);
+  for(let publishAttempt=1;publishAttempt<=2;publishAttempt++){
+    const publish=page.locator('#publish');
+    assert(await publish.count(),`WordPress Publish button missing ${spec.slug}`);
+    try {
+      await Promise.all([page.waitForNavigation({waitUntil:'domcontentloaded',timeout:45000}),publish.click()]);
+    } catch (error) {
+      report('PAGE_PUBLISH_NAV_RETRY',{slug:spec.slug,attempt:publishAttempt,error:error?.name||'error'});
+    }
+    for(let attempt=1;attempt<=10;attempt++){
+      const response=await page.request.get(uri(`/wp-json/wp/v2/pages/${id}?context=edit&_fields=id,slug,status,acf,content,title`),{timeout:30000}).catch(()=>null);
+      if(response?.ok()){
+        readback=await response.json();
+        if(readback.status==='publish'&&readback.slug===spec.slug)break;
+      }
+      await sleep(800*Math.min(attempt,4));
+    }
+    if(readback?.status==='publish'&&readback.slug===spec.slug)break;
+    if(publishAttempt<2){
+      report('PAGE_PUBLISH_READBACK_RETRY',{slug:spec.slug,status:readback?.status||'unknown'});
+      await page.goto(uri(`/wp-admin/post.php?post=${id}&action=edit`),{waitUntil:'domcontentloaded',timeout:45000});
+    }
   }
   assert(readback?.status==='publish',`English Page not published ${spec.slug}`);
   assert.equal(readback.slug,spec.slug,`English Page slug mismatch ${spec.slug}`);
