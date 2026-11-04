@@ -19,6 +19,13 @@ try {
     assert.equal(await triggers.count(), 2, `${viewport.name} award trigger count mismatch`);
     const images = triggers.locator('img');
     assert.equal(await images.count(), 2, `${viewport.name} award image count mismatch`);
+    for (let index = 0; index < 2; index++) {
+      await triggers.nth(index).scrollIntoViewIfNeeded();
+      await page.waitForFunction((imageIndex) => {
+        const image = document.querySelectorAll('[data-about-award-image][data-gallery-trigger="about00-awards"] img')[imageIndex];
+        return image && image.complete && image.naturalWidth > 200 && image.naturalHeight > 120;
+      }, index, { timeout: 8000 });
+    }
     const imageState = await images.evaluateAll((nodes) => nodes.map((img) => ({
       src: img.getAttribute('src') || '',
       width: img.naturalWidth,

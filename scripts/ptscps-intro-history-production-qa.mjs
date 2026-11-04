@@ -20,6 +20,13 @@ try {
     const triggers = page.locator('[data-about-history-image][data-gallery-trigger="about03-history"]');
     assert.equal(await triggers.count(), 16, `${viewport.name} history image trigger count mismatch`);
     const images = triggers.locator('img');
+    for (let index = 0; index < 16; index++) {
+      await triggers.nth(index).scrollIntoViewIfNeeded();
+      await page.waitForFunction((imageIndex) => {
+        const image = document.querySelectorAll('[data-about-history-image][data-gallery-trigger="about03-history"] img')[imageIndex];
+        return image && image.complete && image.naturalWidth >= 200 && image.naturalHeight >= 120;
+      }, index, { timeout: 8000 });
+    }
     const imageState = await images.evaluateAll((nodes) => nodes.map((img) => ({
       src: img.getAttribute('src') || '',
       width: img.naturalWidth,
