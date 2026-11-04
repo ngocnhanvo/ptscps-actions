@@ -337,8 +337,23 @@ async function setRouteAcf(name,value){
   await input.fill(String(value));
 }
 
-async function createProductRoute(spec){
-  await page.goto(uri('/wp-admin/post-new.php?post_type=chuyen-huong-link&esc_full_admin=1'),{waitUntil:'domcontentloaded',timeout:50000});
+async function findRoutePostByTitle(title){
+  await page.goto(uri(`/wp-admin/edit.php?post_type=chuyen-huong-link&s=${encodeURIComponent(title)}&esc_full_admin=1`),{waitUntil:'domcontentloaded',timeout:50000});
+  const rows=page.locator('#the-list tr');
+  const ids=[];
+  for(let i=0;i<await rows.count();i++){
+    const row=rows.nth(i);
+    const link=row.locator('.row-title').first();
+    if(!await link.count())continue;
+    if(clean(await link.textContent())!==title)continue;
+    const match=String(await row.getAttribute('id')||'').match(/^post-(\d+)$/);
+    if(match)ids.push(Number(match[1]));
+  }
+  assert(ids.length<=1,`Duplicate route post title ${title}`);
+  return ids[0]||0;
+}
+
+async function configureProductRouteForm(spec){
   await page.locator('#title').fill(spec.title);
   await setRouteAcf('from_link',spec.from);
   await setRouteAcf('to_link',spec.to);
@@ -348,6 +363,8 @@ async function createProductRoute(spec){
   const priority=page.locator('#esc-route-priority');
   assert(await priority.count()===1,'Route priority field missing');
   await priority.fill(String(spec.priority));
+  const conditionRows=page.locator('#esc-route-condition-rows tr');
+  await conditionRows.evaluateAll(rows=>rows.forEach(row=>row.remove()));
   for(const condition of spec.conditions){
     await page.locator('#esc-route-add-condition').click();
     const row=page.locator('#esc-route-condition-rows tr').last();
@@ -355,18 +372,37 @@ async function createProductRoute(spec){
     await row.locator('input[name="esc_route_condition_capture[]"]').fill(String(condition.capture));
     await row.locator('input[name="esc_route_condition_value[]"]').fill(condition.value);
   }
+}
+
+async function verifyProductRoute(id,spec,state){
+  for(let attempt=0;attempt<8;attempt++){
+    await sleep(600);
+    const feed=await redirectFeed();
+    const exact=feed.filter(x=>routeMatches(x,spec));
+    assert(exact.length<=1,`Duplicate route after save ${spec.title}`);
+    if(exact.length===1){
+      assert(Number(exact[0].id)===Number(id),`Route exact match belongs to unexpected post ${spec.title}`);
+      report('ROUTE',{title:spec.title,id,state});return;
+    }
+  }
+  const candidates=(await redirectFeed()).filter(x=>Number(x.id)===Number(id)||String(x?.redirect?.from_link||'')===spec.from);
+  report('ROUTE_READBACK_MISMATCH',{title:spec.title,id,candidates:candidates.map(x=>({id:x.id,redirect:x.redirect}))});
+  throw Error(`Route readback failed ${spec.title}`);
+}
+
+async function saveProductRoute(id,spec,state){
+  const path=id>0
+    ? `/wp-admin/post.php?post=${id}&action=edit&esc_full_admin=1`
+    : '/wp-admin/post-new.php?post_type=chuyen-huong-link&esc_full_admin=1';
+  await page.goto(uri(path),{waitUntil:'domcontentloaded',timeout:50000});
+  await configureProductRouteForm(spec);
   const publish=page.locator('#publish');
   assert(await publish.count()===1,`Route publish button missing ${spec.title}`);
   await Promise.all([page.waitForNavigation({waitUntil:'domcontentloaded',timeout:45000}).catch(()=>null),publish.click()]);
-  const id=Number(await page.locator('#post_ID').inputValue());
-  assert(id>0,`Route post ID missing ${spec.title}`);
-  for(let attempt=0;attempt<8;attempt++){
-    await sleep(600);
-    const exact=(await redirectFeed()).filter(x=>routeMatches(x,spec));
-    if(exact.length===1){report('ROUTE',{title:spec.title,id,state:'CREATED_VERIFIED'});return;}
-    assert(exact.length<=1,`Duplicate route after create ${spec.title}`);
-  }
-  throw Error(`Route readback failed ${spec.title}`);
+  const savedId=Number(await page.locator('#post_ID').inputValue());
+  assert(savedId>0,`Route post ID missing ${spec.title}`);
+  if(id>0)assert(savedId===Number(id),`Route post ID changed during repair ${spec.title}`);
+  await verifyProductRoute(savedId,spec,state);
 }
 
 async function ensureProductRoutes(){
@@ -375,7 +411,14 @@ async function ensureProductRoutes(){
     const exact=(await redirectFeed()).filter(x=>routeMatches(x,spec));
     assert(exact.length<=1,`Duplicate product SSR route ${spec.title}`);
     if(exact.length===1){report('ROUTE',{title:spec.title,id:exact[0].id,state:'ALREADY_PRESENT_SKIP_WRITE'});continue;}
-    await createProductRoute(spec); changed=true;
+    const existingId=await findRoutePostByTitle(spec.title);
+    if(existingId>0){
+      report('ROUTE_REPAIR',{title:spec.title,id:existingId,state:'EXISTING_POST_REPAIR'});
+      await saveProductRoute(existingId,spec,'REPAIRED_VERIFIED');
+    }else{
+      await saveProductRoute(0,spec,'CREATED_VERIFIED');
+    }
+    changed=true;
   }
   report('ROUTES',{status:'PASS',count:productRouteSpecs.length,changed});
   return changed;
