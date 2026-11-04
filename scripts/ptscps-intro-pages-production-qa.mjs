@@ -4,7 +4,7 @@ import { chromium } from 'playwright';
 
 const front=process.env.FRONT_ORIGIN;
 assert.ok(front,'FRONT_ORIGIN missing');
-const brochureUrl='https://ptscps.com.vn/wp-content/uploads/2024/12/PPS-update.pdf';
+const brochurePath='/wp-content/uploads/2026/11/PPS-update.pdf';
 const specs=[
   {slug:'thu-ngo',title:'Thư ngỏ',snippet:'sau gần 25 năm xây dựng và phát triển'},
   {slug:'gioi-thieu-cong-ty',title:'Giới thiệu công ty',snippet:'chính thức đi vào hoạt động từ 15/09/2002'},
@@ -53,9 +53,19 @@ try{
   }
   const brochure=panel.getByRole('link',{name:'Company Brochure',exact:true});
   assert.equal(await brochure.count(),1,'Desktop brochure missing');
-  assert.equal(await brochure.getAttribute('href'),brochureUrl,'Desktop brochure href changed');
+  const brochureHref=await brochure.getAttribute('href');
+  assert.ok(brochureHref,'Desktop brochure href missing');
+  assert.equal(new URL(brochureHref,front).pathname,brochurePath,'Desktop brochure href changed');
   assert.equal(await brochure.getAttribute('target'),'_blank','Desktop brochure target changed');
-  console.log('INTRO_FINAL_DESKTOP_MENU=PASS');
+  const desktopBeforeBrochure=desktop.url();
+  const popupPromise=desktopContext.waitForEvent('page',{timeout:10000});
+  await brochure.click();
+  const brochurePopup=await popupPromise;
+  await brochurePopup.waitForURL((url)=>url.pathname===brochurePath,{timeout:15000});
+  assert.equal(desktop.url(),desktopBeforeBrochure,'Desktop brochure replaced the current tab');
+  assert.equal(new URL(brochurePopup.url()).pathname,brochurePath,'Desktop brochure popup path changed');
+  await brochurePopup.close();
+  console.log('INTRO_FINAL_DESKTOP_MENU=PASS new_tab=native current_tab=preserved');
   await desktopContext.close();
 
   const mobileContext=await browser.newContext({viewport:{width:390,height:844}});
@@ -93,7 +103,9 @@ try{
   }
   const mobileBrochure=mobilePanel.getByRole('link',{name:'Company Brochure',exact:true});
   assert.equal(await mobileBrochure.count(),1,'Mobile brochure missing');
-  assert.equal(await mobileBrochure.getAttribute('href'),brochureUrl,'Mobile brochure href changed');
+  const mobileBrochureHref=await mobileBrochure.getAttribute('href');
+  assert.ok(mobileBrochureHref,'Mobile brochure href missing');
+  assert.equal(new URL(mobileBrochureHref,front).pathname,brochurePath,'Mobile brochure href changed');
   assert.equal(await mobileBrochure.getAttribute('target'),'_blank','Mobile brochure target changed');
   await mobile.screenshot({path:`${dir}/mobile-menu-open.png`,fullPage:true});
   console.log('INTRO_FINAL_MOBILE_MENU=PASS');
