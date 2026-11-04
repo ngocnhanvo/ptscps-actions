@@ -21,12 +21,47 @@ async function pagedProducts() {
   return all;
 }
 
+async function inspectLegacyServiceCards() {
+  const legacy = 'https://ptscps.com.vn/dich-vu';
+  const response = await fetch(legacy, { headers:{ 'User-Agent':'Mozilla/5.0 PTSCPS migration audit' } });
+  assert(response.ok, `Legacy services HTTP ${response.status}`);
+  const html = (await response.text()).replace(/%E2%80%8B/gi, '').replace(/\u200b/g, '');
+  const slugs = [
+    'van-hanh-va-bao-duong-fpso-fso-mopu',
+    'dich-vu-thiet-ke-mua-sam-gia-cong-che-tao',
+    'cung-ung-nhan-luc-ky-thuat-van-hanh-va-bao-duong',
+    'dich-vu-sua-chua-bao-duong-cac-thiet-bi-va-cong-trinh-cong-nghiep',
+  ];
+  return slugs.map(slug => {
+    const needle = `/dich-vu/${slug}`;
+    const index = html.indexOf(needle);
+    assert(index >= 0, `Legacy service link missing ${slug}`);
+    const before = html.slice(Math.max(0, index - 1800), index);
+    const after = html.slice(index, Math.min(html.length, index + 1200));
+    const beforeImages = [...before.matchAll(/<img\b[^>]*\bsrc=["']([^"']+)["'][^>]*>/gi)];
+    const afterImages = [...after.matchAll(/<img\b[^>]*\bsrc=["']([^"']+)["'][^>]*>/gi)];
+    const image = beforeImages.at(-1)?.[1] || afterImages[0]?.[1] || '';
+    assert(image, `Legacy service image missing ${slug}`);
+    return { slug, href:new URL(needle, legacy).href, image:new URL(image, legacy).href };
+  });
+}
+
+async function inspectProductCatRest() {
+  const routeIndex = await fetch(wp + '/wp-json/', { headers:{Accept:'application/json'} });
+  assert(routeIndex.ok, `REST index HTTP ${routeIndex.status}`);
+  const routes = (await routeIndex.json())?.routes || {};
+  const response = await fetch(wp + '/wp-json/wp/v2/product_cat?hide_empty=false&per_page=1', { headers:{Accept:'application/json'} });
+  return { routeAvailable:Boolean(routes['/wp/v2/product_cat']), status:response.status };
+}
+
 const [{data: categories},{data: menus},{data: pages},products] = await Promise.all([
   getJson('/wp-json/astro/v1/get-product-categories'),
   getJson('/wp-json/esc-api/v1/menus?_service_inventory='+Date.now()),
   getJson('/wp-json/wp/v2/pages?status=publish&per_page=100&_fields=id,slug,title,acf'),
   pagedProducts(),
 ]);
+
+const [legacyMedia, productCatRest] = await Promise.all([inspectLegacyServiceCards(), inspectProductCatRest()]);
 
 assert(Array.isArray(categories), 'Product categories payload invalid');
 assert(Array.isArray(pages), 'Pages payload invalid');
@@ -55,4 +90,6 @@ console.log('SERVICE_INVENTORY_CATEGORIES='+JSON.stringify(categories));
 console.log('SERVICE_INVENTORY_PRODUCTS='+JSON.stringify(productRows));
 console.log('SERVICE_INVENTORY_PAGES='+JSON.stringify(pageRows));
 console.log('SERVICE_INVENTORY_HEADER_VI='+JSON.stringify(viMenu));
+console.log('SERVICE_INVENTORY_LEGACY_MEDIA='+JSON.stringify(legacyMedia));
+console.log('SERVICE_INVENTORY_PRODUCT_CAT_REST='+JSON.stringify(productCatRest));
 console.log(`SERVICE_INVENTORY_SUMMARY=${JSON.stringify({categories:categories.length,products:productRows.length,pages:pageRows.length,menuItems:Array.isArray(viMenu?.items)?viMenu.items.length:0})}`);
