@@ -104,6 +104,27 @@ try {
     noAdminOrigin(await page.content(), `${viewport.name}-service-detail`);
     await page.screenshot({ path: `${artifactDir}/${viewport.name}-dich-vu-fpso-detail.png`, fullPage: true });
     console.log(`SERVICES_READONLY_QA_DETAIL=${viewport.name}:PASS`);
+
+    const designService = services.find((item) => item.slug === 'dich-vu-thiet-ke-mua-sam-gia-cong-che-tao');
+    assert(designService, 'Design/procurement service fixture missing');
+    const designResponse = await page.goto(`${front}/dich-vu/${designService.slug}?_design_detail_qa=${Date.now()}`, { waitUntil: 'load', timeout: 50000 });
+    assert(designResponse?.status() === 200, `${viewport.name} design service detail HTTP ${designResponse?.status()}`);
+    const designDescription = page.locator('[data-service-category-description]');
+    assert(await designDescription.isVisible(), `${viewport.name} design service description missing`);
+    const designText = clean(await designDescription.textContent());
+    assert(designText.includes('dịch vụ EPCI'), `${viewport.name} design EPCI introduction missing`);
+    assert(designText.includes('Các dự án đã thực hiện'), `${viewport.name} design completed-projects heading missing`);
+    for (const expected of [
+      'Trạm Thu gom và phân phối khí Thái Bình – Hàm Rồng',
+      'Metering Skid thuộc Dự án thu gom khí Đại Hùng',
+      'Chemical injection Skid cho giàn Đông Đô',
+      'Condensate Tank TK-8040 for NPK Project',
+      'cung cấp năng lượng sạch và chiếu sáng cho Quần đảo Trường Sa',
+    ]) assert(designText.includes(expected), `${viewport.name} design legacy project missing: ${expected}`);
+    assert.equal(await page.locator('[data-service-projects-heading]').count(), 0, `${viewport.name} design service should not render duplicate featured-project cards`);
+    noAdminOrigin(await page.content(), `${viewport.name}-design-service-detail`);
+    await page.screenshot({ path: `${artifactDir}/${viewport.name}-dich-vu-thiet-ke-detail.png`, fullPage: true });
+    console.log(`SERVICES_READONLY_QA_DESIGN=${viewport.name}:PASS`);
     await context.close();
   }
 
