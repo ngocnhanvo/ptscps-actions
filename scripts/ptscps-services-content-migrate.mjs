@@ -70,7 +70,8 @@ Phạm vi công việc: Mua sắm, chế tạo, lắp đặt các kết cấu th
 };
 
 const clean = (v) => String(v ?? '').replace(/<[^>]+>/g,'').replace(/\s+/g,' ').trim();
-const cleanDescription = (v) => String(v ?? '').replace(/<[^>]+>/g,' ').replace(/&amp;|&#0?38;|&#x26;/gi,'&').replace(/&nbsp;|&#160;|&#xa0;/gi,' ').replace(/\s+/g,' ').trim();
+const cleanDescription = (v) => String(v ?? '').replace(/<[^>]+>/g,'').replace(/\r\n?/g,'\n').split('\n').map(line=>line.replace(/[ \t]+/g,' ').trim()).join('\n').replace(/\n{3,}/g,'\n\n').trim();
+const cleanDesignDescription = (v) => String(v ?? '').replace(/<[^>]+>/g,' ').replace(/&amp;|&#0?38;|&#x26;/gi,'&').replace(/&nbsp;|&#160;|&#xa0;/gi,' ').replace(/\s+/g,' ').trim();
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const report = (k,v) => console.log(`SERVICES_CONTENT_${k}=${typeof v==='string'?v:JSON.stringify(v)}`);
 const browser = await chromium.launch({headless:true});
@@ -123,11 +124,12 @@ async function findCategory(nonce,slug){
   assert(res.ok(),`Category lookup HTTP ${res.status()} ${slug}`); assert(body.length===1,`Category lookup mismatch ${slug}`); return body[0];
 }
 async function ensureDescription(nonce,category,html){
+  const normalize=category.slug==='dich-vu-thiet-ke-mua-sam-gia-cong-che-tao'?cleanDesignDescription:cleanDescription;
   const current=String(category.description?.raw ?? category.description ?? '');
-  if(cleanDescription(current)===cleanDescription(html)){report('DESCRIPTION',{slug:category.slug,state:'ALREADY_CORRECT_SKIP_WRITE'});return false;}
+  if(normalize(current)===normalize(html)){report('DESCRIPTION',{slug:category.slug,state:'ALREADY_CORRECT_SKIP_WRITE'});return false;}
   const {res,body}=await jsonRequest('POST',`/wp-json/wp/v2/product_cat/${category.id}`,nonce,{description:html});
   assert(res.ok(),`Category description update HTTP ${res.status()} ${category.slug}`);
-  assert(cleanDescription(body.description?.raw ?? body.description ?? '')===cleanDescription(html),`Category description readback mismatch ${category.slug}`);
+  assert(normalize(body.description?.raw ?? body.description ?? '')===normalize(html),`Category description readback mismatch ${category.slug}`);
   report('DESCRIPTION',{slug:category.slug,state:'UPDATED_VERIFIED'}); return true;
 }
 async function findMedia(nonce,file){
