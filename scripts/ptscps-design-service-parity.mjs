@@ -368,7 +368,11 @@ async function setProductAdminFields(productId, galleryIds, menuOrder) {
   }
   const menuOrderInput = page.locator('#menu_order, input[name="menu_order"]').first();
   assert(await menuOrderInput.count() === 1, `Product menu_order input missing ${productId}`);
-  await menuOrderInput.fill(String(menuOrder));
+  await menuOrderInput.evaluate((el, value) => {
+    el.value = String(value);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  }, menuOrder);
   const galleryInput = page.locator('#product_image_gallery, input[name="product_image_gallery"]').first();
   assert(await galleryInput.count() === 1, `WooCommerce product gallery input missing product ${productId}`);
   await galleryInput.evaluate((el, value) => {
