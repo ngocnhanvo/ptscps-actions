@@ -355,7 +355,7 @@ async function readGalleryIds(productId) {
   return raw.split(',').map((v) => Number(v.trim())).filter((v) => v > 0);
 }
 
-async function setProductAdminFields(productId, galleryIds, menuOrder) {
+async function setProductAdminFields(productId, galleryIds) {
   await page.goto(`${wp}/wp-admin/post.php?post=${productId}&action=edit&esc_full_admin=1`, { waitUntil: 'domcontentloaded', timeout: 50000 });
   const row = page.locator('[data-name="product_lang"]').first();
   assert(await row.count() === 1, `product_lang ACF missing product ${productId}`);
@@ -366,13 +366,6 @@ async function setProductAdminFields(productId, galleryIds, menuOrder) {
     assert(await input.count(), `product_lang input missing ${productId}`);
     await input.fill('vi');
   }
-  const menuOrderInput = page.locator('#menu_order, input[name="menu_order"]').first();
-  assert(await menuOrderInput.count() === 1, `Product menu_order input missing ${productId}`);
-  await menuOrderInput.evaluate((el, value) => {
-    el.value = String(value);
-    el.dispatchEvent(new Event('input', { bubbles: true }));
-    el.dispatchEvent(new Event('change', { bubbles: true }));
-  }, menuOrder);
   const galleryInput = page.locator('#product_image_gallery, input[name="product_image_gallery"]').first();
   assert(await galleryInput.count() === 1, `WooCommerce product gallery input missing product ${productId}`);
   await galleryInput.evaluate((el, value) => {
@@ -406,7 +399,6 @@ async function ensureProject(nonce, category, project) {
     && clean(product.content?.raw ?? product.content?.rendered) === clean(content)
     && clean(product.excerpt?.raw ?? product.excerpt?.rendered) === clean(excerpt)
     && Number(product.featured_media) === featuredId
-    && Number(product.menu_order || 0) === Number(project.order)
     && currentCats.includes(Number(category.id))
     && lang === 'vi'
     && JSON.stringify(currentGallery) === JSON.stringify(galleryIds);
@@ -414,7 +406,7 @@ async function ensureProject(nonce, category, project) {
     report('PRODUCT', { slug: project.slug, id: product.id, state: 'ALREADY_CORRECT_SKIP_WRITE', gallery: galleryIds.length });
     return false;
   }
-  const payload = { title: project.title, slug: project.slug, status: 'publish', content, excerpt, featured_media: featuredId, menu_order: Number(project.order), product_cat: [Number(category.id)] };
+  const payload = { title: project.title, slug: project.slug, status: 'publish', content, excerpt, featured_media: featuredId, product_cat: [Number(category.id)] };
   let state = 'UPDATED_VERIFIED';
   if (product) {
     const update = await jsonRequest('POST', `/wp-json/wp/v2/product/${product.id}`, nonce, payload);
@@ -425,16 +417,76 @@ async function ensureProject(nonce, category, project) {
     product = create.body;
     state = 'CREATED_VERIFIED';
   }
-  await setProductAdminFields(Number(product.id), galleryIds, project.order);
+  await setProductAdminFields(Number(product.id), galleryIds);
   const readback = await productBySlug(nonce, project.slug);
   assert(readback && readback.status === 'publish', `Product readback missing ${project.slug}`);
   const cats = (readback.product_categories || []).map((x) => Number(x.id));
   const readbackLang = readback.acf?.product_lang?.value ?? readback.acf?.product_lang;
-  assert(Number(readback.menu_order || 0) === Number(project.order), `Product menu_order mismatch ${project.slug}`);
   assert(cats.includes(Number(category.id)), `Product category mismatch ${project.slug}`);
   assert(readbackLang === 'vi', `Product lang mismatch ${project.slug}`);
   assert.deepEqual(await readGalleryIds(Number(readback.id)), galleryIds, `Product gallery final mismatch ${project.slug}`);
   report('PRODUCT', { slug: project.slug, id: readback.id, state, gallery: galleryIds.length });
+  return true;
+}
+
+async function ensureProjectOrder(nonce) {
+  const expected = service.projects.map((project) => project.slug);
+  const readRows = async () => {
+    const rows = [];
+    for (const project of service.projects) {
+      const product = await productBySlug(nonce, project.slug);
+      assert(product && Number(product.id) > 0, `Product order lookup missing ${project.slug}`);
+      rows.push({
+        id: Number(product.id),
+        slug: project.slug,
+        title: project.title,
+        menuOrder: Number(product.menu_order || 0),
+      });
+    }
+    return rows;
+  };
+  const orderedSlugs = (rows) => [...rows]
+    .sort((a, b) => (a.menuOrder - b.menuOrder) || a.title.localeCompare(b.title, 'vi'))
+    .map((row) => row.slug);
+
+  let rows = await readRows();
+  if (rows.every((row) => row.menuOrder > 0) && JSON.stringify(orderedSlugs(rows)) === JSON.stringify(expected)) {
+    report('PRODUCT_ORDER', { state: 'ALREADY_CORRECT_SKIP_WRITE', slugs: expected });
+    return false;
+  }
+
+  await page.goto(`${wp}/wp-admin/edit.php?post_type=product&orderby=menu_order&order=asc&esc_full_admin=1`, { waitUntil: 'domcontentloaded', timeout: 50000 });
+  const security = await page.evaluate(() => String(globalThis.woocommerce_product_ordering_params?.nonce || '').trim());
+  assert(security, 'WooCommerce product ordering nonce missing');
+  const bySlug = Object.fromEntries(rows.map((row) => [row.slug, row]));
+
+  for (let index = service.projects.length - 2; index >= 0; index--) {
+    const current = bySlug[service.projects[index].slug];
+    const next = bySlug[service.projects[index + 1].slug];
+    const response = await page.request.post(`${wp}/wp-admin/admin-ajax.php`, {
+      form: {
+        action: 'woocommerce_product_ordering',
+        security,
+        id: String(current.id),
+        previd: '',
+        nextid: String(next.id),
+      },
+      timeout: 30000,
+    });
+    const raw = (await response.text()).trim();
+    assert(response.ok() && raw && raw !== '-1' && raw !== '0', `WooCommerce product ordering failed ${current.slug} HTTP ${response.status()}`);
+    await sleep(350);
+  }
+
+  rows = await readRows();
+  const actual = orderedSlugs(rows);
+  assert(rows.every((row) => row.menuOrder > 0), `Product menu_order readback missing ${JSON.stringify(rows)}`);
+  assert.deepEqual(actual, expected, `Product order mismatch ${JSON.stringify(actual)}`);
+  report('PRODUCT_ORDER', {
+    status: 'PASS',
+    slugs: actual,
+    menuOrder: Object.fromEntries(rows.map((row) => [row.slug, row.menuOrder])),
+  });
   return true;
 }
 
@@ -456,6 +508,7 @@ try {
   }
   changed = (await ensureCapabilityOrder(category.id, capabilityRows)) || changed;
   for (const project of service.projects) changed = (await ensureProject(nonce, category, project)) || changed;
+  changed = (await ensureProjectOrder(nonce)) || changed;
   report('RESULT', { status: 'PASS', introImages: introMedia.length, capabilities: capabilityRows.length, projects: service.projects.length, projectImages: service.projects.reduce((sum, p) => sum + p.images.length, 0), changed });
 } finally {
   await browser.close();
