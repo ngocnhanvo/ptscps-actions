@@ -25,6 +25,7 @@ const service = {
     {
       title: 'Dự án Trạm Thu gom và phân phối khí Thái Bình – Hàm Rồng',
       slug: 'tram-thu-gom-va-phan-phoi-khi-thai-binh-ham-rong',
+      order: 1,
       scope: 'Thiết kế, mua sắm, thi công chế tạo chạy thử cho 18 gói cụm, hệ thống thiết bị cho dự án trạm thu gom và phân phối khí Thái Bình – Hàm Rồng bao gồm hệ thống Corrosion Inhibitor Skid, Pig Launcher – Pig Receiver, Piping system of platform, Hot tap flange, Piping on GDC-LFS, Valve skid, Fire fighting system, Hydrate system, Separator, Heat Exchanger, Flare, Truck Loading System, Oil Water Treatment, ICSS, Metering System, Electrical System và Cathodic Protection.',
       images: [
         ['thai-binh-ham-rong-1', 'Các gói thiết bị dự án Thái Bình – Hàm Rồng', 'https://ptscps.com.vn/wp-content/uploads/2019/12/pro.png'],
@@ -33,6 +34,7 @@ const service = {
     {
       title: 'Dự án Metering Skid – Thu gom khí Đại Hùng',
       slug: 'metering-skid-thu-gom-khi-dai-hung',
+      order: 2,
       scope: 'Thiết kế, mua sắm, chế tạo và chạy thử 01 hệ thống Gas Custody Metering (Tag. No 36A001).',
       images: [
         ['dai-hung-1', 'Metering Skid dự án thu gom khí Đại Hùng', 'https://ptscps.com.vn/wp-content/uploads/2019/12/DAI-HUNG-1.jpg'],
@@ -42,6 +44,7 @@ const service = {
     {
       title: 'Dự án Chemical Injection Skid – Giàn Đông Đô',
       slug: 'chemical-injection-skid-gian-dong-do',
+      order: 3,
       scope: 'Thiết kế, mua sắm, chế tạo, lắp đặt chạy thử 01 hệ thống bơm H2 Scavenger Injection Pump trên giàn Đông Đô.',
       images: [
         ['dong-do-1', 'Chemical Injection Skid cho giàn Đông Đô', 'https://ptscps.com.vn/wp-content/uploads/2019/12/SKID-1.jpg'],
@@ -51,6 +54,7 @@ const service = {
     {
       title: 'Dự án Condensate Tank TK-8040 for NPK Project',
       slug: 'condensate-tank-tk-8040-npk-project',
+      order: 4,
       scope: 'Thiết kế, mua sắm, chế tạo 01 condensate tank (TK-8040).',
       images: [
         ['npk-1', 'Gia công Condensate Tank TK-8040', 'https://ptscps.com.vn/wp-content/uploads/2019/12/FA1.jpg'],
@@ -61,6 +65,7 @@ const service = {
     {
       title: 'Dự án cung cấp năng lượng sạch và chiếu sáng cho Quần đảo Trường Sa',
       slug: 'nang-luong-sach-chieu-sang-quan-dao-truong-sa',
+      order: 5,
       scope: 'Mua sắm, chế tạo, lắp đặt các kết cấu thép cho dự án cấp năng lượng và chiếu sáng cho Quần đảo Trường Sa.',
       images: [
         ['truong-sa-1', 'Kết cấu cấp năng lượng và chiếu sáng tại Trường Sa', 'https://ptscps.com.vn/wp-content/uploads/2019/12/Hinh-8.jpg'],
@@ -336,7 +341,7 @@ async function ensureDescription(nonce, category, html) {
 }
 
 async function productBySlug(nonce, slug) {
-  const { res, body } = await jsonRequest('GET', `/wp-json/wp/v2/product?context=edit&status=publish,draft,pending,private&slug=${encodeURIComponent(slug)}&per_page=20&_fields=id,slug,status,title,acf,content,excerpt,featured_media,product_categories`, nonce);
+  const { res, body } = await jsonRequest('GET', `/wp-json/wp/v2/product?context=edit&status=publish,draft,pending,private&slug=${encodeURIComponent(slug)}&per_page=20&_fields=id,slug,status,title,acf,content,excerpt,featured_media,product_categories,menu_order`, nonce);
   assert(res.ok(), `Product lookup HTTP ${res.status()} ${slug}`);
   assert(Array.isArray(body) && body.length <= 1, `Duplicate product slug ${slug}`);
   return body[0] || null;
@@ -394,6 +399,7 @@ async function ensureProject(nonce, category, project) {
     && clean(product.content?.raw ?? product.content?.rendered) === clean(content)
     && clean(product.excerpt?.raw ?? product.excerpt?.rendered) === clean(excerpt)
     && Number(product.featured_media) === featuredId
+    && Number(product.menu_order || 0) === Number(project.order)
     && currentCats.includes(Number(category.id))
     && lang === 'vi'
     && JSON.stringify(currentGallery) === JSON.stringify(galleryIds);
@@ -401,7 +407,7 @@ async function ensureProject(nonce, category, project) {
     report('PRODUCT', { slug: project.slug, id: product.id, state: 'ALREADY_CORRECT_SKIP_WRITE', gallery: galleryIds.length });
     return false;
   }
-  const payload = { title: project.title, slug: project.slug, status: 'publish', content, excerpt, featured_media: featuredId, product_cat: [Number(category.id)] };
+  const payload = { title: project.title, slug: project.slug, status: 'publish', content, excerpt, featured_media: featuredId, menu_order: Number(project.order), product_cat: [Number(category.id)] };
   let state = 'UPDATED_VERIFIED';
   if (product) {
     const update = await jsonRequest('POST', `/wp-json/wp/v2/product/${product.id}`, nonce, payload);
@@ -417,6 +423,7 @@ async function ensureProject(nonce, category, project) {
   assert(readback && readback.status === 'publish', `Product readback missing ${project.slug}`);
   const cats = (readback.product_categories || []).map((x) => Number(x.id));
   const readbackLang = readback.acf?.product_lang?.value ?? readback.acf?.product_lang;
+  assert(Number(readback.menu_order || 0) === Number(project.order), `Product menu_order mismatch ${project.slug}`);
   assert(cats.includes(Number(category.id)), `Product category mismatch ${project.slug}`);
   assert(readbackLang === 'vi', `Product lang mismatch ${project.slug}`);
   assert.deepEqual(await readGalleryIds(Number(readback.id)), galleryIds, `Product gallery final mismatch ${project.slug}`);
