@@ -129,13 +129,20 @@ async function openPicker(page, dataRow, imageCol) {
 
 async function selectExisting(page, mediaId, basename) {
   const modal = page.locator('.media-modal:visible').last();
+  const libraryTab = modal.locator('.media-menu-item').filter({ hasText: /^(Media Library|Thư viện phương tiện|Thư viện)$/i }).first();
+  if (await libraryTab.count()) {
+    await libraryTab.click();
+    await page.waitForTimeout(400);
+  }
   const search = modal.locator('input.media-search-input, input[type="search"]').last();
   if (await search.count()) {
     await search.fill(basename.replace(/\.[^.]+$/, ''));
-    await page.waitForTimeout(800);
+    await page.waitForTimeout(900);
   }
   const attachment = modal.locator(`.attachment[data-id="${mediaId}"]`).first();
   if (!(await attachment.count())) return false;
+  await attachment.waitFor({ state: 'visible', timeout: 5000 }).catch(() => null);
+  if (!(await attachment.isVisible().catch(() => false))) return false;
   await attachment.click();
   return true;
 }
