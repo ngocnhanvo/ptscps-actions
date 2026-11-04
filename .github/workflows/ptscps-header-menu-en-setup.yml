@@ -1,0 +1,56 @@
+name: PTSCPS English Header menu setup, build and QA
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'audit/ptscps-header-menu-en-setup.ready'
+permissions:
+  contents: read
+jobs:
+  english-header:
+    runs-on: ubuntu-latest
+    timeout-minutes: 22
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate configured production origins
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os,re
+          from urllib.parse import urlsplit
+          raw=os.environ.get('ENV_FILE','')
+          vals=dict(re.findall(r'^\s*(?:export\s+)?(WC_URL|WC_URL_CLIENT)\s*=\s*(.+)\s*$',raw,re.M))
+          def norm(name):
+              u=urlsplit(vals.get(name,'').strip().strip('"\''))
+              if u.scheme!='https' or not u.hostname or u.path not in ('','/') or u.query or u.fragment or u.username or u.password or u.port not in (None,443):
+                  raise SystemExit('INVALID_ORIGIN '+name)
+              return 'https://'+u.hostname
+          wp,front=norm('WC_URL'),norm('WC_URL_CLIENT')
+          if wp==front: raise SystemExit('ORIGINS_NOT_ISOLATED')
+          with open(os.environ['GITHUB_ENV'],'a') as f:
+              f.write('WP_ORIGIN='+wp+'\nFRONT_ORIGIN='+front+'\n')
+          print('EN_HEADER_ORIGINS=PASS')
+          PY
+      - name: Install Playwright Chromium
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Create native Header.en, build through WordPress and verify production
+        env:
+          WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
+          WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
+        run: node scripts/ptscps-header-menu-en-setup.mjs
+      - name: Upload English Header QA screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ptscps-header-menu-en-${{ github.run_id }}
+          path: artifacts/ptscps-header-menu-en
+          if-no-files-found: ignore
+          retention-days: 14
