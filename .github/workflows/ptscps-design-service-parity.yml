@@ -2,10 +2,10 @@ name: PTSCPS design service legacy parity migration
 on:
   push:
     branches: [main]
+    # The migration writes to WordPress. Editing this workflow alone must NOT rerun it.
     paths:
       - 'audit/ptscps-design-service-parity.ready'
       - 'scripts/ptscps-design-service-parity.mjs'
-      - '.github/workflows/ptscps-design-service-parity.yml'
 permissions:
   contents: read
 concurrency:
@@ -49,7 +49,17 @@ jobs:
           npm install --no-save --no-audit --no-fund playwright@1.56.1
           npx playwright install --with-deps chromium
       - name: Migrate design service images and project data into WordPress
+        shell: bash
+        timeout-minutes: 22
         env:
           WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
           WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
-        run: node scripts/ptscps-design-service-parity.mjs
+        run: |
+          set +e
+          timeout --signal=TERM --kill-after=10s 20m \
+            node scripts/ptscps-design-service-parity.mjs
+          exit_code=$?
+          if [[ "$exit_code" == 124 || "$exit_code" == 137 ]]; then
+            echo '::error::Migration exceeded its 20-minute process limit; check for blocked requests or child processes.'
+          fi
+          exit "$exit_code"

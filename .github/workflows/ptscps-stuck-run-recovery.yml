@@ -1,0 +1,81 @@
+name: PTSCPS migration stuck-run recovery
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'GitHub Actions run database ID (NOT the #7 run number)'
+        required: true
+        type: string
+      action:
+        description: 'Inspect, or explicitly request force-cancel'
+        required: true
+        default: inspect
+        type: choice
+        options:
+          - inspect
+          - force_cancel
+      confirmation:
+        description: 'For force_cancel only, type FORCE_CANCEL'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Inspect selected migration run
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TARGET_RUN_ID: ${{ inputs.run_id }}
+          REQUESTED_ACTION: ${{ inputs.action }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+          [[ "$TARGET_RUN_ID" =~ ^[0-9]+$ ]] || { echo '::error::Invalid run database ID'; exit 1; }
+          run="$(gh api "repos/$GH_REPO/actions/runs/$TARGET_RUN_ID")"
+          workflow_path="$(jq -r '(.path // "") | split("@")[0]' <<< "$run")"
+          [[ "$workflow_path" == '.github/workflows/ptscps-design-service-parity.yml' ]] || {
+            echo '::error::Refusing to operate on an unrelated workflow run'
+            exit 1
+          }
+          status="$(jq -r '.status // "unknown"' <<< "$run")"
+          conclusion="$(jq -r '.conclusion // "null"' <<< "$run")"
+          created_at="$(jq -r '.run_started_at // .created_at // ""' <<< "$run")"
+          echo "Migration run $TARGET_RUN_ID status=$status conclusion=$conclusion started=$created_at"
+          {
+            echo '## PTSCPS migration run inspection'
+            echo "- Run: https://github.com/$GH_REPO/actions/runs/$TARGET_RUN_ID"
+            echo "- Status: \`$status\`"
+            echo "- Conclusion: \`$conclusion\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ "$REQUESTED_ACTION" == 'inspect' ]]; then
+            echo 'Inspection only; no run was changed.'
+            exit 0
+          fi
+          [[ "$REQUESTED_ACTION" == 'force_cancel' && "$CONFIRMATION" == 'FORCE_CANCEL' ]] || {
+            echo '::error::force_cancel requires exact confirmation FORCE_CANCEL'
+            exit 1
+          }
+          [[ "$status" == 'in_progress' || "$status" == 'queued' || "$status" == 'waiting' ]] || {
+            echo '::error::Run is no longer active; refusing force-cancel'
+            exit 1
+          }
+          [[ -n "$created_at" ]] || { echo '::error::Missing run timestamp'; exit 1; }
+          started_epoch="$(date -u -d "$created_at" +%s)"
+          now_epoch="$(date -u +%s)"
+          (( now_epoch - started_epoch >= 30 * 60 )) || {
+            echo '::error::Refusing to force-cancel a run younger than 30 minutes'
+            exit 1
+          }
+          gh api --method POST "repos/$GH_REPO/actions/runs/$TARGET_RUN_ID/force-cancel"
+          echo "Force-cancel requested for run $TARGET_RUN_ID; GitHub may take time to update its status."
+          echo '- Force-cancel request submitted (not confirmation of cancellation).' >> "$GITHUB_STEP_SUMMARY"
