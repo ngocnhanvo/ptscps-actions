@@ -58,7 +58,7 @@ try {
       }, i, { timeout: 12000 });
     }
     const srcs = await images.evaluateAll((nodes) => nodes.map((img) => img.getAttribute('src') || ''));
-    assert(srcs.every((src) => src.startsWith('/wp-content/uploads/')), `${viewport.name} category images are not relative WordPress uploads`);
+    assert(srcs.every((src) => src.startsWith('/images/')), `${viewport.name} category images did not use processed ESC image objects`);
 
     noAdminOrigin(await page.content(), viewport.name);
     const overflow = await page.evaluate(() => ({ client: document.documentElement.clientWidth, scroll: document.documentElement.scrollWidth }));
