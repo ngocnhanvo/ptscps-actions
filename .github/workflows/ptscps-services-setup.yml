@@ -33,7 +33,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C source-php rev-parse HEAD)" = 'b6b2d2e88ccfb2ccd479dd914511182d2978b77e'
+          test "$(git -C source-php rev-parse HEAD)" = 'c0b6944c1040891a2c20b78af7e7602ea3440331'
           php -l source-php/wp-content/plugins/github-trigger/product-categories/endpoint.php
           php source-php/wp-content/plugins/github-trigger/tests/product-category-public-media-url-test.php
           python3 -m py_compile scripts/ptscps-php-live-release.py

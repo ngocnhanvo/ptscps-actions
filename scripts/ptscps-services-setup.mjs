@@ -14,6 +14,12 @@ const services = [
   { key:'manpower', title:'Cung ứng nhân lực kỹ thuật vận hành và bảo dưỡng', slug:'cung-ung-nhan-luc-ky-thuat-van-hanh-va-bao-duong', file:'ptscps-dich-vu-nhan-luc.jpg' },
   { key:'repair', title:'Dịch vụ sửa chữa bảo dưỡng các thiết bị và công trình công nghiệp', slug:'dich-vu-sua-chua-bao-duong-cac-thiet-bi-va-cong-trinh-cong-nghiep', file:'ptscps-dich-vu-sua-chua.jpg' },
 ];
+const featuredProjects = {
+  fpso:['FSO PPS 01','FSO GOLDEN STAR','FPSO PTSC LAM SON','FSO PTSC BIEN DONG 01','FPSO RUBY II','FSO PTSC BACH HO','FPSO RUBY PRINCESS'],
+  design:[],
+  manpower:['FPSO LEWEK EMAS','FPSO THAI BINH VN','FSO ORKID','Khu vực thượng nguồn – Nhà máy hóa dầu Long Sơn'],
+  repair:[],
+};
 const serviceTableId='services_00_vi';
 let servicesContentChanged=false;
 const artifactDir='artifacts/ptscps-services';
@@ -665,10 +671,15 @@ async function isProductionReady(){
   const html=await res.text();
   const landingReady=html.includes('data-services-category-grid')&&html.includes('data-services-source="ProductCategory"')&&services.every(x=>html.includes(x.title))&&html.includes('Dịch vụ')&&html.includes('Tất cả');
   if(!landingReady)return false;
-  const detail=await context.request.get(`${front}/dich-vu/${services[0].slug}?_services_detail_ready=${Date.now()}`,{timeout:30000,headers:{'Cache-Control':'no-cache'}}).catch(()=>null);
+  const manpower=services.find(x=>x.key==='manpower');
+  if(!manpower)return false;
+  const detail=await context.request.get(`${front}/dich-vu/${manpower.slug}?_services_detail_ready=${Date.now()}`,{timeout:30000,headers:{'Cache-Control':'no-cache'}}).catch(()=>null);
   if(detail?.status()!==200)return false;
   const detailHtml=await detail.text();
-  return !detailHtml.includes('data-services-category-grid');
+  return !detailHtml.includes('data-services-category-grid')
+    && detailHtml.includes('data-service-category-description')
+    && detailHtml.includes('data-service-projects-heading')
+    && featuredProjects.manpower.every(title=>detailHtml.includes(title));
 }
 
 async function qa(){
@@ -684,9 +695,34 @@ async function qa(){
     assert(!((await p.content()).includes('admin-ptscps.thegioihosting.io.vn')),`${viewport.name} admin origin leaked`);
     const overflow=await p.evaluate(()=>({w:document.documentElement.clientWidth,s:document.documentElement.scrollWidth})); assert(overflow.s<=overflow.w+2,`${viewport.name} horizontal overflow`);
     await p.screenshot({path:`${artifactDir}/${viewport.name}-dich-vu.png`,fullPage:true});
+    const manpower=services.find(x=>x.key==='manpower');
+    assert(manpower,'Manpower service spec missing');
+    const detailRes=await p.goto(`${front}/dich-vu/${manpower.slug}?_qa_visual=${Date.now()}`,{waitUntil:'load',timeout:50000});
+    assert(detailRes?.status()===200,`${viewport.name} manpower detail HTTP ${detailRes?.status()}`);
+    assert(await p.locator('[data-service-category-description]').isVisible(),`${viewport.name} manpower intro not visible`);
+    assert(await p.locator('[data-service-projects-heading]').isVisible(),`${viewport.name} featured-project heading not visible`);
+    const projectCards=p.locator('[data-service-projects-heading] + div article');
+    assert.equal(await projectCards.count(),featuredProjects.manpower.length,`${viewport.name} manpower project count mismatch`);
+    const projectTitles=(await projectCards.locator('h2').allTextContents()).map(clean);
+    assert.deepEqual(projectTitles,featuredProjects.manpower,`${viewport.name} manpower project order mismatch`);
+    await p.screenshot({path:`${artifactDir}/${viewport.name}-dich-vu-nhan-luc.png`,fullPage:true});
     report('QA_ROUTE',{viewport:viewport.name,status:'PASS'}); await ctx.close();
   }
-  for(const spec of services){const res=await context.request.get(`${front}/dich-vu/${spec.slug}?_qa=${Date.now()}`,{timeout:30000,headers:{'Cache-Control':'no-cache'}});assert(res.status()===200,`Category route HTTP ${res.status()} ${spec.slug}`);const html=await res.text();assert(html.includes(spec.title),`Category route heading missing ${spec.slug}`);assert(!html.includes('data-services-category-grid'),`Category route leaked services landing grid ${spec.slug}`);}
+  for(const spec of services){
+    const res=await context.request.get(`${front}/dich-vu/${spec.slug}?_qa=${Date.now()}`,{timeout:30000,headers:{'Cache-Control':'no-cache'}});
+    assert(res.status()===200,`Category route HTTP ${res.status()} ${spec.slug}`);
+    const html=await res.text();
+    const projects=featuredProjects[spec.key]||[];
+    assert(html.includes(spec.title),`Category route heading missing ${spec.slug}`);
+    assert(!html.includes('data-services-category-grid'),`Category route leaked services landing grid ${spec.slug}`);
+    assert(html.includes('data-service-category-description'),`Category route intro missing ${spec.slug}`);
+    if(projects.length){
+      assert(html.includes('data-service-projects-heading'),`Featured-project heading missing ${spec.slug}`);
+      for(const title of projects) assert(html.includes(title),`Featured project missing ${spec.slug}: ${title}`);
+    }else{
+      assert(!html.includes('data-service-projects-heading'),`Unexpected featured-project heading ${spec.slug}`);
+    }
+  }
   const desktop=await browser.newContext({viewport:{width:1440,height:900}}); const p=await desktop.newPage(); await p.goto(`${front}/dich-vu?_menu=${Date.now()}`,{waitUntil:'load',timeout:50000});
   const serviceButton=p.locator('#header-navrow button').filter({hasText:'Dịch vụ'}).first(); assert(await serviceButton.isVisible(),'Desktop Dịch vụ menu button missing'); await serviceButton.click();
   for(const title of ['Tất cả',...expected]) assert(await p.locator('#header-navrow a').filter({hasText:title}).first().isVisible(),`Desktop service submenu missing ${title}`);
