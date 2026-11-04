@@ -70,7 +70,7 @@ Phạm vi công việc: Mua sắm, chế tạo, lắp đặt các kết cấu th
 };
 
 const clean = (v) => String(v ?? '').replace(/<[^>]+>/g,'').replace(/\s+/g,' ').trim();
-const cleanDescription = (v) => String(v ?? '').replace(/<[^>]+>/g,'').replace(/\r\n?/g,'\n').split('\n').map(line=>line.replace(/[ \t]+/g,' ').trim()).join('\n').replace(/\n{3,}/g,'\n\n').trim();
+const cleanDescription = (v) => String(v ?? '').replace(/<[^>]+>/g,' ').replace(/&amp;|&#0?38;|&#x26;/gi,'&').replace(/&nbsp;|&#160;|&#xa0;/gi,' ').replace(/\s+/g,' ').trim();
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const report = (k,v) => console.log(`SERVICES_CONTENT_${k}=${typeof v==='string'?v:JSON.stringify(v)}`);
 const browser = await chromium.launch({headless:true});
