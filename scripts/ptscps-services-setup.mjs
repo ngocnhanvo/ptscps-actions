@@ -164,9 +164,12 @@ async function setThumbnail(termId,mediaId,spec){
   const input=page.locator('#product_cat_thumbnail_id');
   assert(await input.count()===1,`WooCommerce thumbnail field missing ${spec.slug}`);
   await input.evaluate((el,id)=>{el.value=String(id);el.dispatchEvent(new Event('change',{bubbles:true}));},mediaId);
-  const submit=page.locator('#submit:visible').first();
-  assert(await submit.count()===1,`Term Update button missing ${spec.slug}`);
-  await Promise.all([page.waitForNavigation({waitUntil:'domcontentloaded',timeout:45000}),submit.click()]);
+  const form=page.locator('form#edittag').first();
+  assert(await form.count()===1,`Native term edit form missing ${spec.slug}`);
+  await Promise.all([
+    page.waitForNavigation({waitUntil:'domcontentloaded',timeout:45000}).catch(()=>null),
+    form.evaluate(el=>{if(!(el instanceof HTMLFormElement))throw Error('Invalid term edit form');el.requestSubmit();}),
+  ]);
   for(let i=0;i<8;i++){
     await sleep(500);
     const rows=await categoryFeed();
