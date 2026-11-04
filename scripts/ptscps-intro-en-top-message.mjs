@@ -196,7 +196,8 @@ async function ensurePage(original) {
   assert(matches.length<=1,'Duplicate published English Top Message pages');
   const current=matches[0];
   if (current) {
-    assert(current.acf?.action==='IntroPage' && (current.acf.product_lang?.value||current.acf.product_lang)==='en' && String(current.acf.origin_page_id)===String(original.id), 'Existing Top Message is not correct English translation');
+    const translatedFrom = current.acf?.origin_page_id?.ID ?? current.acf?.origin_page_id?.id ?? current.acf?.origin_page_id?.value ?? current.acf?.origin_page_id;
+    assert(current.acf?.action==='IntroPage' && (current.acf.product_lang?.value||current.acf.product_lang)==='en' && String(translatedFrom)===String(original.id), 'Existing Top Message is not correct English translation');
     assert(String(current.content?.rendered||'').includes(target.id), 'Existing English page does not reference EN TablePress');
     console.log('EN_TOP_PAGE=ALREADY_PRESENT_SKIP_WRITE id='+current.id);
     return;
@@ -249,19 +250,42 @@ async function buildViaWordPress() {
   await page.goto(uri('/wp-admin/admin.php?page=vcs-build-trigger'),{waitUntil:'domcontentloaded',timeout:45000});
   const button=page.locator('#vcs-build-btn-main');
   assert(await button.count()===1,'WordPress Build Website tool unavailable');
-  if(await button.isDisabled()){
-    const force=page.locator('#vcs-force-build');
-    assert(await force.count()===1 && !await force.isDisabled(),'WordPress Build button disabled and force option unavailable');
-    await force.check();
-    assert(!await button.isDisabled(),'Native WordPress force-build option did not enable build');
+  let state=await page.evaluate(() => ({
+    configured:window.vcsBuild?.build_configured,
+    active:window.vcsBuild?.initial_active,
+    pending:window.vcsBuild?.pending_count,
+    buttonDisabled:document.querySelector('#vcs-build-btn-main')?.disabled,
+    forceDisabled:document.querySelector('#vcs-force-build')?.disabled,
+  }));
+  console.log('EN_TOP_BUILD_NATIVE_STATE='+JSON.stringify(state));
+  assert(state.configured===true || state.configured==='1' || state.configured===1, 'WordPress native build is not configured');
+  if(state.active){
+    // A previous run can finish while the WordPress active flag remains stale.
+    // Only the native AJAX status API may reconcile and release its lock.
+    const status=await page.waitForResponse(r => r.url().startsWith(wp+'/wp-admin/admin-ajax.php') &&
+      r.request().method()==='POST' && String(r.request().postData()||'').includes('action=vcs_check_build_status'),
+      {timeout:20000}).catch(()=>null);
+    if(status){const info=await status.json().catch(()=>({}));console.log('EN_TOP_BUILD_RECONCILE='+JSON.stringify({status:info?.data?.status,active:info?.data?.build_active}));}
+    await page.reload({waitUntil:'domcontentloaded',timeout:45000});
+    state=await page.evaluate(() => ({configured:window.vcsBuild?.build_configured,active:window.vcsBuild?.initial_active,pending:window.vcsBuild?.pending_count}));
+    console.log('EN_TOP_BUILD_AFTER_RECONCILE='+JSON.stringify(state));
   }
-  const response=page.waitForResponse(r=>r.url().startsWith(wp+'/wp-admin/admin-ajax.php') && String(r.request().postData()||'').includes('vcs_') && !String(r.request().postData()||'').includes('vcs_check_build_status'),{timeout:17000}).catch(()=>null);
+  if(state.active){console.log('EN_TOP_BUILD=OTHER_BUILD_RUNNING_SKIP_DUPLICATE');return;}
+  const force=page.locator('#vcs-force-build');
+  assert(await force.count()===1 && !await force.isDisabled(),'WordPress force-build control still unavailable after native state reconciliation');
+  await force.check();
+  assert(!await button.isDisabled(),'WordPress native build button remains disabled');
+  const response=page.waitForResponse(r=>r.url().startsWith(wp+'/wp-admin/admin-ajax.php') &&
+    r.request().method()==='POST' && String(r.request().postData()||'').includes('action=vcs_trigger_build'),
+    {timeout:45000});
   await button.click();
   const ack=await response;
-  if(ack){assert(ack.ok(),'WordPress Build HTTP '+ack.status());const j=await ack.json().catch(()=>null);assert(j?.success!==false,'WordPress Build was rejected');}
-  else {assert(await button.isDisabled(),'WordPress Build did not acknowledge click');}
+  assert(ack.ok(),'WordPress Build HTTP '+ack.status());
+  const j=await ack.json();
+  assert(j?.success,'WordPress Build rejected: '+String(j?.data?.message||j?.data?.code||'unknown'));
   console.log('EN_TOP_BUILD=TRIGGERED_VIA_WORDPRESS');
 }
+
 async function verifyProduction() {
   for(let k=0;k<52;k++){
     const res=await context.request.get(front+'/'+target.slug+'?_en_sample='+Date.now(),{timeout:25000,headers:{'Cache-Control':'no-cache'}}).catch(()=>null);
