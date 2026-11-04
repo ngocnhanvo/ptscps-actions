@@ -606,17 +606,18 @@ async function triggerNativeWordPressBuild() {
 }
 
 async function waitForProduction() {
-  const probe = specs[0];
+  const probe = specs.find((spec) => spec.id === 'about_03');
+  assert(probe, 'History production probe missing');
   for (let attempt = 1; attempt <= 36; attempt++) {
     try {
       const response = await context.request.get(`${front}/${probe.slug}?_intro_qa=${Date.now()}`, { timeout: 25000, headers: { 'Cache-Control': 'no-cache' } });
       const text = response.ok() ? await response.text() : '';
-      const awardSegments = text.split('data-about-award-image').slice(1, 3);
-      const awardBuildReady = awardSegments.length === 2
-        && awardSegments.every((segment) =>
+      const historySegments = text.split('data-about-history-image').slice(1, 17);
+      const historyBuildReady = historySegments.length === 16
+        && historySegments.every((segment) =>
           segment.slice(0, 2200).includes('src="/images/pages/')
         );
-      if (response.status() === 200 && text.includes(probe.title) && text.includes(probe.snippet) && awardBuildReady) {
+      if (response.status() === 200 && text.includes(probe.title) && text.includes(probe.snippet) && historyBuildReady) {
         console.log(`INTRO_BUILD_DEPLOYED=PASS attempt=${attempt}`);
         return;
       }
@@ -626,7 +627,7 @@ async function waitForProduction() {
     }
     await sleep(15000);
   }
-  throw Error('Production introduction page did not appear after WordPress build trigger');
+  throw Error('Production history page with localized images did not appear after WordPress build trigger');
 }
 
 async function productionQA() {
