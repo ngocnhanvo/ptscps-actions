@@ -25,6 +25,8 @@ const log=(key,value)=>console.log(`NEWS_${key}=${typeof value==='string'?value:
 const uri=p=>wp+p;
 let cmsWrites=0;
 let sourceInventory=null;
+let sourceRestInventory=null;
+const inventoryOnly=process.env.NEWS_INVENTORY_ONLY==='1';
 
 const browser=await chromium.launch({headless:true});
 const context=await browser.newContext({viewport:{width:1440,height:1000}});
@@ -71,6 +73,75 @@ async function inventorySource(){
     log('SOURCE_INVENTORY_PASS',{menu,company:company.titles.slice(0,5),regional:regional.titles.slice(0,5),tender:tender.titles.slice(0,5),galleryH1});
     return {menu,company,regional,tender,galleryH1};
   }finally{await source.close();}
+}
+
+async function inventorySourceRest(){
+  const request=context.request;
+  const categoryResponse=await request.get(legacy+'/wp-json/wp/v2/categories?per_page=100&orderby=id&order=asc&_fields=id,slug,name,count,parent',{timeout:40000,headers:{'Cache-Control':'no-cache'}});
+  assert(categoryResponse.ok(),'Legacy category REST unavailable');
+  const allCategories=await categoryResponse.json();
+  const wantedSlugs=['tin-tuc','hoat-dong-cua-cong-ty','dau-khi-trong-nuoc-va-khu-vuc','thu-moi-chao-gia'];
+  const categories={};
+  const posts={};
+  for(const slug of wantedSlugs){
+    const rows=allCategories.filter(row=>String(row.slug||'')===slug);
+    assert(rows.length===1,`Legacy category ${slug} missing or ambiguous (${rows.length})`);
+    const category=rows[0];
+    categories[slug]={id:Number(category.id),slug,name:clean(category.name),count:Number(category.count||0),parent:Number(category.parent||0)};
+    const collected=[];
+    const totalPages=Math.max(1,Math.ceil(Number(category.count||0)/100));
+    for(let pageNo=1;pageNo<=totalPages;pageNo++){
+      const response=await request.get(legacy+`/wp-json/wp/v2/posts?status=publish&categories=${category.id}&per_page=100&page=${pageNo}&orderby=date&order=desc&_fields=id,slug,title,content,excerpt,date,date_gmt,modified,featured_media,categories,acf,yoast_head_json`,{timeout:50000,headers:{'Cache-Control':'no-cache'}});
+      assert(response.ok(),`Legacy posts REST failed ${slug} page ${pageNo}: HTTP ${response.status()}`);
+      const batch=await response.json();
+      assert(Array.isArray(batch),`Legacy posts response invalid for ${slug}`);
+      collected.push(...batch);
+    }
+    posts[slug]=collected.map(row=>({
+      id:Number(row.id),
+      slug:String(row.slug||''),
+      title:clean(row.title?.rendered),
+      date:String(row.date||''),
+      dateGmt:String(row.date_gmt||''),
+      modified:String(row.modified||''),
+      featuredMedia:Number(row.featured_media||0),
+      categories:Array.isArray(row.categories)?row.categories.map(Number):[],
+      productLang:String(row.acf?.product_lang?.value||row.acf?.product_lang||'').trim(),
+      contentLength:String(row.content?.rendered||'').length,
+      excerptLength:String(row.excerpt?.rendered||'').length,
+    }));
+    assert(posts[slug].length===Number(category.count||0),`Legacy post count mismatch for ${slug}: REST=${posts[slug].length} category=${category.count}`);
+  }
+  const galleryResponse=await request.get(legacy+'/wp-json/wp/v2/pages?slug=thu-vien-pps&status=publish&per_page=20&_fields=id,slug,title,content,date,modified,featured_media,acf,yoast_head_json',{timeout:40000,headers:{'Cache-Control':'no-cache'}});
+  assert(galleryResponse.ok(),'Legacy PPS gallery Page REST unavailable');
+  const galleryPages=await galleryResponse.json();
+  assert(galleryPages.length===1,`Legacy PPS gallery Page missing or ambiguous (${galleryPages.length})`);
+  const gallery=galleryPages[0];
+  const galleryHtml=String(gallery.content?.rendered||'');
+  const galleryImages=[...galleryHtml.matchAll(/<img\b[^>]*\bsrc=["']([^"']+)["'][^>]*>/gi)].map(match=>match[1]);
+  const languageValues=[...new Set(Object.values(posts).flat().map(row=>row.productLang||'(missing)'))].sort();
+  log('SOURCE_REST_INVENTORY_PASS',{
+    categories,
+    counts:Object.fromEntries(Object.entries(posts).map(([slug,rows])=>[slug,rows.length])),
+    languageValues,
+    samples:Object.fromEntries(Object.entries(posts).map(([slug,rows])=>[slug,rows.slice(0,5)])),
+    gallery:{
+      id:Number(gallery.id),
+      slug:String(gallery.slug||''),
+      title:clean(gallery.title?.rendered),
+      productLang:String(gallery.acf?.product_lang?.value||gallery.acf?.product_lang||'').trim(),
+      action:String(gallery.acf?.action||''),
+      key:String(gallery.acf?.key||''),
+      featuredMedia:Number(gallery.featured_media||0),
+      contentLength:galleryHtml.length,
+      imageCount:galleryImages.length,
+      imageSamples:galleryImages.slice(0,8),
+    },
+  });
+  assert(languageValues.length===1&&languageValues[0]&&languageValues[0]!=='(missing)','Legacy News product_lang missing or inconsistent');
+  const galleryLang=String(gallery.acf?.product_lang?.value||gallery.acf?.product_lang||'').trim();
+  assert(galleryLang,'Legacy PPS gallery product_lang missing');
+  return {categories,posts,gallery,galleryImages};
 }
 
 async function login(){
@@ -294,14 +365,19 @@ async function qa(){
 
 try{
   sourceInventory=await inventorySource();
-  await login();
-  await inventoryTargetData();
-  const n=await nonce();
-  await ensureMenu(n);
-  log('CMS',{status:'PASS',writes:cmsWrites});
-  await buildThroughWordPress();
-  await qa();
-  log('RESULT','PASS');
+  sourceRestInventory=await inventorySourceRest();
+  if(inventoryOnly){
+    log('RESULT','INVENTORY_ONLY_PASS');
+  }else{
+    await login();
+    await inventoryTargetData();
+    const n=await nonce();
+    await ensureMenu(n);
+    log('CMS',{status:'PASS',writes:cmsWrites});
+    await buildThroughWordPress();
+    await qa();
+    log('RESULT','PASS');
+  }
 }finally{
   await browser.close();
 }

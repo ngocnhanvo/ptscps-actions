@@ -51,11 +51,12 @@ jobs:
         run: npm install --no-save --no-package-lock --ignore-scripts --no-audit --no-fund playwright@1.64.0
       - name: Verify WordPress build monitor contract
         run: node scripts/ptscps-wordpress-build-monitor.test.mjs
-      - name: Set up News menu and perform source parity QA
+      - name: Inventory legacy News source via DOM + REST
         env:
           WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
           WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
           GITHUB_TOKEN: ${{ github.token }}
+          NEWS_INVENTORY_ONLY: '1'
         run: node scripts/ptscps-news-setup.mjs
       - name: Upload News visual QA
         if: always()
