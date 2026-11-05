@@ -139,6 +139,27 @@ async function inventorySourceRest(){
       imageSamples:galleryImages.slice(0,8),
     },
   });
+  const probePostId=posts['tin-tuc']?.[0]?.id;
+  assert(probePostId,'Legacy News language probe post missing');
+  const rawPostResponse=await request.get(legacy+`/wp-json/wp/v2/posts/${probePostId}`,{timeout:40000,headers:{'Cache-Control':'no-cache'}});
+  assert(rawPostResponse.ok(),'Legacy raw post language probe unavailable');
+  const rawPost=await rawPostResponse.json();
+  const acfPostResponse=await request.get(legacy+`/wp-json/acf/v3/posts/${probePostId}`,{timeout:40000,headers:{'Cache-Control':'no-cache'}}).catch(()=>null);
+  const acfPostBody=acfPostResponse&&acfPostResponse.ok()?await acfPostResponse.json():null;
+  const acfPageResponse=await request.get(legacy+`/wp-json/acf/v3/pages/${gallery.id}`,{timeout:40000,headers:{'Cache-Control':'no-cache'}}).catch(()=>null);
+  const acfPageBody=acfPageResponse&&acfPageResponse.ok()?await acfPageResponse.json():null;
+  log('SOURCE_LANGUAGE_PROBE',{
+    postId:probePostId,
+    rawPostKeys:Object.keys(rawPost||{}).sort(),
+    rawPostAcfKeys:Object.keys(rawPost?.acf||{}).sort(),
+    rawPostLanguageFields:Object.fromEntries(Object.entries(rawPost||{}).filter(([key])=>/lang|locale|translat/i.test(key))),
+    acfPostStatus:acfPostResponse?.status?.()??null,
+    acfPostKeys:Object.keys(acfPostBody?.acf||acfPostBody||{}).sort(),
+    galleryId:Number(gallery.id),
+    rawGalleryAcfKeys:Object.keys(gallery?.acf||{}).sort(),
+    acfPageStatus:acfPageResponse?.status?.()??null,
+    acfPageKeys:Object.keys(acfPageBody?.acf||acfPageBody||{}).sort(),
+  });
   const galleryLang=String(gallery.acf?.product_lang?.value||gallery.acf?.product_lang||'').trim();
   if(languageValues.includes('(missing)')||!galleryLang){
     log('SOURCE_LANGUAGE_BLOCKER',{
