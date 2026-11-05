@@ -1,0 +1,441 @@
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { extname, basename } from 'node:path';
+import { chromium } from 'playwright';
+
+const wp=String(process.env.WP_ORIGIN||'').replace(/\/$/,'');
+const legacy='https://ptscps.com.vn';
+const username=process.env.WP_ADMIN_USERNAME;
+const password=process.env.WP_ADMIN_PASSWORD;
+const productLang=String(process.env.NEWS_PRODUCT_LANG||'').trim();
+assert(wp.startsWith('https://')&&username&&password,'Missing News migration WordPress configuration');
+assert(productLang==='vi','NEWS_PRODUCT_LANG must be the owner-approved value vi');
+
+const categorySlugs=['tin-tuc','hoat-dong-cua-cong-ty','dau-khi-trong-nuoc-va-khu-vuc','thu-moi-chao-gia'];
+const artifactDir='artifacts/ptscps-news-migrate';
+await mkdir(artifactDir,{recursive:true});
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const clean=x=>String(x??'').replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim();
+const decodeEntities=value=>String(value??'')
+  .replace(/&#x([0-9a-f]+);/gi,(_,n)=>String.fromCodePoint(parseInt(n,16)))
+  .replace(/&#(\d+);/g,(_,n)=>String.fromCodePoint(Number(n)))
+  .replace(/&nbsp;/gi,' ')
+  .replace(/&amp;/gi,'&')
+  .replace(/&quot;/gi,'"')
+  .replace(/&apos;|&#39;/gi,"'")
+  .replace(/&lt;/gi,'<')
+  .replace(/&gt;/gi,'>');
+const log=(key,value)=>console.log(`NEWS_MIGRATE_${key}=${typeof value==='string'?value:JSON.stringify(value)}`);
+const uri=p=>wp+p;
+const sourceAssetRe=/(?:https?:)?\/\/ptscps\.com\.vn\/wp-content\/uploads\/[^\s"'()<>,]+|\/wp-content\/uploads\/[^\s"'()<>,]+/gi;
+const targetCategoryBySourceId=new Map();
+const assetCache=new Map();
+const created={categories:[],media:[],posts:[],pages:[]};
+const updated={categories:[],posts:[],pages:[]};
+let writes=0;
+
+const browser=await chromium.launch({headless:true});
+const context=await browser.newContext({viewport:{width:1440,height:1000}});
+const page=await context.newPage();
+
+async function login(){
+  await page.goto(uri('/wp-login.php'),{waitUntil:'domcontentloaded',timeout:50000});
+  await page.locator('#user_login').fill(username);
+  await page.locator('#user_pass').fill(password);
+  await page.locator('#wp-submit').click();
+  await page.waitForLoadState('domcontentloaded');
+  if(new URL(page.url()).searchParams.get('action')==='confirm_admin_email'){
+    const skip=page.locator('a.skip-confirmation-button').first();
+    const confirm=page.locator('#correct-admin-email').first();
+    if(await skip.count()) await skip.click();
+    else if(await confirm.count()) await confirm.click();
+    await page.waitForURL(/\/wp-admin\//,{timeout:50000});
+  }else if(!/\/wp-admin\//.test(page.url())){
+    await page.waitForURL(/\/wp-admin\//,{timeout:50000});
+  }
+  assert(new URL(page.url()).origin===wp,'WordPress admin origin mismatch');
+  log('AUTH','PASS');
+}
+
+async function nonce(){
+  for(const candidate of ['/wp-admin/nav-menus.php?esc_full_admin=1','/wp-admin/edit.php?esc_full_admin=1']){
+    await page.goto(uri(candidate),{waitUntil:'domcontentloaded',timeout:45000});
+    const value=await page.evaluate(()=>String(globalThis.wpApiSettings?.nonce||'').trim());
+    if(/^[A-Za-z0-9_-]{8,32}$/.test(value)){log('REST_NONCE_SOURCE',candidate.split('?')[0]);return value;}
+  }
+  throw Error('WordPress REST nonce unavailable');
+}
+
+async function api(method,path,n,data,timeout=50000){
+  const response=await page.request.fetch(uri(path),{
+    method,timeout,headers:{'X-WP-Nonce':n,'Cache-Control':'no-cache'},
+    ...(data===undefined?{}:{data}),
+  });
+  const body=await response.json().catch(()=>null);
+  return {response,body};
+}
+
+async function readSource(){
+  const request=context.request;
+  const categoryResponse=await request.get(legacy+'/wp-json/wp/v2/categories?per_page=100&orderby=id&order=asc&_fields=id,slug,name,count,parent',{timeout:40000,headers:{'Cache-Control':'no-cache'}});
+  assert(categoryResponse.ok(),'Legacy category REST unavailable');
+  const all=await categoryResponse.json();
+  const categories={};
+  const postsById=new Map();
+  for(const slug of categorySlugs){
+    const matches=all.filter(row=>String(row.slug||'')===slug);
+    assert(matches.length===1,`Legacy category ${slug} missing or ambiguous (${matches.length})`);
+    const category=matches[0];
+    categories[slug]={id:Number(category.id),slug,name:decodeEntities(clean(category.name)),count:Number(category.count||0),parent:Number(category.parent||0)};
+    const totalPages=Math.max(1,Math.ceil(Number(category.count||0)/100));
+    for(let pageNo=1;pageNo<=totalPages;pageNo++){
+      const response=await request.get(legacy+`/wp-json/wp/v2/posts?status=publish&categories=${category.id}&per_page=100&page=${pageNo}&orderby=date&order=desc&_fields=id,slug,title,content,excerpt,date,date_gmt,modified,featured_media,categories`,{timeout:60000,headers:{'Cache-Control':'no-cache'}});
+      assert(response.ok(),`Legacy posts REST failed ${slug} page ${pageNo}: HTTP ${response.status()}`);
+      const batch=await response.json();
+      for(const row of batch){
+        postsById.set(Number(row.id),{
+          id:Number(row.id),slug:String(row.slug||''),title:decodeEntities(row.title?.rendered||''),
+          content:String(row.content?.rendered||''),excerpt:String(row.excerpt?.rendered||''),
+          date:String(row.date||''),dateGmt:String(row.date_gmt||''),modified:String(row.modified||''),
+          featuredMedia:Number(row.featured_media||0),categories:Array.isArray(row.categories)?row.categories.map(Number):[],
+        });
+      }
+    }
+  }
+  assert(postsById.size===226,`Legacy unique News post count changed: ${postsById.size}`);
+  for(const [slug,category] of Object.entries(categories)){
+    const count=[...postsById.values()].filter(post=>post.categories.includes(category.id)).length;
+    assert(count===category.count,`Legacy category count mismatch ${slug}: posts=${count} category=${category.count}`);
+  }
+  const galleryResponse=await request.get(legacy+'/wp-json/wp/v2/pages?slug=thu-vien-pps&status=publish&per_page=20&_fields=id,slug,title,content,date,date_gmt,modified,featured_media',{timeout:40000,headers:{'Cache-Control':'no-cache'}});
+  assert(galleryResponse.ok(),'Legacy PPS gallery Page REST unavailable');
+  const galleryRows=await galleryResponse.json();
+  assert(galleryRows.length===1,'Legacy PPS gallery Page missing or ambiguous');
+  const galleryRaw=galleryRows[0];
+  const gallery={
+    id:Number(galleryRaw.id),slug:String(galleryRaw.slug||''),title:decodeEntities(galleryRaw.title?.rendered||''),
+    content:String(galleryRaw.content?.rendered||''),date:String(galleryRaw.date||''),dateGmt:String(galleryRaw.date_gmt||''),
+    featuredMedia:Number(galleryRaw.featured_media||0),
+  };
+  const imageCount=[...gallery.content.matchAll(/<img\b[^>]*\bsrc=["'][^"']+["'][^>]*>/gi)].length;
+  assert(gallery.id===2&&imageCount===8,`Legacy PPS gallery baseline changed id=${gallery.id} images=${imageCount}`);
+  log('SOURCE_PASS',{categories:Object.fromEntries(Object.entries(categories).map(([k,v])=>[k,{id:v.id,count:v.count,parent:v.parent}])),uniquePosts:postsById.size,gallery:{id:gallery.id,imageCount}});
+  return {categories,posts:[...postsById.values()],gallery};
+}
+
+async function sourceMediaByIds(ids){
+  const result=new Map();
+  for(let i=0;i<ids.length;i+=100){
+    const chunk=ids.slice(i,i+100);
+    if(!chunk.length)continue;
+    const response=await context.request.get(legacy+`/wp-json/wp/v2/media?include=${chunk.join(',')}&per_page=100&_fields=id,slug,source_url,alt_text,title,caption,mime_type`,{timeout:50000,headers:{'Cache-Control':'no-cache'}});
+    assert(response.ok(),`Legacy media batch HTTP ${response.status()}`);
+    for(const row of await response.json()) result.set(Number(row.id),row);
+  }
+  for(const id of ids) assert(result.has(id),`Legacy featured media missing ${id}`);
+  return result;
+}
+
+async function targetSnapshot(n){
+  const categories=[];
+  for(const slug of categorySlugs){
+    const {response,body}=await api('GET',`/wp-json/wp/v2/categories?context=edit&hide_empty=false&slug=${encodeURIComponent(slug)}&per_page=20&_fields=id,slug,name,count,parent`,n);
+    assert(response.ok(),`Target category snapshot failed ${slug}`);
+    categories.push(...(body||[]));
+  }
+  const {response:galleryResponse,body:gallery}=await api('GET','/wp-json/wp/v2/pages?context=edit&status=any&slug=thu-vien-pps&per_page=20&_fields=id,slug,status,title,acf',n);
+  assert(galleryResponse.ok(),'Target gallery snapshot failed');
+  const snapshot={capturedAt:new Date().toISOString(),categories,gallery:gallery||[],note:'Pre-write snapshot; migration is idempotent and never deletes existing records.'};
+  await writeFile(`${artifactDir}/prewrite.json`,JSON.stringify(snapshot,null,2));
+  log('PREWRITE_SNAPSHOT',{categories:categories.length,gallery:(gallery||[]).length});
+}
+
+async function ensureCategories(source,n){
+  const ordered=Object.values(source.categories).sort((a,b)=>Number(a.parent>0)-Number(b.parent>0));
+  for(const item of ordered){
+    const {response,body}=await api('GET',`/wp-json/wp/v2/categories?context=edit&hide_empty=false&slug=${encodeURIComponent(item.slug)}&per_page=20&_fields=id,slug,name,count,parent`,n);
+    assert(response.ok(),`Target category lookup failed ${item.slug}`);
+    assert((body||[]).length<=1,`Target category duplicate ${item.slug}`);
+    const parentTarget=item.parent?targetCategoryBySourceId.get(item.parent)||0:0;
+    if(item.parent)assert(parentTarget,`Target parent mapping missing for ${item.slug}`);
+    let category=body?.[0]||null;
+    if(!category){
+      const createdResponse=await api('POST','/wp-json/wp/v2/categories',n,{name:item.name,slug:item.slug,parent:Number(parentTarget)});
+      assert(createdResponse.response.ok()&&createdResponse.body?.id,`Category create failed ${item.slug}: HTTP ${createdResponse.response.status()}`);
+      category=createdResponse.body;created.categories.push(Number(category.id));writes++;
+      log('CATEGORY',{slug:item.slug,id:category.id,state:'CREATED'});
+    }else{
+      const needs=clean(category.name)!==item.name||Number(category.parent||0)!==Number(parentTarget);
+      if(needs){
+        const updateResponse=await api('POST',`/wp-json/wp/v2/categories/${category.id}`,n,{name:item.name,parent:Number(parentTarget)});
+        assert(updateResponse.response.ok(),`Category update failed ${item.slug}`);
+        category=updateResponse.body;updated.categories.push(Number(category.id));writes++;
+        log('CATEGORY',{slug:item.slug,id:category.id,state:'UPDATED'});
+      }else log('CATEGORY',{slug:item.slug,id:category.id,state:'SKIP_EXISTING'});
+    }
+    targetCategoryBySourceId.set(Number(item.id),Number(category.id));
+  }
+}
+
+function normalizeSourceAsset(value){
+  let raw=String(value||'').trim();
+  if(!raw)return null;
+  if(raw.startsWith('//'))raw='https:'+raw;
+  if(raw.startsWith('/wp-content/uploads/'))raw=legacy+raw;
+  try{
+    const u=new URL(raw);
+    if(!/^https?:$/.test(u.protocol)||u.hostname!=='ptscps.com.vn'||!u.pathname.startsWith('/wp-content/uploads/'))return null;
+    u.protocol='https:';u.hash='';
+    return u.href;
+  }catch{return null;}
+}
+
+function assetSlug(url){return 'legacy-news-'+createHash('sha256').update(url).digest('hex').slice(0,20);}
+function assetFilename(url,mime=''){
+  const u=new URL(url);let ext=extname(u.pathname).toLowerCase();
+  if(!/^\.[a-z0-9]{1,8}$/.test(ext)){
+    if(/jpeg/.test(mime))ext='.jpg'; else if(/png/.test(mime))ext='.png'; else if(/webp/.test(mime))ext='.webp'; else if(/pdf/.test(mime))ext='.pdf'; else ext='';
+  }
+  return assetSlug(url)+ext;
+}
+
+async function lookupMedia(n,slug){
+  const {response,body}=await api('GET',`/wp-json/wp/v2/media?context=edit&slug=${encodeURIComponent(slug)}&per_page=20&_fields=id,slug,source_url,alt_text,title,mime_type`,n);
+  assert(response.ok(),`Target media lookup failed ${slug}`);assert((body||[]).length<=1,`Duplicate target media ${slug}`);return body?.[0]||null;
+}
+
+async function ensureAsset(n,url,meta={}){
+  const normalized=normalizeSourceAsset(url);if(!normalized)return null;
+  if(assetCache.has(normalized))return assetCache.get(normalized);
+  const promise=(async()=>{
+    const slug=assetSlug(normalized);
+    let media=await lookupMedia(n,slug);
+    if(media){return {id:Number(media.id),url:String(media.source_url||''),path:new URL(media.source_url).pathname,state:'existing'};}
+    const source=await fetch(normalized,{headers:{'User-Agent':'PTSCPS News migration/1.0'},signal:AbortSignal.timeout(60000)});
+    assert(source.ok,`Legacy asset HTTP ${source.status}: ${normalized}`);
+    const bytes=Buffer.from(await source.arrayBuffer());
+    assert(bytes.length>0,`Legacy asset empty: ${normalized}`);
+    assert(bytes.length<=30*1024*1024,`Legacy asset exceeds 30MB: ${normalized}`);
+    const contentType=String(source.headers.get('content-type')||meta.mime_type||'application/octet-stream').split(';')[0];
+    const file=assetFilename(normalized,contentType);
+    let createdMedia=null;
+    for(let attempt=1;attempt<=3&&!createdMedia;attempt++){
+      const upload=await page.request.post(uri('/wp-json/wp/v2/media'),{
+        headers:{'X-WP-Nonce':n,'Content-Type':contentType,'Content-Disposition':`attachment; filename="${file}"`},
+        data:bytes,timeout:90000,
+      }).catch(()=>null);
+      const body=upload?await upload.json().catch(()=>null):null;
+      if(upload?.ok()&&body?.id){createdMedia=body;break;}
+      await sleep(700*attempt);
+      const recovered=await lookupMedia(n,slug).catch(()=>null);
+      if(recovered){createdMedia=recovered;break;}
+      log('MEDIA_RETRY',{slug,attempt,http:upload?.status?.()||0});
+    }
+    assert(createdMedia?.id,`Target media upload failed ${normalized}`);
+    const metadata={
+      alt_text:String(meta.alt_text||''),
+      title:decodeEntities(meta.title?.rendered||meta.title||basename(new URL(normalized).pathname)),
+      caption:String(meta.caption?.rendered||meta.caption||''),
+    };
+    const update=await api('POST',`/wp-json/wp/v2/media/${createdMedia.id}`,n,metadata);
+    assert(update.response.ok(),`Target media metadata update failed ${createdMedia.id}`);
+    media=update.body||createdMedia;created.media.push(Number(media.id));writes++;
+    const absolute=String(media.source_url||createdMedia.source_url||'');
+    assert(absolute,'Target media source_url missing');
+    return {id:Number(media.id),url:absolute,path:new URL(absolute).pathname,state:'created'};
+  })();
+  assetCache.set(normalized,promise);
+  return promise;
+}
+
+function extractAssets(html){
+  return [...new Set((String(html||'').match(sourceAssetRe)||[]).map(normalizeSourceAsset).filter(Boolean))];
+}
+
+async function rewriteAssets(n,html){
+  let result=String(html||'');
+  const originals=[...new Set(result.match(sourceAssetRe)||[])];
+  for(const raw of originals){
+    const normalized=normalizeSourceAsset(raw);if(!normalized)continue;
+    const media=await ensureAsset(n,normalized);
+    assert(media?.path,`Asset mapping missing ${normalized}`);
+    result=result.split(raw).join(media.path);
+  }
+  return result.replace(/https?:\/\/ptscps\.com\.vn(?=\/)/gi,'');
+}
+
+async function setAcf(n,collection,id,values){
+  const attempt=await api('POST',`/wp-json/wp/v2/${collection}/${id}`,n,{acf:values});
+  if(attempt.response.ok()){
+    const verify=await api('GET',`/wp-json/wp/v2/${collection}/${id}?context=edit&_fields=id,acf`,n);
+    if(verify.response.ok()&&Object.entries(values).every(([key,value])=>String(verify.body?.acf?.[key]?.value??verify.body?.acf?.[key]??'')===String(value)))return;
+  }
+  await page.goto(uri(`/wp-admin/post.php?post=${id}&action=edit&esc_full_admin=1`),{waitUntil:'domcontentloaded',timeout:50000});
+  for(const [name,value] of Object.entries(values)){
+    const row=page.locator(`.acf-field[data-name="${name}"]`).first();
+    assert(await row.count()===1,`ACF field ${name} missing for ${collection} ${id}`);
+    const select=row.locator('select').first();
+    if(await select.count())await select.selectOption(String(value));
+    else{
+      const radio=row.locator(`input[type="radio"][value="${String(value).replace(/"/g,'\\"')}"]`).first();
+      if(await radio.count())await radio.check();
+      else{
+        const input=row.locator('input[type="text"],input:not([type]),textarea').first();
+        assert(await input.count(),`ACF field input ${name} missing for ${collection} ${id}`);await input.fill(String(value));
+      }
+    }
+  }
+  const publish=page.locator('#publish').first();assert(await publish.count(),`Update control missing for ${collection} ${id}`);
+  await Promise.all([page.waitForNavigation({waitUntil:'domcontentloaded',timeout:45000}).catch(()=>null),publish.click()]);
+  const verify=await api('GET',`/wp-json/wp/v2/${collection}/${id}?context=edit&_fields=id,acf`,n);
+  assert(verify.response.ok(),`ACF readback failed ${collection} ${id}`);
+  for(const [key,value] of Object.entries(values)) assert(String(verify.body?.acf?.[key]?.value??verify.body?.acf?.[key]??'')===String(value),`ACF ${key} mismatch ${collection} ${id}`);
+}
+
+async function postBySlug(n,slug){
+  const {response,body}=await api('GET',`/wp-json/wp/v2/posts?context=edit&status=any&slug=${encodeURIComponent(slug)}&per_page=20&_fields=id,slug,status,title,content,excerpt,date,date_gmt,featured_media,categories,acf`,n);
+  assert(response.ok(),`Target post lookup failed ${slug}`);assert((body||[]).length<=1,`Duplicate target post ${slug}`);return body?.[0]||null;
+}
+
+async function migratePosts(source,n,featuredMap){
+  let index=0;
+  for(const post of source.posts){
+    const targetCategories=post.categories.map(id=>targetCategoryBySourceId.get(id)).filter(Boolean).map(Number);
+    assert(targetCategories.length>0,`No mapped News category for source post ${post.id}`);
+    const content=await rewriteAssets(n,post.content);
+    const excerpt=await rewriteAssets(n,post.excerpt);
+    let featured=0;
+    if(post.featuredMedia){
+      const sourceMedia=featuredMap.get(post.featuredMedia);assert(sourceMedia,`Source featured media metadata missing ${post.featuredMedia}`);
+      featured=Number((await ensureAsset(n,sourceMedia.source_url,sourceMedia)).id);
+    }
+    const payload={
+      title:post.title,slug:post.slug,status:'publish',content,excerpt,
+      date:post.date,date_gmt:post.dateGmt,categories:targetCategories,featured_media:featured,
+    };
+    let target=await postBySlug(n,post.slug);let state='UPDATED';
+    if(!target){
+      const createdResponse=await api('POST','/wp-json/wp/v2/posts',n,payload,90000);
+      assert(createdResponse.response.ok()&&createdResponse.body?.id,`Post create failed source=${post.id} HTTP ${createdResponse.response.status()}`);
+      target=createdResponse.body;created.posts.push(Number(target.id));state='CREATED';writes++;
+    }else{
+      const currentLang=String(target.acf?.product_lang?.value??target.acf?.product_lang??'');
+      const currentCats=(target.categories||[]).map(Number).sort((a,b)=>a-b);
+      const exact=clean(decodeEntities(target.title?.raw??target.title?.rendered))===clean(post.title)
+        &&String(target.date_gmt||'').slice(0,19)===post.dateGmt.slice(0,19)
+        &&Number(target.featured_media||0)===featured
+        &&JSON.stringify(currentCats)===JSON.stringify([...targetCategories].sort((a,b)=>a-b))
+        &&currentLang===productLang
+        &&String(target.content?.raw??'')===content
+        &&String(target.excerpt?.raw??'')===excerpt;
+      if(exact){index++;if(index%25===0||index===source.posts.length)log('POST_PROGRESS',{done:index,total:source.posts.length,writes});continue;}
+      const updateResponse=await api('POST',`/wp-json/wp/v2/posts/${target.id}`,n,payload,90000);
+      assert(updateResponse.response.ok(),`Post update failed source=${post.id} HTTP ${updateResponse.response.status()}`);
+      updated.posts.push(Number(target.id));writes++;
+    }
+    await setAcf(n,'posts',Number(target.id),{product_lang:productLang});
+    const readback=await postBySlug(n,post.slug);assert(readback?.status==='publish',`Post readback missing ${post.slug}`);
+    assert(String(readback.acf?.product_lang?.value??readback.acf?.product_lang??'')===productLang,`Post language mismatch ${post.slug}`);
+    const rbCats=(readback.categories||[]).map(Number).sort((a,b)=>a-b);
+    assert(JSON.stringify(rbCats)===JSON.stringify([...targetCategories].sort((a,b)=>a-b)),`Post category mismatch ${post.slug}`);
+    assert(Number(readback.featured_media||0)===featured,`Post featured media mismatch ${post.slug}`);
+    index++;if(index%25===0||index===source.posts.length)log('POST_PROGRESS',{done:index,total:source.posts.length,writes,lastState:state});
+  }
+}
+
+async function pageBySlug(n,slug){
+  const {response,body}=await api('GET',`/wp-json/wp/v2/pages?context=edit&status=any&slug=${encodeURIComponent(slug)}&per_page=20&_fields=id,slug,status,title,content,date,date_gmt,featured_media,acf`,n);
+  assert(response.ok(),`Target Page lookup failed ${slug}`);assert((body||[]).length<=1,`Duplicate target Page ${slug}`);return body?.[0]||null;
+}
+
+async function migrateGallery(source,n){
+  const gallery=source.gallery;
+  const content=await rewriteAssets(n,gallery.content);
+  const payload={title:gallery.title,slug:gallery.slug,status:'publish',content,date:gallery.date,date_gmt:gallery.dateGmt};
+  let target=await pageBySlug(n,gallery.slug);
+  if(!target){
+    const createdResponse=await api('POST','/wp-json/wp/v2/pages',n,payload,90000);
+    assert(createdResponse.response.ok()&&createdResponse.body?.id,`Gallery Page create failed HTTP ${createdResponse.response.status()}`);
+    target=createdResponse.body;created.pages.push(Number(target.id));writes++;
+    log('GALLERY',{id:target.id,state:'CREATED'});
+  }else{
+    const currentLang=String(target.acf?.product_lang?.value??target.acf?.product_lang??'');
+    const currentKey=String(target.acf?.key||'');const currentAction=String(target.acf?.action||'');
+    if(currentLang===productLang&&currentKey==='news-gallery'&&currentAction==='IntroPage'&&String(target.content?.raw??'')===content){
+      log('GALLERY',{id:target.id,state:'SKIP_EXISTING'});
+    }else{
+      const updateResponse=await api('POST',`/wp-json/wp/v2/pages/${target.id}`,n,payload,90000);assert(updateResponse.response.ok(),'Gallery Page update failed');updated.pages.push(Number(target.id));writes++;
+    }
+  }
+  await setAcf(n,'pages',Number(target.id),{product_lang:productLang,key:'news-gallery',action:'IntroPage'});
+  const readback=await pageBySlug(n,gallery.slug);assert(readback?.status==='publish','Gallery Page readback missing');
+  assert(String(readback.acf?.product_lang?.value??readback.acf?.product_lang??'')===productLang,'Gallery Page language mismatch');
+  assert(String(readback.acf?.key||'')==='news-gallery'&&String(readback.acf?.action||'')==='IntroPage','Gallery Page frontend metadata mismatch');
+  const rendered=String(readback.content?.raw??readback.content?.rendered??'');
+  assert(!/https?:\/\/ptscps\.com\.vn\/wp-content\/uploads\//i.test(rendered),'Gallery Page still references legacy media origin');
+  log('GALLERY',{id:readback.id,state:'PASS',key:'news-gallery',action:'IntroPage'});
+}
+
+async function verify(source,n){
+  const targetCategoryIds={};
+  for(const [slug,item] of Object.entries(source.categories)){
+    const {response,body}=await api('GET',`/wp-json/wp/v2/categories?slug=${encodeURIComponent(slug)}&per_page=20&_fields=id,slug,name,count,parent`,n);
+    assert(response.ok()&&(body||[]).length===1,`Final category readback failed ${slug}`);
+    const row=body[0];targetCategoryIds[slug]=Number(row.id);
+    assert(Number(row.count||0)===Number(item.count),`Final category count mismatch ${slug}: target=${row.count} source=${item.count}`);
+  }
+  const allTarget=new Map();
+  for(const [slug,item] of Object.entries(source.categories)){
+    const targetId=targetCategoryIds[slug];const totalPages=Math.max(1,Math.ceil(Number(item.count||0)/100));
+    for(let pageNo=1;pageNo<=totalPages;pageNo++){
+      const {response,body}=await api('GET',`/wp-json/wp/v2/posts?context=edit&status=publish&categories=${targetId}&per_page=100&page=${pageNo}&orderby=date&order=desc&_fields=id,slug,title,date,date_gmt,featured_media,categories,acf`,n);
+      assert(response.ok(),`Final target posts readback failed ${slug} page ${pageNo}`);
+      for(const row of body||[])allTarget.set(String(row.slug||''),row);
+    }
+  }
+  assert(allTarget.size===source.posts.length,`Final unique Post count mismatch target=${allTarget.size} source=${source.posts.length}`);
+  for(const post of source.posts){
+    const row=allTarget.get(post.slug);assert(row,`Final target Post missing ${post.slug}`);
+    assert(clean(decodeEntities(row.title?.raw??row.title?.rendered))===clean(post.title),`Final title mismatch ${post.slug}`);
+    assert(String(row.acf?.product_lang?.value??row.acf?.product_lang??'')===productLang,`Final language mismatch ${post.slug}`);
+    const expectedCats=post.categories.map(id=>targetCategoryBySourceId.get(id)).filter(Boolean).map(Number).sort((a,b)=>a-b);
+    const actualCats=(row.categories||[]).map(Number).sort((a,b)=>a-b);
+    assert(JSON.stringify(actualCats)===JSON.stringify(expectedCats),`Final category mapping mismatch ${post.slug}`);
+    if(post.featuredMedia)assert(Number(row.featured_media||0)>0,`Final featured media missing ${post.slug}`);
+  }
+  const gallery=await pageBySlug(n,'thu-vien-pps');assert(gallery?.status==='publish','Final gallery Page missing');
+  assert(String(gallery.acf?.product_lang?.value??gallery.acf?.product_lang??'')===productLang,'Final gallery lang mismatch');
+  assert(String(gallery.acf?.key||'')==='news-gallery','Final gallery key mismatch');
+  const summary={status:'PASS',uniquePosts:allTarget.size,categories:Object.fromEntries(Object.entries(source.categories).map(([slug,item])=>[slug,item.count])),galleryId:Number(gallery.id),productLang,writes,created,updated,mediaMapped:assetCache.size};
+  await writeFile(`${artifactDir}/result.json`,JSON.stringify(summary,null,2));
+  log('READBACK_PASS',summary);
+}
+
+try{
+  const source=await readSource();
+  await login();
+  const n=await nonce();
+  await targetSnapshot(n);
+  await ensureCategories(source,n);
+
+  const featuredIds=[...new Set(source.posts.map(post=>post.featuredMedia).filter(Boolean))];
+  const featuredMap=await sourceMediaByIds(featuredIds);
+  const assetSet=new Set();
+  for(const post of source.posts){for(const url of extractAssets(post.content))assetSet.add(url);for(const url of extractAssets(post.excerpt))assetSet.add(url);}
+  for(const row of featuredMap.values()){const url=normalizeSourceAsset(row.source_url);if(url)assetSet.add(url);}
+  for(const url of extractAssets(source.gallery.content))assetSet.add(url);
+  log('MEDIA_PLAN',{uniqueAssets:assetSet.size,featuredAttachments:featuredIds.length});
+  const assets=[...assetSet];
+  for(let i=0;i<assets.length;i+=4){
+    await Promise.all(assets.slice(i,i+4).map(url=>ensureAsset(n,url)));
+    const done=Math.min(i+4,assets.length);if(done%40===0||done===assets.length)log('MEDIA_PROGRESS',{done,total:assets.length,created:created.media.length});
+  }
+
+  await migratePosts(source,n,featuredMap);
+  await migrateGallery(source,n);
+  await verify(source,n);
+  log('RESULT',{status:'PASS',writes,created:{categories:created.categories.length,media:created.media.length,posts:created.posts.length,pages:created.pages.length},updated:{categories:updated.categories.length,posts:updated.posts.length,pages:updated.pages.length}});
+}finally{
+  await browser.close();
+}
