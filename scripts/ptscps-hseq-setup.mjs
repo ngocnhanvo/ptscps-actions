@@ -356,7 +356,7 @@ async function buildThroughWordPress(){
     if(status.disabled&&status.forceDisabled){
       log('BUILD','OTHER_BUILD_RUNNING_SKIP_DUPLICATE');return;
     }
-    if(await isPublished()){
+    if(!cmsWrites && await isPublished()){
       log('BUILD','ACTIVE_BUILD_COMPLETED_AND_PUBLISHED');return;
     }
   }
@@ -404,8 +404,13 @@ async function qa(){
       const toggle=p.locator('#header-navrow button').filter({hasText:'HSEQ'}).first();
       assert(await toggle.isVisible(),'Desktop HSEQ menu button missing');
       await toggle.click();
-      for(const item of expectedMenu){
-        const link=p.locator('#header-navrow a').filter({hasText:item.title}).first();
+      const panelId=await toggle.getAttribute('aria-controls');
+      assert(panelId,'Desktop HSEQ menu panel id missing');
+      const menuLinks=p.locator(`#${panelId} a`);
+      assert.deepEqual((await menuLinks.allTextContents()).map(clean),expectedMenu.map(item=>item.title),'Desktop HSEQ submenu order mismatch');
+      for(let i=0;i<expectedMenu.length;i++){
+        const link=menuLinks.nth(i);
+        const item=expectedMenu[i];
         assert(await link.isVisible(),`Desktop HSEQ submenu missing ${item.title}`);
         assert.equal(await link.getAttribute('href'),item.href,`Desktop HSEQ submenu href mismatch ${item.title}`);
         assert.notEqual(await link.getAttribute('target'),'_blank',`Desktop HSEQ submenu opens new tab ${item.title}`);
@@ -418,8 +423,13 @@ async function qa(){
       const toggle=p.locator('#mobile-menu-container [data-menu-toggle]').filter({hasText:'HSEQ'}).first();
       assert(await toggle.isVisible(),'Mobile HSEQ menu toggle missing');
       await toggle.click();
-      for(const item of expectedMenu){
-        const link=p.locator('#mobile-menu-container a').filter({hasText:item.title}).first();
+      const panelId=await toggle.getAttribute('aria-controls');
+      assert(panelId,'Mobile HSEQ menu panel id missing');
+      const menuLinks=p.locator(`#${panelId} a`);
+      assert.deepEqual((await menuLinks.allTextContents()).map(clean),expectedMenu.map(item=>item.title),'Mobile HSEQ submenu order mismatch');
+      for(let i=0;i<expectedMenu.length;i++){
+        const link=menuLinks.nth(i);
+        const item=expectedMenu[i];
         assert(await link.isVisible(),`Mobile HSEQ submenu missing ${item.title}`);
         assert.equal(await link.getAttribute('href'),item.href,`Mobile HSEQ submenu href mismatch ${item.title}`);
         assert.notEqual(await link.getAttribute('target'),'_blank',`Mobile HSEQ submenu opens new tab ${item.title}`);
