@@ -255,6 +255,15 @@ try {
     assert.deepEqual((await repairGroups.locator('h3').allTextContents()).map(clean), repairChildren.map((item) => item.title), `${viewport.name} repair child service labels mismatch`);
     const repairGroupHrefs = await repairGroups.evaluateAll((nodes) => nodes.map((node) => node.getAttribute('href') || ''));
     assert.deepEqual(repairGroupHrefs.map((href) => new URL(href, frontUrl.origin).pathname), repairChildren.map((item) => `/dich-vu/${item.slug}`), `${viewport.name} repair child service href mismatch`);
+    const repairGroupImages = repairGroups.locator('img');
+    assert.equal(await repairGroupImages.count(), 3, `${viewport.name} repair child service image count mismatch`);
+    for (let i = 0; i < 3; i += 1) {
+      await repairGroupImages.nth(i).scrollIntoViewIfNeeded();
+      await page.waitForFunction((index) => {
+        const image = document.querySelectorAll('[data-service-subcategories] img')[index];
+        return image && image.complete && image.naturalWidth > 0;
+      }, i, { timeout: 12000 });
+    }
     assert.equal(await page.locator('[data-service-projects-heading]').count(), 0, `${viewport.name} repair parent should not render project cards`);
     noAdminOrigin(await page.content(), `${viewport.name}-repair-parent`);
     await page.screenshot({ path: `${artifactDir}/${viewport.name}-dich-vu-sua-chua-parent.png`, fullPage: true });
@@ -302,6 +311,13 @@ try {
     const repairProjectImages = repairProjectCards.locator('img');
     assert.equal(await repairProjectImages.count(), 8, `${viewport.name} repair projects should show one representative image each`);
     assert.equal(await repairProjectCards.locator('[data-service-project-gallery]').count(), 0, `${viewport.name} repair project gallery should not render`);
+    for (let i = 0; i < 8; i += 1) {
+      await repairProjectImages.nth(i).scrollIntoViewIfNeeded();
+      await page.waitForFunction((index) => {
+        const image = document.querySelectorAll('[data-service-projects-heading] + div article img')[index];
+        return image && image.complete && image.naturalWidth > 0;
+      }, i, { timeout: 12000 });
+    }
     const repairScopeMetrics = await repairProjectCards.locator('[data-service-project-scope]').evaluateAll((nodes) => nodes.map((node) => ({
       clientHeight: node.clientHeight,
       scrollHeight: node.scrollHeight,
