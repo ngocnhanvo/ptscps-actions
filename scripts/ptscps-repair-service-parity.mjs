@@ -8,6 +8,7 @@ assert(wp && user && pass, 'Missing WordPress origin/admin credentials');
 
 const parentSlug = 'dich-vu-sua-chua-bao-duong-cac-thiet-bi-va-cong-trinh-cong-nghiep';
 const mediaPrefix = 'ptscps-repair';
+const serviceDetailTableId = `pub_service_${parentSlug}`;
 
 const parent = {
   intro: 'Công ty đã đầu tư xây dựng khu nhà xưởng để thực hiện dịch vụ sửa chữa bảo dưỡng trên diện tích 5000m2 nằm trong khu vực Cảng hạ lưu PTSC, đồng thời cũng đã đầu tư đầy đủ trang thiết bị nhằm phục vụ công tác bảo dưỡng, sửa chữa trên các tàu FPSO/FSO và thực hiện các dịch vụ khác cho khách hàng.',
@@ -300,6 +301,115 @@ function relativeMediaPath(media) {
   return u.origin === new URL(wp).origin ? `${u.pathname}${u.search}` : u.href;
 }
 
+function serviceDetailTableData(workshop, certificates) {
+  return [
+    ['type', 'title', 'content', 'img'],
+    ['Loại', 'Tiêu đề', 'Nội dung', 'Hình ảnh'],
+    ['image', 'Xưởng cơ khí bảo dưỡng PTSC', '', `<img src="${relativeMediaPath(workshop)}" alt="Xưởng cơ khí bảo dưỡng PTSC">`],
+    ['prose', '', parent.asme, ''],
+    ['certificate', parent.certificates[0][1], '', `<img src="${relativeMediaPath(certificates[0])}" alt="${parent.certificates[0][1]}">`],
+    ['certificate', parent.certificates[1][1], '', `<img src="${relativeMediaPath(certificates[1])}" alt="${parent.certificates[1][1]}">`],
+    ['service-heading', '', 'Các dịch vụ sửa chữa bảo dưỡng được Công ty thực hiện bao gồm:', ''],
+  ];
+}
+
+async function readServiceDetailTable() {
+  const res = await page.request.get(`${wp}/wp-json/tablepress/v1/table/${encodeURIComponent(serviceDetailTableId)}?_repair=${Date.now()}`, {
+    timeout: 30000,
+    headers: { 'Cache-Control': 'no-cache' },
+  });
+  if (res.status() === 404) return null;
+  assert(res.ok(), `ESC Table read HTTP ${res.status()}`);
+  const body = await res.json().catch(() => ({}));
+  return body?.success ? body : null;
+}
+
+function verifyServiceDetailTable(table, workshop, certificates) {
+  assert(table?.success, 'Repair parent ESC Table missing');
+  assert.deepEqual((table.fields || []).map((field) => String(field.key || '')), ['type', 'title', 'content', 'img'], 'Repair parent ESC Table fields mismatch');
+  const items = Array.isArray(table.items) ? table.items : [];
+  assert.deepEqual(items.map((item) => String(item?.type || '')), ['image', 'prose', 'certificate', 'certificate', 'service-heading'], 'Repair parent ESC Table row types mismatch');
+  assert(clean(items[1]?.content).includes('ASME'), 'Repair parent ESC Table ASME text missing');
+  assert.equal(clean(items[4]?.content), 'Các dịch vụ sửa chữa bảo dưỡng được Công ty thực hiện bao gồm:', 'Repair parent ESC Table service heading mismatch');
+  const expectedMedia = [workshop, ...certificates].map((media) => new URL(String(media.source_url), wp).pathname.split('/').pop());
+  const actualMedia = [items[0]?.img, items[2]?.img, items[3]?.img].map((value) => String(value || ''));
+  expectedMedia.forEach((name, index) => assert(name && actualMedia[index].includes(name), `Repair parent ESC Table media mismatch ${name}`));
+  report('ESC_TABLE', { id: serviceDetailTableId, rows: items.length, media: expectedMedia.length, state: 'VERIFIED' });
+  return true;
+}
+
+async function createServiceDetailTableShell(rows, columns) {
+  await page.goto(`${wp}/wp-admin/admin.php?page=tablepress&action=add&esc_full_admin=1`, { waitUntil: 'domcontentloaded', timeout: 50000 });
+  const form = page.locator('#tablepress-page-form');
+  assert(await form.count() === 1, 'ESC Table add form missing');
+  await page.locator('input[name="table[name]"]').fill('Dịch vụ sửa chữa bảo dưỡng - Nội dung chi tiết');
+  await page.locator('textarea[name="table[description]"]').fill('Nội dung chi tiết trang dịch vụ sửa chữa bảo dưỡng.');
+  await page.locator('input[name="table[rows]"]').fill(String(rows));
+  await page.locator('input[name="table[columns]"]').fill(String(columns));
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 50000 }),
+    form.evaluate((element) => element.requestSubmit()),
+  ]);
+  const temporaryId = new URL(page.url()).searchParams.get('table_id');
+  assert(temporaryId, `ESC Table creation did not return table_id: ${page.url()}`);
+  return temporaryId;
+}
+
+async function saveServiceDetailTable(editId, data) {
+  await page.goto(`${wp}/wp-admin/admin.php?page=tablepress&action=edit&table_id=${encodeURIComponent(editId)}&esc_full_admin=1`, { waitUntil: 'domcontentloaded', timeout: 50000 });
+  await page.waitForFunction(() => Boolean(globalThis.tp?.nonces?.edit_table && globalThis.tp?.table?.id), null, { timeout: 20000 });
+  const state = await page.evaluate(() => ({
+    nonce: String(globalThis.tp?.nonces?.edit_table || ''),
+    id: String(globalThis.tp?.table?.id || ''),
+    options: globalThis.tp?.table?.options || {},
+  }));
+  assert(state.nonce && state.id, 'ESC Table edit state missing');
+  const visibility = { rows: Array(data.length).fill(1), columns: Array(data[0].length).fill(1) };
+  const res = await page.request.post(`${wp}/wp-admin/admin-ajax.php`, {
+    form: {
+      action: 'tablepress_save_table',
+      _ajax_nonce: state.nonce,
+      'tablepress[id]': state.id,
+      'tablepress[new_id]': serviceDetailTableId,
+      'tablepress[name]': 'Dịch vụ sửa chữa bảo dưỡng - Nội dung chi tiết',
+      'tablepress[description]': 'Nội dung chi tiết trang dịch vụ sửa chữa bảo dưỡng.',
+      'tablepress[data]': JSON.stringify(data),
+      'tablepress[options]': JSON.stringify(state.options),
+      'tablepress[visibility]': JSON.stringify(visibility),
+      'tablepress[number][rows]': String(data.length),
+      'tablepress[number][columns]': String(data[0].length),
+    },
+    timeout: 60000,
+  });
+  const body = await res.json().catch(() => ({}));
+  assert(res.ok() && body?.success === true, `ESC Table save failed HTTP ${res.status()} ${JSON.stringify(body).slice(0, 500)}`);
+  assert.equal(String(body.table_id || serviceDetailTableId), serviceDetailTableId, 'ESC Table ID mismatch after save');
+}
+
+async function ensureServiceDetailTable(workshop, certificates) {
+  const data = serviceDetailTableData(workshop, certificates);
+  const existing = await readServiceDetailTable();
+  if (existing) {
+    try {
+      verifyServiceDetailTable(existing, workshop, certificates);
+      report('ESC_TABLE_WRITE', { id: serviceDetailTableId, state: 'ALREADY_CORRECT_SKIP_WRITE' });
+      return false;
+    } catch {}
+  }
+  const editId = existing ? serviceDetailTableId : await createServiceDetailTableShell(data.length, data[0].length);
+  await saveServiceDetailTable(editId, data);
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    await sleep(500);
+    const readback = await readServiceDetailTable();
+    try {
+      verifyServiceDetailTable(readback, workshop, certificates);
+      report('ESC_TABLE_WRITE', { id: serviceDetailTableId, state: existing ? 'UPDATED_VERIFIED' : 'CREATED_VERIFIED' });
+      return true;
+    } catch {}
+  }
+  throw Error(`ESC Table readback failed ${serviceDetailTableId}`);
+}
+
 async function setCategoryThumbnail(termId, mediaId, slug) {
   const feed = await categoryFeed();
   const current = feed.find((x)=>Number(x.id)===Number(termId));
@@ -319,7 +429,7 @@ function verifyDescription(actualValue, expectedHtml, key) {
   const actual = String(actualValue ?? '');
   const actualText = clean(actual);
   const requiredByKey = {
-    parent: ['5000m2', 'ASME'],
+    parent: ['5000m2'],
     equipment: ['(1) Thiết bị tĩnh', 'Heat exchanger', '(2) Thiết bị quay', 'Reciprocating Compressor Overhaul', '(3) Thiết bị điện / Tự động hóa'],
     plants: ['Cung cấp quy trình vận hành bảo dưỡng', 'đại tu máy nén pittông'],
     other: ['Lắp dựng giàn giáo', 'floating hose', 'Đo UTM', 'Doa, mạ & phun phủ'],
@@ -329,14 +439,8 @@ function verifyDescription(actualValue, expectedHtml, key) {
     const needle = clean(phrase);
     assert(needle && actualText.includes(needle), `Description phrase missing ${key}: ${needle}`);
   }
-  const imageNames = [...String(expectedHtml ?? '').matchAll(/<img[^>]+src="([^"]+)"/gi)]
-    .map((match) => String(match[1]).split('/').pop()?.split('?')[0] || '')
-    .filter(Boolean);
-  const retained = imageNames.filter((name) => actual.includes(name)).length;
-  report('DESCRIPTION_MEDIA', { key, expected:imageNames.length, retained });
   if (key === 'parent') {
-    assert.equal(retained, imageNames.length, `Description media missing ${key}: expected ${imageNames.length}, retained ${retained}`);
-    assert(/class=["'][^"']*\bservice-certificates\b/.test(actual), 'Parent certificate grid marker missing');
+    assert.equal(actualText, clean(expectedHtml), 'Repair parent taxonomy description should contain only the introductory paragraph');
   }
   return true;
 }
@@ -386,9 +490,9 @@ try {
   const parentCategory=await findCategory(nonce,parentSlug); assert(parentCategory,`Parent category missing ${parentSlug}`);
   const workshop=await ensureMedia(nonce,...parent.image);
   const certificates=[]; for(const spec of parent.certificates) certificates.push(await ensureMedia(nonce,...spec));
-  const certificateHtml=certificates.map((media,index)=>`<figure><img src="${relativeMediaPath(media)}" alt="${parent.certificates[index][1]}" /></figure>`).join('');
-  const parentHtml=`<p>${parent.intro}</p><figure><img src="${relativeMediaPath(workshop)}" alt="Xưởng cơ khí bảo dưỡng PTSC" /></figure><p>${parent.asme}</p><div class="service-certificates">${certificateHtml}</div><p><strong>Các dịch vụ sửa chữa bảo dưỡng được Công ty thực hiện bao gồm:</strong></p>`;
+  const parentHtml=`<p>${parent.intro}</p>`;
   await ensureDescription(nonce,parentCategory,parentHtml,'parent');
+  await ensureServiceDetailTable(workshop,certificates);
   const childRows=[]; for(const spec of children) childRows.push(await ensureChildCategory(nonce,parentCategory.id,spec));
   await ensureCategoryOrder(parentCategory.id,childRows);
 

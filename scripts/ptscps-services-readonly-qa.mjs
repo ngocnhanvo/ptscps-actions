@@ -249,23 +249,31 @@ try {
     assert(await repairParentDescription.isVisible(), `${viewport.name} repair parent description missing`);
     const repairParentText = clean(await repairParentDescription.textContent());
     assert(repairParentText.includes('5000m2'), `${viewport.name} repair workshop introduction missing`);
-    assert(repairParentText.includes('ASME'), `${viewport.name} repair ASME introduction missing`);
-    const repairParentImages = repairParentDescription.locator('img');
+    assert(!repairParentText.includes('ASME'), `${viewport.name} repair ASME content duplicated in taxonomy description`);
+    const repairDetailContent = page.locator('[data-service-detail-content]');
+    assert(await repairDetailContent.isVisible(), `${viewport.name} repair ESC Table detail content missing`);
+    assert(clean(await repairDetailContent.textContent()).includes('ASME'), `${viewport.name} repair ASME introduction missing`);
+    const repairDetailBlocks = repairDetailContent.locator('[data-service-detail-block]');
+    assert.deepEqual(await repairDetailBlocks.evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-service-detail-block') || '')), ['image', 'prose', 'certificates', 'service-heading'], `${viewport.name} repair detail block order mismatch`);
+    const repairParentImages = repairDetailContent.locator('img');
     assert.equal(await repairParentImages.count(), 3, `${viewport.name} repair parent legacy media count mismatch`);
-    const repairParentSources = await repairParentImages.evaluateAll((nodes) => nodes.map((node) => node.getAttribute('src') || ''));
-    for (const mediaKey of ['ptscps-repair-workshop', 'ptscps-repair-asme-u', 'ptscps-repair-asme-s']) {
-      assert(repairParentSources.some((src) => src.includes(mediaKey)), `${viewport.name} repair parent media missing ${mediaKey}`);
-    }
-    const repairCertificateGrid = repairParentDescription.locator('.service-certificates');
+    assert.deepEqual(await repairParentImages.evaluateAll((nodes) => nodes.map((node) => node.getAttribute('alt') || '')), ['Xưởng cơ khí bảo dưỡng PTSC', 'Chứng chỉ ASME U', 'Chứng chỉ ASME S'], `${viewport.name} repair parent media order/alt mismatch`);
+    const repairCertificateGrid = repairDetailContent.locator('[data-service-certificates]');
     assert.equal(await repairCertificateGrid.count(), 1, `${viewport.name} repair certificate grid missing`);
     assert.equal(await repairCertificateGrid.locator('img').count(), 2, `${viewport.name} repair certificate count mismatch`);
+    const repairDetailHeading = repairDetailContent.locator('[data-service-detail-heading]');
+    assert.equal(clean(await repairDetailHeading.textContent()), 'Các dịch vụ sửa chữa bảo dưỡng được Công ty thực hiện bao gồm:', `${viewport.name} repair detail service heading mismatch`);
     for (let i = 0; i < 3; i += 1) {
       await repairParentImages.nth(i).scrollIntoViewIfNeeded();
       await page.waitForFunction((index) => {
-        const image = document.querySelectorAll('[data-service-category-description] img')[index];
+        const image = document.querySelectorAll('[data-service-detail-content] img')[index];
         return image && image.complete && image.naturalWidth > 0;
       }, i, { timeout: 12000 });
     }
+    const certificateBoxes = await repairCertificateGrid.locator('figure').evaluateAll((nodes) => nodes.map((node) => { const rect = node.getBoundingClientRect(); return { x: Math.round(rect.x), y: Math.round(rect.y) }; }));
+    assert.equal(certificateBoxes.length, 2, `${viewport.name} repair certificate layout items missing`);
+    if (viewport.name === 'desktop') assert(Math.abs(certificateBoxes[0].y - certificateBoxes[1].y) <= 4 && certificateBoxes[1].x > certificateBoxes[0].x, 'desktop repair certificates should render side-by-side');
+    else assert(certificateBoxes[1].y > certificateBoxes[0].y + 20, 'mobile repair certificates should stack vertically');
     const repairGroups = page.locator('[data-service-subcategories] a');
     assert.equal(await repairGroups.count(), 3, `${viewport.name} repair child service count mismatch`);
     assert.deepEqual((await repairGroups.locator('h3').allTextContents()).map(clean), repairChildren.map((item) => item.title), `${viewport.name} repair child service labels mismatch`);
@@ -283,7 +291,7 @@ try {
     assert.equal(await page.locator('[data-service-projects-heading]').count(), 0, `${viewport.name} repair parent should not render project cards`);
     noAdminOrigin(await page.content(), `${viewport.name}-repair-parent`);
     await page.screenshot({ path: `${artifactDir}/${viewport.name}-dich-vu-sua-chua-parent.png`, fullPage: true });
-    console.log(`SERVICES_READONLY_QA_REPAIR_PARENT=${viewport.name}:PASS children=3`);
+    console.log(`SERVICES_READONLY_QA_REPAIR_PARENT=${viewport.name}:PASS children=3 legacy_media=3`);
 
     const equipment = repairChildren[0];
     const equipmentResponse = await page.goto(`${front}/dich-vu/${equipment.slug}?_repair_equipment_qa=${Date.now()}`, { waitUntil: 'load', timeout: 50000 });
