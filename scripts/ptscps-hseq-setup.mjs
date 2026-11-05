@@ -74,34 +74,36 @@ async function collectSourcePolicyDocs(p){
     return {url:preferred.url,alt:preferred.alt};
   });
 }
-async function collectSourceLinkedAssets(p){
+async function collectSourceObjectiveDocuments(p){
   await p.evaluate(async()=>{
     const height=Math.max(document.body.scrollHeight,document.documentElement.scrollHeight);
     for(let y=0;y<height;y+=600){window.scrollTo(0,y);await new Promise(r=>setTimeout(r,80));}
     window.scrollTo(0,0);
   });
   await p.waitForTimeout(400);
-  const rows=await p.locator('a[href]').evaluateAll(anchors=>anchors.map((anchor,index)=>{
-    const href=String(anchor.href||'');
-    const rect=anchor.getBoundingClientRect();
-    const media=anchor.querySelector('img');
-    const mediaRect=media?.getBoundingClientRect();
+  const rows=await p.locator('img').evaluateAll(images=>images.map((image,index)=>{
+    const rect=image.getBoundingClientRect();
+    const anchor=image.closest('a[href]');
+    const candidates=[image.currentSrc,image.src,image.getAttribute('data-src'),image.getAttribute('data-lazy-src')].filter(Boolean);
+    const imageUrl=candidates.find(value=>/\/wp-content\/uploads\/.*\.(?:png|jpe?g|webp)(?:[?#].*)?$/i.test(String(value)))||'';
+    const linkUrl=String(anchor?.href||'');
     return {
       index,
-      url:href,
-      top:(mediaRect?.top??rect.top)+window.scrollY,
-      left:(mediaRect?.left??rect.left),
-      width:mediaRect?.width??rect.width,
-      height:mediaRect?.height??rect.height,
-      excluded:Boolean(anchor.closest('header,footer,nav')),
+      imageUrl:String(imageUrl),
+      linkUrl,
+      top:rect.top+window.scrollY,
+      left:rect.left,
+      width:rect.width,
+      height:rect.height,
+      excluded:Boolean(image.closest('header,footer,nav')),
     };
-  }).filter(row=>!row.excluded&&/\/wp-content\/uploads\/.*\.(?:png|jpe?g|webp|pdf)(?:[?#].*)?$/i.test(row.url)));
+  }).filter(row=>row.imageUrl&&!row.excluded&&row.width>=140&&row.height>=180));
   const seen=new Set();
   return rows.sort((a,b)=>a.top-b.top||a.left-b.left).filter(row=>{
-    const key=new URL(row.url).pathname;
+    const key=new URL(row.imageUrl).pathname;
     if(seen.has(key))return false;
     seen.add(key);return true;
-  }).map(row=>({url:row.url,kind:/\.pdf(?:[?#].*)?$/i.test(row.url)?'pdf':'image'}));
+  }).map(row=>({imageUrl:row.imageUrl,linkUrl:/\.pdf(?:[?#].*)?$/i.test(row.linkUrl)?row.linkUrl:''}));
 }
 async function collectSourceCertificateImages(p){
   await p.evaluate(async()=>{
@@ -152,10 +154,10 @@ async function inventorySource(){
 
     const objectiveResponse=await p.goto(legacy+'/hseq/muc-tieu-skatmtcl?_parity='+Date.now(),{waitUntil:'load',timeout:50000});
     assert(objectiveResponse?.status()===200,'Legacy HSEQ objective page unavailable');
-    const objectiveAssets=await collectSourceLinkedAssets(p);
-    log('SOURCE_OBJECTIVE_CANDIDATES',objectiveAssets.map(asset=>({kind:asset.kind,url:new URL(asset.url).pathname})));
-    assert.equal(objectiveAssets.filter(asset=>asset.kind==='image').length,1,`Legacy objective image count changed: ${objectiveAssets.filter(asset=>asset.kind==='image').length}`);
-    assert.equal(objectiveAssets.filter(asset=>asset.kind==='pdf').length,1,`Legacy objective PDF count changed: ${objectiveAssets.filter(asset=>asset.kind==='pdf').length}`);
+    const objectiveDocs=await collectSourceObjectiveDocuments(p);
+    log('SOURCE_OBJECTIVE_CANDIDATES',objectiveDocs.map(doc=>({image:new URL(doc.imageUrl).pathname,link:doc.linkUrl?new URL(doc.linkUrl).pathname:''})));
+    assert.equal(objectiveDocs.length,2,`Legacy objective visible document count changed: expected 2, got ${objectiveDocs.length}`);
+    assert.equal(objectiveDocs.filter(doc=>doc.linkUrl).length,1,`Legacy objective PDF-linked thumbnail count changed: ${objectiveDocs.filter(doc=>doc.linkUrl).length}`);
     await p.screenshot({path:`${artifactDir}/source-desktop-objective.png`,fullPage:true});
 
     const certificateResponse=await p.goto(legacy+'/hseq/giay-chung-nhan-skatmtcl?_parity='+Date.now(),{waitUntil:'load',timeout:50000});
@@ -168,11 +170,11 @@ async function inventorySource(){
 
     log('SOURCE_INVENTORY_PASS',{
       policyDocuments:policyDocs.map(doc=>({title:doc.title,url:new URL(doc.url).pathname})),
-      objectiveAssets:objectiveAssets.map(asset=>({kind:asset.kind,url:new URL(asset.url).pathname})),
+      objectiveDocuments:objectiveDocs.map(doc=>({image:new URL(doc.imageUrl).pathname,link:doc.linkUrl?new URL(doc.linkUrl).pathname:''})),
       certificates:certificates.map(cert=>({title:cert.title,url:new URL(cert.url).pathname})),
       navOrder
     });
-    return {policyDocs,objectiveAssets,certificates,navOrder};
+    return {policyDocs,objectiveDocs,certificates,navOrder};
   }finally{await source.close();}
 }
 
@@ -260,11 +262,9 @@ function rowsFor(imagePaths){
   const policyDocuments=sourceInventory.policyDocs.map((doc,index)=>[
     'document',doc.title,'','',img(imagePaths.policyDocuments[index],doc.title),'Phóng to tài liệu'
   ]);
-  const objectiveDocuments=sourceInventory.objectiveAssets.map((asset,index)=>{
-    const media=imagePaths.objectiveAssets[index];
-    return asset.kind==='pdf'
-      ? ['document','Tài liệu Mục tiêu HSEQ (PDF)','',''+media,'','Mở tài liệu PDF']
-      : ['document','Mục tiêu HSEQ','','',img(media,'Tài liệu mục tiêu HSEQ'),'Phóng to tài liệu'];
+  const objectiveDocuments=sourceInventory.objectiveDocs.map((doc,index)=>{
+    const title=`Tài liệu Mục tiêu HSEQ ${index+1}`;
+    return ['document',title,'',doc.linkUrl?imagePaths.objectivePdf:'',img(imagePaths.objectiveDocs[index],title),doc.linkUrl?'Mở tài liệu PDF':'Phóng to tài liệu'];
   });
   const certificates=sourceInventory.certificates.map((cert,index)=>[
     'certificate',cert.title,'','',''+img(imagePaths.certificates[index],cert.title),'Phóng to chứng nhận'
@@ -298,16 +298,19 @@ async function ensureTable(def,rows){
   if(previouslyPopulated){
     const keys=(existing.fields||[]).map(f=>String(f.key||''));
     assert(fields.every((field,i)=>keys[i]===field),`Existing ${def.id} has different field schema; preserving CMS data`);
+    const objectiveImages=def.id==='hseq_02_vi'
+      ? existing.items.filter(item=>String(item?.type||'').trim().toLowerCase()==='document'&&item?.img).length
+      : 0;
     const certificateImages=def.id==='hseq_04_vi'
       ? existing.items.filter(item=>String(item?.type||'').trim().toLowerCase()==='certificate'&&item?.img).length
       : 0;
-    const objectiveNeedsExpansion=def.id==='hseq_02_vi'&&existing.items.length<rows.length;
+    const objectiveNeedsImages=def.id==='hseq_02_vi'&&objectiveImages<sourceInventory.objectiveDocs.length;
     const certificateNeedsImages=def.id==='hseq_04_vi'&&certificateImages<sourceInventory.certificates.length;
-    if(existing.items.length===rows.length&&!certificateNeedsImages){
+    if(existing.items.length===rows.length&&!objectiveNeedsImages&&!certificateNeedsImages){
       log('TABLE',{id:def.id,state:'SKIP_EXISTING',rows:rows.length});return;
     }
-    assert((def.id==='hseq_01_vi'||objectiveNeedsExpansion||certificateNeedsImages)&&existing.items.length<=rows.length,`Refusing destructive or unexpected HSEQ table change ${def.id}: ${existing.items.length} -> ${rows.length}`);
-    log('TABLE',{id:def.id,state:'UPDATE_FOR_SOURCE_PARITY',from:existing.items.length,to:rows.length,certificateImages});
+    assert((def.id==='hseq_01_vi'||objectiveNeedsImages||certificateNeedsImages)&&existing.items.length<=rows.length,`Refusing destructive or unexpected HSEQ table change ${def.id}: ${existing.items.length} -> ${rows.length}`);
+    log('TABLE',{id:def.id,state:'UPDATE_FOR_SOURCE_PARITY',from:existing.items.length,to:rows.length,objectiveImages,certificateImages});
   }
   if(!existing){
     await page.goto(uri('/wp-admin/admin.php?page=tablepress&action=add'),{waitUntil:'domcontentloaded',timeout:45000});
@@ -523,8 +526,8 @@ async function isPublished(){
     if(policyResponse?.status()!==200||await probe.locator('button[data-gallery-trigger]').count()!==sourceInventory.policyDocs.length)return false;
     const objectiveResponse=await probe.goto(`${front}/hseq/muc-tieu-skatmtcl?_hseq_objective_publish=${Date.now()}`,{waitUntil:'domcontentloaded',timeout:40000}).catch(()=>null);
     if(objectiveResponse?.status()!==200)return false;
-    if(await probe.locator('button[data-gallery-trigger]').count()!==sourceInventory.objectiveAssets.filter(asset=>asset.kind==='image').length)return false;
-    if(await probe.locator('article a[target="_blank"]').count()<sourceInventory.objectiveAssets.filter(asset=>asset.kind==='pdf').length)return false;
+    if(await probe.locator('button[data-gallery-trigger]').count()!==sourceInventory.objectiveDocs.length)return false;
+    if(await probe.locator('article a[target="_blank"]').count()<sourceInventory.objectiveDocs.filter(doc=>doc.linkUrl).length)return false;
     const certificateResponse=await probe.goto(`${front}/hseq/giay-chung-nhan-skatmtcl?_hseq_certificate_publish=${Date.now()}`,{waitUntil:'domcontentloaded',timeout:40000}).catch(()=>null);
     if(certificateResponse?.status()!==200)return false;
     return await probe.locator('button[data-gallery-trigger]').count()===sourceInventory.certificates.length;
@@ -665,7 +668,7 @@ async function qa(){
     const objectiveResponse=await p.goto(`${front}/hseq/muc-tieu-skatmtcl?_qa_objective=${Date.now()}`,{waitUntil:'load',timeout:50000});
     assert(objectiveResponse?.status()===200,`HSEQ objective ${viewport.name} HTTP failure`);
     const objectiveImages=p.locator('button[data-gallery-trigger] img');
-    assert.equal(await objectiveImages.count(),sourceInventory.objectiveAssets.filter(asset=>asset.kind==='image').length,`DATA_PARITY_FAIL objective images ${viewport.name}`);
+    assert.equal(await objectiveImages.count(),sourceInventory.objectiveDocs.length,`DATA_PARITY_FAIL objective visible images ${viewport.name}`);
     for(let i=0;i<await objectiveImages.count();i++){
       await objectiveImages.nth(i).scrollIntoViewIfNeeded();
       await p.waitForFunction(index=>{
@@ -676,7 +679,7 @@ async function qa(){
       log('OBJECTIVE_IMAGE_LOADED',{viewport:viewport.name,index:i+1,...dimensions});
     }
     const objectivePdfLinks=p.locator('article a[target="_blank"]');
-    assert(await objectivePdfLinks.count()>=sourceInventory.objectiveAssets.filter(asset=>asset.kind==='pdf').length,`DATA_PARITY_FAIL objective PDF links ${viewport.name}`);
+    assert(await objectivePdfLinks.count()>=sourceInventory.objectiveDocs.filter(doc=>doc.linkUrl).length,`DATA_PARITY_FAIL objective PDF links ${viewport.name}`);
     await p.screenshot({path:`${artifactDir}/target-${viewport.name}-objective.png`,fullPage:true});
 
     const certificateResponse=await p.goto(`${front}/hseq/giay-chung-nhan-skatmtcl?_qa_certificates=${Date.now()}`,{waitUntil:'load',timeout:50000});
@@ -706,8 +709,8 @@ async function qa(){
     await legacyPage.screenshot({path:`${artifactDir}/source-${viewport.name}-policy.png`,fullPage:true});
     const legacyObjective=await legacyPage.goto(legacy+'/hseq/muc-tieu-skatmtcl?_qa_source='+Date.now(),{waitUntil:'load',timeout:50000});
     assert(legacyObjective?.status()===200,`Legacy objective ${viewport.name} HTTP failure`);
-    const legacyObjectiveAssets=await collectSourceLinkedAssets(legacyPage);
-    assert.equal(legacyObjectiveAssets.length,sourceInventory.objectiveAssets.length,`SOURCE_INVENTORY_FAIL objective assets changed ${viewport.name}`);
+    const legacyObjectiveDocs=await collectSourceObjectiveDocuments(legacyPage);
+    assert.equal(legacyObjectiveDocs.length,sourceInventory.objectiveDocs.length,`SOURCE_INVENTORY_FAIL objective visible documents changed ${viewport.name}`);
     await legacyPage.screenshot({path:`${artifactDir}/source-${viewport.name}-objective.png`,fullPage:true});
     const legacyCertificates=await legacyPage.goto(legacy+'/hseq/giay-chung-nhan-skatmtcl?_qa_source='+Date.now(),{waitUntil:'load',timeout:50000});
     assert(legacyCertificates?.status()===200,`Legacy certificates ${viewport.name} HTTP failure`);
@@ -722,7 +725,7 @@ async function qa(){
       log('NAV_PARITY_PASS',{relativeOrder:relative});
       log('DATA_PARITY_PASS',{
         policyDocuments:sourceInventory.policyDocs.length,
-        objectiveAssets:sourceInventory.objectiveAssets.length,
+        objectiveVisibleDocuments:sourceInventory.objectiveDocs.length,
         certificates:sourceInventory.certificates.length
       });
     }
@@ -736,9 +739,16 @@ try{
   sourceInventory=await inventorySource();
   await login();
   const n=await nonce();
-  const media={policyDocuments:[],objectiveAssets:[],certificates:[]};
+  const media={policyDocuments:[],objectiveDocs:[],objectivePdf:'',certificates:[]};
   for(const [index,doc] of sourceInventory.policyDocs.entries())media.policyDocuments.push(await ensureMedia(`policy-${index+1}`,doc.url,n));
-  for(const [index,asset] of sourceInventory.objectiveAssets.entries())media.objectiveAssets.push(await ensureMedia(`objective-${index+1}`,asset.url,n));
+  const canonicalObjectivePath=new URL(fileSources.objective).pathname;
+  for(const [index,doc] of sourceInventory.objectiveDocs.entries()){
+    const name=new URL(doc.imageUrl).pathname===canonicalObjectivePath?'objective-1':`objective-visible-${index+1}`;
+    media.objectiveDocs.push(await ensureMedia(name,doc.imageUrl,n));
+  }
+  const linkedObjective=sourceInventory.objectiveDocs.find(doc=>doc.linkUrl);
+  assert(linkedObjective?.linkUrl,'Legacy objective PDF linkage missing');
+  media.objectivePdf=await ensureMedia('objective-2',linkedObjective.linkUrl,n);
   for(const [index,cert] of sourceInventory.certificates.entries())media.certificates.push(await ensureMedia(`certificate-${index+1}`,cert.url,n));
   for(const [key,url] of Object.entries(fileSources))media[key]=await ensureMedia(key,url,n);
   const rows=rowsFor(media);
