@@ -554,6 +554,19 @@ async function qa(){
     assert.equal(await targetDocs.count(),sourceInventory.policyDocs.length,`DATA_PARITY_FAIL policy documents ${viewport.name}`);
     const targetHeadings=(await p.locator('article h2').allTextContents()).map(clean);
     for(const expected of sourceInventory.policyDocs.map(doc=>doc.title))assert(targetHeadings.includes(expected),`DATA_PARITY_FAIL missing policy document title ${expected}`);
+    const targetImages=targetDocs.locator('img');
+    assert.equal(await targetImages.count(),sourceInventory.policyDocs.length,`DATA_PARITY_FAIL policy images ${viewport.name}`);
+    for(let i=0;i<await targetImages.count();i++){
+      const image=targetImages.nth(i);
+      await image.scrollIntoViewIfNeeded();
+      await p.waitForFunction(index=>{
+        const node=document.querySelectorAll('button[data-gallery-trigger] img')[index];
+        return node instanceof HTMLImageElement&&node.complete&&node.naturalWidth>0&&node.naturalHeight>0;
+      },i,{timeout:15000});
+      const dimensions=await image.evaluate(node=>({naturalWidth:node.naturalWidth,naturalHeight:node.naturalHeight,src:node.currentSrc||node.src}));
+      assert(dimensions.naturalWidth>0&&dimensions.naturalHeight>0,`DATA_PARITY_FAIL policy image ${i+1} did not load ${viewport.name}`);
+      log('POLICY_IMAGE_LOADED',{viewport:viewport.name,index:i+1,naturalWidth:dimensions.naturalWidth,naturalHeight:dimensions.naturalHeight,src:dimensions.src});
+    }
     const targetOverflow=await p.evaluate(()=>document.documentElement.scrollWidth);
     assert(targetOverflow<=viewport.width+2,`HSEQ policy horizontal overflow ${viewport.name}: ${targetOverflow}`);
     await p.screenshot({path:`${artifactDir}/target-${viewport.name}-policy.png`,fullPage:true});
