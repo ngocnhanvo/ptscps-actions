@@ -12,11 +12,16 @@ const fields = ['type','title','content','link','img','label'];
 const labels = ['Loại','Tiêu đề','Nội dung','Liên kết','Hình ảnh','Nhãn'];
 const uri = p => wp + p;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+const legacy = 'https://ptscps.com.vn';
 const fileSources = {
-  policy: 'https://ptscps.com.vn/wp-content/uploads/2024/08/PTS082024007.png',
-  objective: 'https://ptscps.com.vn/wp-content/uploads/2024/08/PTS082024009.png',
-  system: 'https://ptscps.com.vn/wp-content/uploads/2019/12/0001.jpg',
+  objective: legacy + '/wp-content/uploads/2024/08/PTS082024009.png',
+  system: legacy + '/wp-content/uploads/2019/12/0001.jpg',
 };
+const fallbackPolicyTitles = [
+  'Chính sách sử dụng rượu, cồn và các chất kích thích',
+  'Chính sách sức khỏe, an toàn, môi trường và chất lượng',
+  'Chính sách dừng công việc',
+];
 const defs = [
   {id:'hseq_00_vi',title:'HSEQ',slug:'hseq',description:'Sức khỏe · An toàn · Môi trường · Chất lượng',root:true,key:'hseq-overview'},
   {id:'hseq_01_vi',title:'Chính sách HSEQ',slug:'chinh-sach-skatmtcl',description:'Cam kết về an toàn, sức khỏe và chất lượng dịch vụ',key:'hseq-policy'},
@@ -31,9 +36,62 @@ const browser = await chromium.launch({headless:true});
 const ctx = await browser.newContext({viewport:{width:1440,height:900}});
 const page = await ctx.newPage();
 let cmsWrites=0;
+let sourceInventory=null;
 const log=(key,value)=>console.log(`HSEQ_${key}=${typeof value==='string'?value:JSON.stringify(value)}`);
 const clean=x=>String(x ?? '').replace(/<[^>]*>/g,'').trim();
 const img=(p,alt)=>`<img src="${p}" alt="${alt}" />`;
+const norm=x=>clean(x).toLocaleLowerCase('vi-VN');
+
+async function collectSourcePolicyDocs(p){
+  await p.evaluate(async()=>{
+    const height=Math.max(document.body.scrollHeight,document.documentElement.scrollHeight);
+    for(let y=0;y<height;y+=600){window.scrollTo(0,y);await new Promise(r=>setTimeout(r,80));}
+    window.scrollTo(0,0);
+  });
+  await p.waitForTimeout(500);
+  const rows=await p.locator('img').evaluateAll(images=>images.map((image,index)=>{
+    const rect=image.getBoundingClientRect();
+    const anchor=image.closest('a');
+    const candidates=[anchor?.href,image.currentSrc,image.src,image.getAttribute('data-src'),image.getAttribute('data-lazy-src')].filter(Boolean);
+    const url=candidates.find(value=>/\/wp-content\/uploads\/.*\.(?:png|jpe?g|webp)(?:[?#].*)?$/i.test(String(value))) || '';
+    return {index,url:String(url),alt:String(image.getAttribute('alt')||'').trim(),left:rect.left,top:rect.top,width:rect.width,height:rect.height};
+  }));
+  const seen=new Set();
+  return rows
+    .filter(row=>row.url && row.width>=170 && row.height>=230 && row.height>row.width*1.08)
+    .sort((a,b)=>Math.abs(a.top-b.top)>40?a.top-b.top:a.left-b.left)
+    .filter(row=>{if(seen.has(row.url))return false;seen.add(row.url);return true;})
+    .map(({url,alt})=>({url,alt}));
+}
+async function visibleRelativeOrder(p,labels,scope='body'){
+  const wanted=labels.map(label=>({label,key:norm(label)}));
+  const nodes=await p.locator(`${scope} a,${scope} button`).evaluateAll(elements=>elements.map(element=>{
+    const rect=element.getBoundingClientRect();
+    const style=getComputedStyle(element);
+    return {text:String(element.textContent||'').replace(/\s+/g,' ').trim(),left:rect.left,top:rect.top,width:rect.width,height:rect.height,visible:style.visibility!=='hidden'&&style.display!=='none'};
+  }).filter(item=>item.visible&&item.width>0&&item.height>0));
+  const found=wanted.map(item=>{
+    const match=nodes.filter(node=>norm(node.text)===item.key).sort((a,b)=>a.top-b.top||a.left-b.left)[0];
+    return match?{label:item.label,...match}:null;
+  }).filter(Boolean);
+  return found.sort((a,b)=>a.left-b.left||a.top-b.top).map(item=>item.label);
+}
+async function inventorySource(){
+  const source=await browser.newContext({viewport:{width:1440,height:900}});
+  const p=await source.newPage();
+  try{
+    const response=await p.goto(legacy+'/hseq/chinh-sach-skatmtcl?_parity='+Date.now(),{waitUntil:'load',timeout:50000});
+    assert(response?.status()===200,'Legacy HSEQ policy page unavailable');
+    const rawDocs=await collectSourcePolicyDocs(p);
+    assert.equal(rawDocs.length,3,`Legacy policy document count changed: expected 3, got ${rawDocs.length}`);
+    const policyDocs=rawDocs.map((doc,index)=>({...doc,title:doc.alt||fallbackPolicyTitles[index]}));
+    const navOrder=await visibleRelativeOrder(p,['Giới thiệu','Dịch vụ','HSEQ']);
+    assert.deepEqual(navOrder,['Giới thiệu','Dịch vụ','HSEQ'],'Legacy HSEQ relative top menu order changed');
+    await p.screenshot({path:`${artifactDir}/source-desktop-policy.png`,fullPage:true});
+    log('SOURCE_INVENTORY_PASS',{policyDocuments:policyDocs.map(doc=>({title:doc.title,url:new URL(doc.url).pathname})),navOrder});
+    return {policyDocs,navOrder};
+  }finally{await source.close();}
+}
 
 async function login(){
   await page.goto(uri('/wp-login.php'),{waitUntil:'domcontentloaded',timeout:50000});
@@ -113,12 +171,16 @@ async function ensureMedia(name,url,n){
 }
 function rowsFor(imagePaths){
   const nav=defs.slice(1).map(d=>['nav',d.title,'',dest(d),'','']);
-  const cards=defs.slice(1).map((d,i)=>['card',d.title,d.description,dest(d),img([imagePaths.policy,imagePaths.objective,imagePaths.system,imagePaths.system][i],d.title),'Xem chi tiết']);
+  const policyCard=imagePaths.policyDocuments.at(-1);
+  const cards=defs.slice(1).map((d,i)=>['card',d.title,d.description,dest(d),img([policyCard,imagePaths.objective,imagePaths.system,imagePaths.system][i],d.title),'Xem chi tiết']);
+  const policyDocuments=sourceInventory.policyDocs.map((doc,index)=>[
+    'document',doc.title,'','',img(imagePaths.policyDocuments[index],doc.title),'Phóng to tài liệu'
+  ]);
   return [
     [...nav,...cards],
     [...nav,
       ['prose','','Công ty cung cấp dịch vụ với chất lượng quốc tế, đảm bảo an toàn cho tất cả các khách hàng với cam kết:','','',''],
-      ['document','Chính sách HSEQ','','',img(imagePaths.policy,'Văn bản chính sách HSEQ'),'Xem tài liệu']],
+      ...policyDocuments],
     [...nav,
       ['prose','','Mục tiêu liên tục nâng cao chất lượng dịch vụ phục vụ khách hàng, đảm bảo yếu tố an toàn, không gây tác động xấu tới môi trường, cộng đồng và các bên liên quan.','','',''],
       ['document','Mục tiêu HSEQ','','https://ptscps.com.vn/wp-content/uploads/2022/04/2.-Ke-hoach-thuc-hien-muc-tieu-2022-2.pdf',img(imagePaths.objective,'Tài liệu mục tiêu HSEQ'),'Xem tài liệu PDF']],
@@ -141,11 +203,15 @@ async function readTable(id){
 }
 async function ensureTable(def,rows){
   let existing=await readTable(def.id);
-  if(existing?.items?.length){
-    assert(existing.items.length===rows.length,`Existing ${def.id} has unexpected row count; preserving CMS data`);
+  const previouslyPopulated=Boolean(existing?.items?.length);
+  if(previouslyPopulated){
     const keys=(existing.fields||[]).map(f=>String(f.key||''));
     assert(fields.every((field,i)=>keys[i]===field),`Existing ${def.id} has different field schema; preserving CMS data`);
-    log('TABLE',{id:def.id,state:'SKIP_EXISTING',rows:rows.length});return;
+    if(existing.items.length===rows.length){
+      log('TABLE',{id:def.id,state:'SKIP_EXISTING',rows:rows.length});return;
+    }
+    assert(def.id==='hseq_01_vi'&&existing.items.length<rows.length,`Refusing destructive or unexpected HSEQ table resize ${def.id}: ${existing.items.length} -> ${rows.length}`);
+    log('TABLE',{id:def.id,state:'EXPAND_FOR_SOURCE_PARITY',from:existing.items.length,to:rows.length});
   }
   if(!existing){
     await page.goto(uri('/wp-admin/admin.php?page=tablepress&action=add'),{waitUntil:'domcontentloaded',timeout:45000});
@@ -167,7 +233,7 @@ async function ensureTable(def,rows){
     for(let i=0;i<12;i++){await sleep(700);existing=await readTable(def.id).catch(()=>null);if(existing)break;}
     assert(existing,`ESC Table renaming failed ${def.id}`);
   }
-  assert(!existing?.items?.length,`Refusing overwrite of ${def.id}`);
+  if(existing?.items?.length)assert(def.id==='hseq_01_vi'&&existing.items.length<rows.length,`Refusing overwrite of populated ${def.id}`);
   await page.goto(uri(`/wp-admin/admin.php?page=tablepress&action=edit&table_id=${def.id}`),{waitUntil:'domcontentloaded',timeout:45000});
   await page.waitForFunction(()=>Boolean(window.tp?.editor?.options?.data && window.tp?.callbacks?.append),null,{timeout:30000});
   await page.locator('#table-name').fill(def.title);
@@ -189,7 +255,7 @@ async function ensureTable(def,rows){
     if(check?.items?.length===rows.length){existing=check;break;}
   }
   assert(existing?.items?.length===rows.length,`ESC Table readback failed ${def.id}`);
-  cmsWrites++;log('TABLE',{id:def.id,state:'CREATED',rows:rows.length});
+  cmsWrites++;log('TABLE',{id:def.id,state:previouslyPopulated?'UPDATED_SOURCE_PARITY':'CREATED',rows:rows.length});
 }
 async function setAcf(name,value){
   const field=page.locator(`.acf-field[data-name="${name}"]`).first();
@@ -267,7 +333,12 @@ async function ensureMenu(n){
   const top=(header.items||[]).filter(x=>String(x.label||'')==='HSEQ');
   assert(top.length<=1,'Duplicated HSEQ top menu');
   const desired=[{title:'Tất cả',url:'/hseq'},...defs.slice(1).map(x=>({title:x.title,url:dest(x)}))];
+  const topLabels=(header.items||[]).map(x=>String(x.label||''));
+  const serviceIndex=topLabels.indexOf('Dịch vụ');
+  const hseqIndex=topLabels.indexOf('HSEQ');
+  const relativeOrderCorrect=serviceIndex>=0&&hseqIndex===serviceIndex+1;
   const same=top.length===1
+    &&relativeOrderCorrect
     &&top[0].children?.length===desired.length
     &&desired.every((w,i)=>top[0].children?.[i]?.label===w.title
       &&String(top[0].children?.[i]?.href||'').replace(/^\/+|\/+$/g,'')===w.url.replace(/^\/+|\/+$/g,''));
@@ -284,7 +355,20 @@ async function ensureMenu(n){
   if(!parentId){
     const created=await api('POST','/wp-json/wp/v2/menu-items',n,{title:'HSEQ',type:'custom',url:'/hseq',menus:Number(header.id),status:'publish',parent:0});
     assert(created.response.ok(),`HSEQ parent menu creation failed HTTP ${created.response.status()}`);
-    parentId=created.body.id;cmsWrites++;
+    parentId=created.body.id;items.push(created.body);cmsWrites++;
+  }
+  const topItems=items.filter(x=>Number(x.parent||0)===0).sort((a,b)=>Number(a.menu_order||0)-Number(b.menu_order||0)||Number(a.id)-Number(b.id));
+  const serviceItem=topItems.find(x=>titleOf(x)==='Dịch vụ');
+  const hseqItem=topItems.find(x=>Number(x.id)===Number(parentId));
+  assert(serviceItem&&hseqItem,'Cannot position HSEQ after Dịch vụ');
+  const orderedTop=topItems.filter(x=>Number(x.id)!==Number(parentId));
+  orderedTop.splice(orderedTop.findIndex(x=>Number(x.id)===Number(serviceItem.id))+1,0,hseqItem);
+  for(const [index,item] of orderedTop.entries()){
+    const menuOrder=(index+1)*10;
+    if(Number(item.menu_order||0)===menuOrder)continue;
+    const update=await api('POST',`/wp-json/wp/v2/menu-items/${item.id}`,n,{menu_order:menuOrder});
+    assert(update.response.ok(),`Cannot update top-level menu order for ${titleOf(item)}`);
+    cmsWrites++;
   }
   for(const [index,expected] of desired.entries()){
     const matches=items.filter(x=>Number(x.parent||0)===Number(parentId)&&titleOf(x)===expected.title);
@@ -304,10 +388,14 @@ async function ensureMenu(n){
     await sleep(500);
     const verify=await page.request.get(uri(`/wp-json/esc-api/v1/menus?_hseq_menu=${Date.now()}`),{timeout:30000,headers:{'Cache-Control':'no-cache'}});
     assert(verify.ok(),'Cannot verify HSEQ Header menu');
-    const current=(await verify.json())?.menus?.Header?.vi?.items?.find(x=>String(x.label||'')==='HSEQ');
+    const menuItems=(await verify.json())?.menus?.Header?.vi?.items||[];
+    const current=menuItems.find(x=>String(x.label||'')==='HSEQ');
     const children=current?.children||[];
-    if(children.length===desired.length&&desired.every((w,i)=>children[i]?.label===w.title&&String(children[i]?.href||'').replace(/^\/+|\/+$/g,'')===w.url.replace(/^\/+|\/+$/g,''))){
-      log('MENU',{status:'PASS',children:desired.map(x=>x.title)});return;
+    const labels=menuItems.map(x=>String(x.label||''));
+    const serviceAt=labels.indexOf('Dịch vụ');
+    const hseqAt=labels.indexOf('HSEQ');
+    if(serviceAt>=0&&hseqAt===serviceAt+1&&children.length===desired.length&&desired.every((w,i)=>children[i]?.label===w.title&&String(children[i]?.href||'').replace(/^\/+|\/+$/g,'')===w.url.replace(/^\/+|\/+$/g,''))){
+      log('MENU',{status:'PASS',topLevel:labels,children:desired.map(x=>x.title)});return;
     }
   }
   throw Error('HSEQ submenu order readback mismatch');
@@ -332,7 +420,12 @@ async function isPublished(){
     const panelId=await toggle.getAttribute('aria-controls');
     if(!panelId)return false;
     const labels=(await probe.locator(`#${panelId} a`).allTextContents()).map(clean);
-    return JSON.stringify(labels)===JSON.stringify(expectedMenu);
+    if(JSON.stringify(labels)!==JSON.stringify(expectedMenu))return false;
+    const relative=await visibleRelativeOrder(probe,sourceInventory.navOrder,'#header-navrow');
+    if(JSON.stringify(relative)!==JSON.stringify(sourceInventory.navOrder))return false;
+    const policyResponse=await probe.goto(`${front}/hseq/chinh-sach-skatmtcl?_hseq_policy_publish=${Date.now()}`,{waitUntil:'domcontentloaded',timeout:40000}).catch(()=>null);
+    if(policyResponse?.status()!==200)return false;
+    return await probe.locator('button[data-gallery-trigger]').count()===sourceInventory.policyDocs.length;
   }finally{
     await probe.close();
   }
@@ -444,15 +537,43 @@ async function qa(){
       }
       await p.screenshot({path:`${artifactDir}/mobile-hseq-menu.png`,fullPage:false});
     }
+    const policyResponse=await p.goto(`${front}/hseq/chinh-sach-skatmtcl?_qa_policy=${Date.now()}`,{waitUntil:'load',timeout:50000});
+    assert(policyResponse?.status()===200,`HSEQ policy ${viewport.name} HTTP failure`);
+    const targetDocs=p.locator('button[data-gallery-trigger]');
+    assert.equal(await targetDocs.count(),sourceInventory.policyDocs.length,`DATA_PARITY_FAIL policy documents ${viewport.name}`);
+    const targetHeadings=(await p.locator('article h2').allTextContents()).map(clean);
+    for(const expected of sourceInventory.policyDocs.map(doc=>doc.title))assert(targetHeadings.includes(expected),`DATA_PARITY_FAIL missing policy document title ${expected}`);
+    const targetOverflow=await p.evaluate(()=>document.documentElement.scrollWidth);
+    assert(targetOverflow<=viewport.width+2,`HSEQ policy horizontal overflow ${viewport.name}: ${targetOverflow}`);
+    await p.screenshot({path:`${artifactDir}/target-${viewport.name}-policy.png`,fullPage:true});
+
+    const legacyView=await browser.newContext({viewport:{width:viewport.width,height:viewport.height}});
+    const legacyPage=await legacyView.newPage();
+    const legacyResponse=await legacyPage.goto(legacy+'/hseq/chinh-sach-skatmtcl?_qa_source='+Date.now(),{waitUntil:'load',timeout:50000});
+    assert(legacyResponse?.status()===200,`Legacy HSEQ policy ${viewport.name} HTTP failure`);
+    const legacyDocs=await collectSourcePolicyDocs(legacyPage);
+    assert.equal(legacyDocs.length,sourceInventory.policyDocs.length,`SOURCE_INVENTORY_FAIL policy documents changed ${viewport.name}`);
+    await legacyPage.screenshot({path:`${artifactDir}/source-${viewport.name}-policy.png`,fullPage:true});
+    await legacyView.close();
+
+    if(viewport.name==='desktop'){
+      const relative=await visibleRelativeOrder(p,sourceInventory.navOrder,'#header-navrow');
+      assert.deepEqual(relative,sourceInventory.navOrder,'NAV_PARITY_FAIL HSEQ top-level relative order');
+      log('NAV_PARITY_PASS',{relativeOrder:relative});
+      log('DATA_PARITY_PASS',{policyDocuments:sourceInventory.policyDocs.length});
+    }
+    log('VISUAL_PARITY_PASS',{viewport:viewport.name,approvedException:'HSEQ presentation redesigned; source content/media/navigation preserved'});
     log('QA',{viewport:viewport.name,status:'PASS',menu:'PASS'});
     await view.close();
   }
 }
 
 try{
+  sourceInventory=await inventorySource();
   await login();
   const n=await nonce();
-  const media={};
+  const media={policyDocuments:[]};
+  for(const [index,doc] of sourceInventory.policyDocs.entries())media.policyDocuments.push(await ensureMedia(`policy-${index+1}`,doc.url,n));
   for(const [key,url] of Object.entries(fileSources))media[key]=await ensureMedia(key,url,n);
   const rows=rowsFor(media);
   for(let i=0;i<defs.length;i++)await ensureTable(defs[i],rows[i]);
