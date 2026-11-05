@@ -3,6 +3,15 @@
 Updated: 2026-11-05
 Code mode: `auto-build`
 
+## CURRENT CHECKPOINT — HSEQ CMS pages, nested routes, Header menu and production QA PASS (2026-11-05)
+
+- HSEQ is live from WordPress-owned CMS data: 5 Pages (`hseq` ID `82890` plus child IDs `82893`/`82895`/`82897`/`82899`), 5 ESC Tables (`hseq_00_vi` through `hseq_04_vi`), and verified legacy media IDs `82871`/`82872`/`82873`. Latest idempotency run `42018467034` read all of them back as `SKIP_EXISTING`; do not re-upload or recreate them.
+- Astro `master` `784ba1cb9dc010af1c3c132d7a868eafd059b0bc` publishes nested `/hseq/<slug>` SSG routes and the reusable `HseqSections.astro`. Production deploy `42011201590` **PASS** with signed activation plus public SSG/home smoke.
+- Native `Header.vi` contains one top-level `HSEQ` click/tap menu with exact ordered children: `Tất cả`, `Chính sách HSEQ`, `Mục tiêu HSEQ`, `Hệ thống quản lý HSEQ`, `Giấy chứng nhận HSEQ`, linked to the root/child routes. Latest desktop/mobile QA run `42018467034` **PASS** with `menu=PASS`; visual artifact `13410961022`.
+- HSEQ automation is idempotent: validation run `42018467034` reported `writes=0`, `HSEQ_BUILD=ALREADY_PUBLISHED_SKIP_TRIGGER`, `HSEQ_FRONT_READY=PASS`, and `HSEQ_RESULT=PASS`; it did not start another production build.
+- Actions `dabd4449ce8623f7ea814cab35a917a7144e365c` adds the WordPress build-result monitor required by Knowledge. Mock contract `HSEQ_BUILD_MONITOR_TEST=PASS`; future HSEQ-triggered builds lock the exact GitHub run ID through the native WordPress status API, monitor to terminal result, fail on build failure/non-retryable status errors, bound transient retries, and only continue frontend QA after build success.
+- **Do not rerun HSEQ migration/build unless source/CMS changes or a new regression is observed.** Preserve WordPress ownership of Pages/ESC Tables/Header menu and do not hard-code HSEQ Header links in Astro.
+
 ## CURRENT CHECKPOINT — Project detail semantics aligned and production QA PASS (2026-11-05)
 
 - Astro `master` source `886ac10d5158283f997a6c4987281c612b4c8975` (`fix(projects): use project category semantics on detail pages`) keeps generic product behavior outside project routes while treating `/dich-vu/...` / service-root detail entries as projects.
