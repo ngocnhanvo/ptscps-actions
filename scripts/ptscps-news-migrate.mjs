@@ -29,6 +29,7 @@ const decodeEntities=value=>String(value??'')
 const log=(key,value)=>console.log(`NEWS_MIGRATE_${key}=${typeof value==='string'?value:JSON.stringify(value)}`);
 const uri=p=>wp+p;
 const sourceAssetRe=/(?:https?:)?\/\/ptscps\.com\.vn\/wp-content\/uploads\/[^\s"'()<>,]+|\/wp-content\/uploads\/[^\s"'()<>,]+/gi;
+const sourceAssetInTextRe=/(?:https?:)?\/\/ptscps\.com\.vn\/wp-content\/uploads\/|\/wp-content\/uploads\//i;
 const targetCategoryBySourceId=new Map();
 const assetCache=new Map();
 const created={categories:[],media:[],posts:[],pages:[]};
@@ -95,12 +96,27 @@ async function nonce(){
 }
 
 async function api(method,path,n,data,timeout=50000){
-  const response=await page.request.fetch(uri(path),{
-    method,timeout,headers:{'X-WP-Nonce':n,'Cache-Control':'no-cache'},
-    ...(data===undefined?{}:{data}),
-  });
-  const body=await response.json().catch(()=>null);
-  return {response,body};
+  const maxAttempts=method==='GET'?4:1;
+  for(let attempt=1;attempt<=maxAttempts;attempt++){
+    try{
+      const response=await page.request.fetch(uri(path),{
+        method,timeout,headers:{'X-WP-Nonce':n,'Cache-Control':'no-cache'},
+        ...(data===undefined?{}:{data}),
+      });
+      if(method==='GET'&&[429,500,502,503,504].includes(response.status())&&attempt<maxAttempts){
+        log('REST_RETRY',{method,path,attempt,http:response.status()});
+        await sleep(750*attempt);
+        continue;
+      }
+      const body=await response.json().catch(()=>null);
+      return {response,body};
+    }catch(error){
+      if(attempt>=maxAttempts)throw error;
+      log('REST_RETRY',{method,path,attempt,code:String(error?.code||error?.cause?.code||error?.name||'ERROR')});
+      await sleep(750*attempt);
+    }
+  }
+  throw Error(`REST request exhausted ${method} ${path}`);
 }
 
 async function readSource(){
@@ -312,12 +328,21 @@ async function ensureAsset(n,url,meta={}){
   return promise;
 }
 
+function stripLegacyResponsiveAttrs(html){
+  return String(html||'').replace(/<img\b[^>]*>/gi,tag=>{
+    const srcset=tag.match(/\s+srcset=(["'])([\s\S]*?)\1/i);
+    if(!srcset||!sourceAssetInTextRe.test(srcset[2]))return tag;
+    return tag.replace(srcset[0],'').replace(/\s+sizes=(["'])([\s\S]*?)\1/i,'');
+  });
+}
+
 function extractAssets(html){
-  return [...new Set((String(html||'').match(sourceAssetRe)||[]).map(normalizeSourceAsset).filter(Boolean))];
+  const normalizedHtml=stripLegacyResponsiveAttrs(html);
+  return [...new Set((normalizedHtml.match(sourceAssetRe)||[]).map(normalizeSourceAsset).filter(Boolean))];
 }
 
 async function rewriteAssets(n,html){
-  let result=String(html||'');
+  let result=stripLegacyResponsiveAttrs(html);
   const originals=[...new Set(result.match(sourceAssetRe)||[])];
   for(const raw of originals){
     const normalized=normalizeSourceAsset(raw);if(!normalized)continue;
@@ -490,9 +515,10 @@ try{
   for(const url of extractAssets(source.gallery.content))assetSet.add(url);
   log('MEDIA_PLAN',{uniqueAssets:assetSet.size,featuredAttachments:featuredIds.length});
   const assets=[...assetSet];
-  for(let i=0;i<assets.length;i+=4){
-    await Promise.all(assets.slice(i,i+4).map(url=>ensureAsset(n,url)));
-    const done=Math.min(i+4,assets.length);if(done%40===0||done===assets.length)log('MEDIA_PROGRESS',{done,total:assets.length,created:created.media.length});
+  const mediaConcurrency=2;
+  for(let i=0;i<assets.length;i+=mediaConcurrency){
+    await Promise.all(assets.slice(i,i+mediaConcurrency).map(url=>ensureAsset(n,url)));
+    const done=Math.min(i+mediaConcurrency,assets.length);if(done%40===0||done===assets.length)log('MEDIA_PROGRESS',{done,total:assets.length,created:created.media.length});
   }
 
   await migratePosts(source,n,featuredMap);
