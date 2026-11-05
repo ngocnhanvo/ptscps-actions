@@ -146,7 +146,7 @@ const projects = [
   },
 ];
 
-const child1Text = `<h2>(1) Thiết bị tĩnh</h2><h3>Bảo dưỡng/sửa chữa van các loại</h3><p>Cung cấp dịch vụ kiểm tra, đại tu, sửa chữa, hiệu chỉnh bao gồm cung cấp và chế tạo vật tư (spare part) cho van an toàn (pressure safety valve), van điều khiển (control valve) và van tay (manual valve).</p><h3>Bảo dưỡng sửa chữa các thiết bị trao đổi nhiệt (Heat exchanger)</h3><ul><li>Cleaning in place (CIP) – Chemical cleaning</li><li>Shell and tube internal cleaning (high pressure water jetting)</li><li>Tube leaking test and rectification</li><li>Tube/tube bundle repair and replacement</li><li>Clean and anti-corrosion inside the Shell</li><li>Re-assemble &amp; carry out pressure testing</li></ul><h3>Bảo dưỡng sửa chữa các két, bình áp lực (tank and vessel)</h3><ul><li>Hot bolting</li><li>Cleaning/chemical cleaning for the shell, trays, internals / replace internals and other surfaces for visual inspection</li><li>NDT (MPI/UT/PT/RT)</li><li>Inspection by API 510 Inspector</li><li>Corrosion control/Insulation repair</li><li>Defect repair</li><li>Hydro test</li></ul><h2>(2) Thiết bị quay</h2><p>Cung cấp dịch vụ bảo dưỡng, sửa chữa và nâng cấp các thiết bị quay bao gồm Pump (Centrifugal, Screw and Reciprocating pumps), Turbines (Gas turbine, Steam turbine), Compressors (Centrifugal and Reciprocating compressors), Diesel Engines, Boilers and other Rotating equipment.</p><h3>Revamping Steam Turbines package for Phu My Fertilizer</h3><h3>Reciprocating Compressor Overhaul</h3><h2>(3) Thiết bị điện / Tự động hóa</h2><ul><li>Bảo dưỡng, sửa chữa, lắp đặt động cơ điện có công suất lên đến 300KW.</li><li>Bảo dưỡng động cơ điện AC/DC.</li><li>Kiểm tra/Bảo dưỡng các hệ thống điện/kiểm tra bình acqui trên các tàu FPSO/FSO và cho các khách hàng dầu khí.</li><li>Test định kỳ các thiết bị điện.</li><li>Dịch vụ kiểm tra hình ảnh nhiệt cho các thiết bị điện (Dịch vụ CBM).</li></ul>`;
+const child1Text = `<h2>(1) Thiết bị tĩnh</h2><h3>Bảo dưỡng/sửa chữa van các loại</h3><p>Cung cấp dịch vụ kiểm tra, đại tu, sửa chữa, hiệu chỉnh bao gồm cung cấp và chế tạo vật tư (spare part) cho van an toàn (pressure safety valve), van điều khiển (control valve) và van tay (manual valve).</p>{{MEDIA_0_1}}<h3>Bảo dưỡng sửa chữa các thiết bị trao đổi nhiệt (Heat exchanger)</h3><ul><li>Cleaning in place (CIP) – Chemical cleaning</li><li>Shell and tube internal cleaning (high pressure water jetting)</li><li>Tube leaking test and rectification</li><li>Tube/tube bundle repair and replacement</li><li>Clean and anti-corrosion inside the Shell</li><li>Re-assemble &amp; carry out pressure testing</li></ul>{{MEDIA_2_3}}<h3>Bảo dưỡng sửa chữa các két, bình áp lực (tank and vessel)</h3><ul><li>Hot bolting</li><li>Cleaning/chemical cleaning for the shell, trays, internals / replace internals and other surfaces for visual inspection</li><li>NDT (MPI/UT/PT/RT)</li><li>Inspection by API 510 Inspector</li><li>Corrosion control/Insulation repair</li><li>Defect repair</li><li>Hydro test</li></ul>{{MEDIA_4_5}}<h2>(2) Thiết bị quay</h2><p>Cung cấp dịch vụ bảo dưỡng, sửa chữa và nâng cấp các thiết bị quay bao gồm Pump (Centrifugal, Screw and Reciprocating pumps), Turbines (Gas turbine, Steam turbine), Compressors (Centrifugal and Reciprocating compressors), Diesel Engines, Boilers and other Rotating equipment.</p><h3>Revamping Steam Turbines package for Phu My Fertilizer</h3>{{MEDIA_6_9}}<h3>Reciprocating Compressor Overhaul</h3>{{MEDIA_10_13}}<h2>(3) Thiết bị điện / Tự động hóa</h2><ul><li>Bảo dưỡng, sửa chữa, lắp đặt động cơ điện có công suất lên đến 300KW.</li><li>Bảo dưỡng động cơ điện AC/DC.</li><li>Kiểm tra/Bảo dưỡng các hệ thống điện/kiểm tra bình acqui trên các tàu FPSO/FSO và cho các khách hàng dầu khí.</li><li>Test định kỳ các thiết bị điện.</li><li>Dịch vụ kiểm tra hình ảnh nhiệt cho các thiết bị điện (Dịch vụ CBM).</li></ul>{{MEDIA_14_15}}`;
 const child2Text = `<ul><li>Cung cấp quy trình vận hành bảo dưỡng các hệ thống thiết bị nhà máy, công trình công nghiệp.</li><li>Cung cấp nhân sự vận hành, bảo dưỡng sửa chữa lớn các hệ thống thiết bị cho các nhà máy, công trình công nghiệp.</li></ul><p><strong>Năng lực tiêu biểu:</strong> Cung cấp dịch vụ sửa chữa turbine hơi cho Nhà máy đạm Phú Mỹ; đại tu máy nén pittông.</p>`;
 const child3Text = `<ul><li>Lắp dựng giàn giáo phục vụ việc bảo dưỡng sửa chữa/chống ăn mòn trên các tàu FPSO/FSO (năng lực trên 1000m3/lần thực hiện).</li><li>Thực hiện việc chống ăn mòn trên các tàu FPSO/FSO (năng lực thực hiện đến 1200 m2/năm).</li><li>Kiểm tra, sửa chữa, test theo tiêu chuẩn OCIMF (Oil Companies International Marine Forum), lắp đặt ống xuất dầu (floating hose) cho các tàu FPSO/FSO.</li><li>Kiểm tra, cân tâm cho các thiết bị quay tại xưởng và trên các tàu FPSO/FSO.</li><li>Đo UTM cho đường ống công nghệ trên các tàu. Đánh giá &amp; nhận xét về độ giảm chiều dày &amp; lifetime của đường ống.</li><li>Doa, mạ &amp; phun phủ phục hồi các chi tiết/thiết bị cơ khí.</li></ul>`;
 
@@ -447,6 +447,12 @@ function verifyDescription(actualValue, expectedHtml, key) {
     const needle = clean(phrase);
     assert(needle && actualText.includes(needle), `Description phrase missing ${key}: ${needle}`);
   }
+  if (key === 'equipment') {
+    const grids = actual.match(/class=["'][^"']*\bservice-media-grid\b[^"']*["']/gi) || [];
+    const images = actual.match(/<img\b/gi) || [];
+    assert.equal(grids.length, 6, 'Repair equipment description must preserve six legacy media groups');
+    assert.equal(images.length, 16, 'Repair equipment description must preserve sixteen legacy images');
+  }
   if (key === 'parent') {
     assert.equal(actualText, clean(expectedHtml), 'Repair parent taxonomy description should contain only the introductory paragraph');
   }
@@ -489,7 +495,25 @@ async function ensureProject(nonce, category, project, order) {
 }
 
 function descriptionWithMedia(text, media, captions) {
-  const figures=media.map((m,i)=>`<figure><img src="${relativeMediaPath(m)}" alt="${captions[i]||''}" /><figcaption>${captions[i]||''}</figcaption></figure>`).join('');
+  const figure=(index)=>`<figure><img src="${relativeMediaPath(media[index])}" alt="${captions[index]||''}" /><figcaption>${captions[index]||''}</figcaption></figure>`;
+  const mediaGrid=(from,to)=>`<div class="service-media-grid">${Array.from({length:to-from+1},(_,offset)=>figure(from+offset)).join('')}</div>`;
+  const groups = [
+    ['{{MEDIA_0_1}}', 0, 1],
+    ['{{MEDIA_2_3}}', 2, 3],
+    ['{{MEDIA_4_5}}', 4, 5],
+    ['{{MEDIA_6_9}}', 6, 9],
+    ['{{MEDIA_10_13}}', 10, 13],
+    ['{{MEDIA_14_15}}', 14, 15],
+  ];
+  let html=text;
+  let replaced=false;
+  for (const [token,from,to] of groups) {
+    if (!html.includes(token)) continue;
+    html=html.replace(token,mediaGrid(Number(from),Number(to)));
+    replaced=true;
+  }
+  if (replaced) return html;
+  const figures=media.map((_,i)=>figure(i)).join('');
   return `${text}${figures}`;
 }
 
