@@ -3,6 +3,14 @@
 Updated: 2026-11-05
 Code mode: `auto-build`
 
+## CURRENT CHECKPOINT — HSEQ desktop dropdown horizontal overflow fixed and production QA PASS (2026-11-05)
+
+- Root cause was the generic desktop dropdown positioning: flipping `left/right` near the viewport edge did not guarantee the final rendered panel stayed inside the layout viewport, so opening HSEQ at intermediate desktop widths could increase `document.scrollWidth`.
+- Astro `master` commit `4548c470e38029b97dd7658b673cf0706cadeb2c` (`fix(header): clamp desktop dropdowns to viewport`) clamps non-mega dropdown width/position to an 8px viewport gutter instead of hiding overflow globally.
+- Native WordPress Build Website trigger `42042474880` **PASS**; production deploy `42042628923` **PASS** and explicitly deployed Astro commit `4548c470e38029b97dd7658b673cf0706cadeb2c`, including FTP-TLS upload, signed activation and public SSG/home smoke.
+- Production HSEQ regression `42043425600` **PASS**. At viewport `1185x900` after opening HSEQ, `clientWidth=1185`, `documentScrollWidth=1185`, `bodyScrollWidth=1185`, and dropdown bounds are `746.39..1026.39` with width `280`, so opening the menu no longer creates horizontal scrolling. Artifact `13424306805` includes `desktop-1185-hseq-menu-no-overflow.png`.
+- Regression source commit `52c9a26d33a1976524c0b25813834911419c75b9` keeps this measurement in `scripts/ptscps-hseq-setup.mjs`; final QA had `writes=0` and `HSEQ_BUILD=ALREADY_PUBLISHED_SKIP_TRIGGER`, so no redundant deploy was triggered by the regression.
+
 ## CURRENT CHECKPOINT — HSEQ full source/target parity, objective/certificate data and production QA PASS (2026-11-05)
 
 - Acceptance baselines now cover all corrected HSEQ children, not only Policy: `/hseq/chinh-sach-skatmtcl`, `/hseq/muc-tieu-skatmtcl`, and `/hseq/giay-chung-nhan-skatmtcl` on legacy `ptscps.com.vn` versus production target `ptscps.thegioihosting.io.vn`. HSEQ remains WordPress-owned with 5 Pages and ESC Tables `hseq_00_vi` through `hseq_04_vi`.
@@ -12,7 +20,7 @@ Code mode: `auto-build`
 - WordPress-triggered production deploy `42038393361` **PASS** after the objective visible-media update, including Astro build, FTP-TLS upload, signed activation and public smoke. No independent build path was used.
 - Final HSEQ source→target run `42038107618` **PASS** on desktop/mobile; artifact `13420361262`. Required gates all PASS: `SOURCE_INVENTORY_PASS`, `DATA_PARITY_PASS={policyDocuments:3, objectiveVisibleDocuments:2, objectivePdfLinks:1, certificates:3}`, `NAV_PARITY_PASS`, and `VISUAL_PARITY_PASS` for both viewports.
 - Image-load assertions verify actual rendered media: both objective images and all three certificate images report positive `naturalWidth`/`naturalHeight` on desktop/mobile. Artifact screenshots visually confirm the two objective documents plus PDF action and all three certificate documents. This supersedes the earlier weaker `objectiveAssets=2` gate that counted one image plus one PDF without enforcing two visible source images.
-- Current Actions source `dd50ff23c3d12058518ce082fe47c783dbb59469` keeps the independent source oracle and exact WordPress build-run monitor. **Do not weaken objective parity back to link/count-only checks.**
+- HSEQ data-parity baseline was `dd50ff23c3d12058518ce082fe47c783dbb59469`; current Actions source `52c9a26d33a1976524c0b25813834911419c75b9` additionally guards desktop dropdown overflow while retaining the independent source oracle and exact WordPress build-run monitor. **Do not weaken objective parity back to link/count-only checks.**
 - **Do not rerun HSEQ migration/build unless source/CMS/source code changes or a new regression is observed.** Preserve WordPress ownership of Pages/ESC Tables/Header menu and use source-visible-media parity for future HSEQ child pages.
 
 ## CURRENT CHECKPOINT — Project detail semantics aligned and production QA PASS (2026-11-05)
