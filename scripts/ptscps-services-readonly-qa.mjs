@@ -231,6 +231,11 @@ try {
       { title: 'Vận hành và bảo dưỡng sửa chữa các nhà máy, các công trình công nghiệp', slug: 'van-hanh-va-bao-duong-sua-chua-cac-nha-may-cac-cong-trinh-cong-nghiep' },
       { title: 'Các dịch vụ khác', slug: 'cac-dich-vu-khac' },
     ];
+    const repairSummaryNeedles = [
+      ['thiết bị tĩnh', '300KW'],
+      ['Dung Quất', 'FPSO Ruby II'],
+      ['giàn giáo', 'OCIMF', 'UTM'],
+    ];
     const repairProjectTitles = [
       'Dự án bảo dưỡng sửa chữa van trong đợt bảo dưỡng tổng thể lần 4 – Nhà máy lọc dầu Dung Quất',
       'Dự án cung cấp quy trình bảo dưỡng, bảo dưỡng hàng ngày, bảo dưỡng chiến dịch cho trạm nạp liệu ngầm sân bay Tân Sơn Nhất',
@@ -274,9 +279,32 @@ try {
     assert.equal(certificateBoxes.length, 2, `${viewport.name} repair certificate layout items missing`);
     if (viewport.name === 'desktop') assert(Math.abs(certificateBoxes[0].y - certificateBoxes[1].y) <= 4 && certificateBoxes[1].x > certificateBoxes[0].x, 'desktop repair certificates should render side-by-side');
     else assert(certificateBoxes[1].y > certificateBoxes[0].y + 20, 'mobile repair certificates should stack vertically');
-    const repairGroups = page.locator('[data-service-subcategories] a');
+    const repairGroups = page.locator('[data-service-subcategory-row]');
     assert.equal(await repairGroups.count(), 3, `${viewport.name} repair child service count mismatch`);
     assert.deepEqual((await repairGroups.locator('h3').allTextContents()).map(clean), repairChildren.map((item) => item.title), `${viewport.name} repair child service labels mismatch`);
+    const repairGroupSummaries = repairGroups.locator('[data-service-subcategory-summary]');
+    assert.equal(await repairGroupSummaries.count(), 3, `${viewport.name} repair child service summary count mismatch`);
+    const repairSummaryTexts = (await repairGroupSummaries.allTextContents()).map(clean);
+    assert(repairSummaryTexts.every((text) => text.length >= 120), `${viewport.name} repair child service summary too short`);
+    for (let index = 0; index < repairSummaryNeedles.length; index += 1) {
+      for (const phrase of repairSummaryNeedles[index]) {
+        assert(repairSummaryTexts[index].includes(phrase), `${viewport.name} repair child service summary missing ${phrase}`);
+      }
+    }
+    const repairSummaryMetrics = await repairGroupSummaries.evaluateAll((nodes) => nodes.map((node) => ({
+      clientHeight: node.clientHeight,
+      scrollHeight: node.scrollHeight,
+      overflow: getComputedStyle(node).overflow,
+    })));
+    assert(repairSummaryMetrics.every((item) => item.scrollHeight <= item.clientHeight + 2), `${viewport.name} repair child service summary is visually truncated`);
+    assert(repairSummaryMetrics.every((item) => item.overflow !== 'hidden'), `${viewport.name} repair child service summary hides overflow`);
+    const repairGroupBoxes = await repairGroups.evaluateAll((nodes) => nodes.map((node) => { const rect = node.getBoundingClientRect(); return { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width) }; }));
+    assert.equal(repairGroupBoxes.length, 3, `${viewport.name} repair child service row boxes missing`);
+    for (let index = 1; index < repairGroupBoxes.length; index += 1) {
+      assert(repairGroupBoxes[index].y > repairGroupBoxes[index - 1].y + 40, `${viewport.name} repair child services should render one service per row`);
+      assert(Math.abs(repairGroupBoxes[index].x - repairGroupBoxes[0].x) <= 4, `${viewport.name} repair child service rows should share the same left edge`);
+      assert(Math.abs(repairGroupBoxes[index].width - repairGroupBoxes[0].width) <= 4, `${viewport.name} repair child service rows should share the same width`);
+    }
     const repairGroupHrefs = await repairGroups.evaluateAll((nodes) => nodes.map((node) => node.getAttribute('href') || ''));
     assert.deepEqual(repairGroupHrefs.map((href) => new URL(href, frontUrl.origin).pathname), repairChildren.map((item) => `/dich-vu/${item.slug}`), `${viewport.name} repair child service href mismatch`);
     const repairGroupImages = repairGroups.locator('img');
@@ -291,7 +319,7 @@ try {
     assert.equal(await page.locator('[data-service-projects-heading]').count(), 0, `${viewport.name} repair parent should not render project cards`);
     noAdminOrigin(await page.content(), `${viewport.name}-repair-parent`);
     await page.screenshot({ path: `${artifactDir}/${viewport.name}-dich-vu-sua-chua-parent.png`, fullPage: true });
-    console.log(`SERVICES_READONLY_QA_REPAIR_PARENT=${viewport.name}:PASS children=3 legacy_media=3`);
+    console.log(`SERVICES_READONLY_QA_REPAIR_PARENT=${viewport.name}:PASS children=3 summaries=3 layout=single-row legacy_media=3`);
 
     const equipment = repairChildren[0];
     const equipmentResponse = await page.goto(`${front}/dich-vu/${equipment.slug}?_repair_equipment_qa=${Date.now()}`, { waitUntil: 'load', timeout: 50000 });
