@@ -9,6 +9,7 @@ assert(wp && user && pass, 'Missing WordPress origin/admin credentials');
 const parentSlug = 'dich-vu-sua-chua-bao-duong-cac-thiet-bi-va-cong-trinh-cong-nghiep';
 const mediaPrefix = 'ptscps-repair';
 const serviceDetailTableId = `pub_service_${parentSlug}`;
+const equipmentDetailTableId = "pub_service_dich-vu-bao-duong-sua-chua-thiet-bi-tinh-thiet-bi-quay-thiet-bi-dien-va-tu-dong-hoa";
 
 const parent = {
   intro: 'Công ty đã đầu tư xây dựng khu nhà xưởng để thực hiện dịch vụ sửa chữa bảo dưỡng trên diện tích 5000m2 nằm trong khu vực Cảng hạ lưu PTSC, đồng thời cũng đã đầu tư đầy đủ trang thiết bị nhằm phục vụ công tác bảo dưỡng, sửa chữa trên các tàu FPSO/FSO và thực hiện các dịch vụ khác cho khách hàng.',
@@ -418,6 +419,143 @@ async function ensureServiceDetailTable(workshop, certificates) {
   throw Error(`ESC Table readback failed ${serviceDetailTableId}`);
 }
 
+function equipmentDetailTableData(media) {
+  const galleryRows = (indexes) => indexes.map((index) => [
+    'gallery-image',
+    child1Media[index][1],
+    '',
+    `<img src="${relativeMediaPath(media[index])}" alt="${child1Media[index][1]}">`,
+    child1Media[index][0],
+  ]);
+  return [
+    ['type', 'title', 'content', 'img', 'slug'],
+    ['Loại', 'Tiêu đề', 'Nội dung', 'Hình ảnh', 'Slug'],
+    ['section-heading', '(1) Thiết bị tĩnh', '', '', ''],
+    ['subheading', 'Bảo dưỡng/sửa chữa van các loại', '', '', ''],
+    ['prose', '', '<p>Cung cấp dịch vụ kiểm tra, đại tu, sửa chữa, hiệu chỉnh bao gồm cung cấp và chế tạo vật tư (spare part) cho các loại van như sau:</p><ul><li>Van an toàn (pressure safety valve)</li><li>Van điều khiển (control valve)</li><li>Van tay (manual valve)</li></ul>', '', ''],
+    ...galleryRows([0, 1]),
+    ['subheading', 'Bảo dưỡng sửa chữa các thiết bị trao đổi nhiệt (Heat exchanger)', '', '', ''],
+    ['prose', '', '<ul><li>Cleaning in place (CIP) – Chemical cleaning</li><li>Shell and tube internal cleaning (high pressure water jetting)</li><li>Tube leaking test and rectification</li><li>Tube/tube bundle repair and replacement</li><li>Clean and anti-corrosion inside the Shell.</li><li>Re-assemble &amp; Carry out pressure testing</li></ul>', '', ''],
+    ...galleryRows([2, 3]),
+    ['subheading', 'Bảo dưỡng sửa chữa các két, bình áp lực (tank and vessel)', '', '', ''],
+    ['prose', '', '<ul><li>Hot bolting</li><li>Cleaning/ chemical cleaning for the shell, trays, internals / replace internals and other surfaces for visual inspection</li><li>NDT (MPI/UT/PT/RT)</li><li>Inspection by API 510 Inspector</li><li>Corrosion control/Insulation repair</li><li>Defect repair</li><li>Hydro test</li></ul>', '', ''],
+    ...galleryRows([4, 5]),
+    ['section-heading', '(2) Thiết bị quay', '', '', ''],
+    ['prose', '', '<p>Cung cấp dịch vụ bảo dưỡng, sửa chữa và nâng cấp các thiết bị quay bao gồm:</p><ul><li>Pump: Centrifugal, Screw and Reciprocating pumps</li><li>Turbines: Gas turbine, Steam turbine</li><li>Compressors: Centrifugal and Reciprocating compressors</li><li>Diesel Engines, Boilers and other Rotating equipment</li></ul>', '', ''],
+    ['subheading', 'Revamping Steam Turbines package for Phu My Fertilizer', '', '', ''],
+    ...galleryRows([6, 7, 8, 9]),
+    ['subheading', 'Reciprocating Compressor Overhaul', '', '', ''],
+    ...galleryRows([10, 11, 12, 13]),
+    ['section-heading', '(3) Thiết bị điện / Tự động hóa', '', '', ''],
+    ['prose', '', '<ul><li>Bảo dưỡng, sửa chữa, lắp đặt động cơ điện có công suất lên đến 300KW.</li><li>Bảo dưỡng động cơ điện AC/DC</li><li>Kiểm tra/Bảo dưỡng các hệ thống điện/kiểm tra bình acqui trên các tàu FPSO/FSO và cho các khách hàng dầu khí.</li><li>Test định kỳ các thiết bị điện.</li><li>Dịch vụ kiểm tra hình ảnh nhiệt cho các thiết bị điện (Dịch vụ CBM).</li></ul>', '', ''],
+    ...galleryRows([14, 15]),
+  ];
+}
+
+async function readEquipmentDetailTable() {
+  const res = await page.request.get(`${wp}/wp-json/tablepress/v1/table/${encodeURIComponent(equipmentDetailTableId)}?_repair=${Date.now()}`, {
+    timeout: 30000,
+    headers: { 'Cache-Control': 'no-cache' },
+  });
+  if (res.status() === 404) return null;
+  assert(res.ok(), `Equipment ESC Table read HTTP ${res.status()}`);
+  const body = await res.json().catch(() => ({}));
+  return body?.success ? body : null;
+}
+
+function verifyEquipmentDetailTable(table, media) {
+  assert(table?.success, 'Repair equipment ESC Table missing');
+  assert.deepEqual((table.fields || []).map((field) => String(field.key || '')), ['type', 'title', 'content', 'img', 'slug'], 'Repair equipment ESC Table fields mismatch');
+  const items = Array.isArray(table.items) ? table.items : [];
+  const expected = equipmentDetailTableData(media).slice(2);
+  assert.equal(items.length, expected.length, 'Repair equipment ESC Table row count mismatch');
+  let galleryCount = 0;
+  for (let index = 0; index < expected.length; index += 1) {
+    const expectedRow = expected[index];
+    const actual = items[index] || {};
+    assert.equal(String(actual.type || ''), expectedRow[0], `Repair equipment row type mismatch ${index}`);
+    assert.equal(clean(actual.title), clean(expectedRow[1]), `Repair equipment row title mismatch ${index}`);
+    assert.equal(clean(actual.content), clean(expectedRow[2]), `Repair equipment row content mismatch ${index}`);
+    if (expectedRow[0] === 'gallery-image') {
+      galleryCount += 1;
+      const mediaIndex = child1Media.findIndex(([key]) => key === expectedRow[4]);
+      const expectedName = new URL(String(media[mediaIndex]?.source_url || ''), wp).pathname.split('/').pop();
+      assert(expectedName && String(actual.img || '').includes(expectedName), `Repair equipment row image mismatch ${index}`);
+    }
+  }
+  assert.equal(galleryCount, 16, 'Repair equipment ESC Table must preserve sixteen legacy images');
+  report('EQUIPMENT_ESC_TABLE', { id: equipmentDetailTableId, rows: items.length, media: galleryCount, state: 'VERIFIED' });
+  return true;
+}
+
+async function createEquipmentDetailTableShell(rows, columns) {
+  await page.goto(`${wp}/wp-admin/admin.php?page=tablepress&action=add&esc_full_admin=1`, { waitUntil: 'domcontentloaded', timeout: 50000 });
+  const form = page.locator('#tablepress-page-form');
+  assert(await form.count() === 1, 'Equipment ESC Table add form missing');
+  await page.locator('input[name="table[name]"]').fill('Dịch vụ bảo dưỡng sửa chữa thiết bị - Nội dung chi tiết');
+  await page.locator('textarea[name="table[description]"]').fill('Nội dung và hình ảnh trang chi tiết dịch vụ theo đúng thứ tự nguồn gốc.');
+  await page.locator('input[name="table[rows]"]').fill(String(rows));
+  await page.locator('input[name="table[columns]"]').fill(String(columns));
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 50000 }),
+    form.evaluate((element) => element.requestSubmit()),
+  ]);
+  const temporaryId = new URL(page.url()).searchParams.get('table_id');
+  assert(temporaryId, `Equipment ESC Table creation did not return table_id: ${page.url()}`);
+  return temporaryId;
+}
+
+async function saveEquipmentDetailTable(editId, data) {
+  await page.goto(`${wp}/wp-admin/admin.php?page=tablepress&action=edit&table_id=${encodeURIComponent(editId)}&esc_full_admin=1`, { waitUntil: 'domcontentloaded', timeout: 50000 });
+  await page.waitForFunction(() => Boolean(globalThis.tp?.nonces?.edit_table && globalThis.tp?.table?.id), null, { timeout: 20000 });
+  const state = await page.evaluate(() => ({ nonce: String(globalThis.tp?.nonces?.edit_table || ''), id: String(globalThis.tp?.table?.id || ''), options: globalThis.tp?.table?.options || {} }));
+  assert(state.nonce && state.id, 'Equipment ESC Table edit state missing');
+  const visibility = { rows: Array(data.length).fill(1), columns: Array(data[0].length).fill(1) };
+  const res = await page.request.post(`${wp}/wp-admin/admin-ajax.php`, {
+    form: {
+      action: 'tablepress_save_table',
+      _ajax_nonce: state.nonce,
+      'tablepress[id]': state.id,
+      'tablepress[new_id]': equipmentDetailTableId,
+      'tablepress[name]': 'Dịch vụ bảo dưỡng sửa chữa thiết bị - Nội dung chi tiết',
+      'tablepress[description]': 'Nội dung và hình ảnh trang chi tiết dịch vụ theo đúng thứ tự nguồn gốc.',
+      'tablepress[data]': JSON.stringify(data),
+      'tablepress[options]': JSON.stringify(state.options),
+      'tablepress[visibility]': JSON.stringify(visibility),
+      'tablepress[number][rows]': String(data.length),
+      'tablepress[number][columns]': String(data[0].length),
+    },
+    timeout: 60000,
+  });
+  const body = await res.json().catch(() => ({}));
+  assert(res.ok() && body?.success === true, `Equipment ESC Table save failed HTTP ${res.status()} ${JSON.stringify(body).slice(0, 500)}`);
+  assert.equal(String(body.table_id || equipmentDetailTableId), equipmentDetailTableId, 'Equipment ESC Table ID mismatch after save');
+}
+
+async function ensureEquipmentDetailTable(media) {
+  const data = equipmentDetailTableData(media);
+  const existing = await readEquipmentDetailTable();
+  if (existing) {
+    try {
+      verifyEquipmentDetailTable(existing, media);
+      report('EQUIPMENT_ESC_TABLE_WRITE', { id: equipmentDetailTableId, state: 'ALREADY_CORRECT_SKIP_WRITE' });
+      return false;
+    } catch {}
+  }
+  const editId = existing ? equipmentDetailTableId : await createEquipmentDetailTableShell(data.length, data[0].length);
+  await saveEquipmentDetailTable(editId, data);
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    await sleep(500);
+    const readback = await readEquipmentDetailTable();
+    try {
+      verifyEquipmentDetailTable(readback, media);
+      report('EQUIPMENT_ESC_TABLE_WRITE', { id: equipmentDetailTableId, state: existing ? 'UPDATED_VERIFIED' : 'CREATED_VERIFIED' });
+      return true;
+    } catch {}
+  }
+  throw Error(`Equipment ESC Table readback failed ${equipmentDetailTableId}`);
+}
+
 async function setCategoryThumbnail(termId, mediaId, slug) {
   const feed = await categoryFeed();
   const current = feed.find((x)=>Number(x.id)===Number(termId));
@@ -446,31 +584,6 @@ function verifyDescription(actualValue, expectedHtml, key) {
   for (const phrase of required) {
     const needle = clean(phrase);
     assert(needle && actualText.includes(needle), `Description phrase missing ${key}: ${needle}`);
-  }
-  if (key === 'equipment') {
-    const images = actual.match(/<img\b/gi) || [];
-    assert.equal(images.length, 16, 'Repair equipment description must preserve sixteen legacy images');
-    const orderMarkers = [
-      '(1) Thiết bị tĩnh',
-      `${mediaPrefix}-static-valve`,
-      'Bảo dưỡng sửa chữa các thiết bị trao đổi nhiệt (Heat exchanger)',
-      `${mediaPrefix}-heat-exchanger-1`,
-      'Bảo dưỡng sửa chữa các két, bình áp lực',
-      `${mediaPrefix}-tank-vessel-1`,
-      '(2) Thiết bị quay',
-      'Revamping Steam Turbines package for Phu My Fertilizer',
-      `${mediaPrefix}-phu-my-1`,
-      'Reciprocating Compressor Overhaul',
-      `${mediaPrefix}-compressor-1`,
-      '(3) Thiết bị điện / Tự động hóa',
-      `${mediaPrefix}-electrical-1`,
-    ];
-    let previous = -1;
-    for (const marker of orderMarkers) {
-      const position = actual.indexOf(marker);
-      assert(position > previous, `Repair equipment legacy order mismatch at ${marker}`);
-      previous = position;
-    }
   }
   if (key === 'parent') {
     assert.equal(actualText, clean(expectedHtml), 'Repair parent taxonomy description should contain only the introductory paragraph');
@@ -560,7 +673,8 @@ try {
     await setCategoryThumbnail(capability.id,child1Images[i].id,capability.slug);
   }
   await ensureCategoryOrder(child1.id,capabilityRows,child1Capabilities,'CAPABILITY_ORDER');
-  await ensureDescription(nonce,child1,descriptionWithMedia(child1Text,child1Images,child1Media.map(x=>x[1])),'equipment');
+  await ensureDescription(nonce,child1,child1Text.replace(/\{\{MEDIA_\d+_\d+\}\}/g,''),'equipment');
+  await ensureEquipmentDetailTable(child1Images);
   await ensureDescription(nonce,child2,child2Text,'plants');
   await ensureDescription(nonce,child3,child3Text,'other');
 
