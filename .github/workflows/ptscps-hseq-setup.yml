@@ -9,6 +9,7 @@ on:
       - '.github/workflows/ptscps-hseq-setup.yml'
 permissions:
   contents: read
+  actions: read
 concurrency:
   group: ptscps-hseq-cms-setup
   cancel-in-progress: false
@@ -54,6 +55,7 @@ jobs:
         env:
           WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
           WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: node scripts/ptscps-hseq-setup.mjs
       - name: Upload HSEQ visual QA
         if: always()
