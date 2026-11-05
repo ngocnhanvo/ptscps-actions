@@ -213,8 +213,19 @@ async function ensurePage(def,parentId,n){
   await page.goto(uri('/wp-admin/post-new.php?post_type=page&esc_full_admin=1'),{waitUntil:'domcontentloaded',timeout:45000});
   await page.locator('#title').fill(def.title);
   await setAcf('key',def.key);await setAcf('action','IntroPage');await setAcf('product_lang','vi');
-  const htmlTab=page.locator('#content-html');if(await htmlTab.count())await htmlTab.click();
-  await page.locator('#content').fill(desired);
+  // Classic Editor keeps #content hidden while TinyMCE is in visual mode.
+  // Update both the editor and underlying textarea; Playwright.fill requires
+  // visibility and otherwise times out on this installation.
+  await page.evaluate((shortcode)=>{
+    const editor=window.tinymce?.get('content');
+    if(editor){ editor.setContent(shortcode); editor.save(); }
+    const raw=document.querySelector('#content');
+    if(!raw)throw Error('Classic Editor content field missing');
+    raw.value=shortcode;
+    raw.dispatchEvent(new Event('input',{bubbles:true}));
+    raw.dispatchEvent(new Event('change',{bubbles:true}));
+  },desired);
+  assert((await page.locator('#content').inputValue()).includes(def.id),'Shortcode not applied to Classic Editor');
   const parent=page.locator('#parent_id');
   if(parentId && await parent.count())await parent.selectOption(String(parentId));
   await page.locator('#save-post').click();
