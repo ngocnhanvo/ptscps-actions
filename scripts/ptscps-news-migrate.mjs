@@ -167,7 +167,20 @@ async function sourceMediaByIds(ids,posts=[]){
       const row=await direct.json();
       if(Number(row?.id)===Number(id)){result.set(Number(id),row);log('FEATURED_MEDIA_RECOVERED',{id,state:'DIRECT_READ'});continue;}
     }
-    const refs=posts.filter(post=>Number(post.featuredMedia)===Number(id)).map(post=>({id:post.id,slug:post.slug,title:post.title,contentAssets:extractAssets(post.content).slice(0,3)}));
+    const matchingPosts=posts.filter(post=>Number(post.featuredMedia)===Number(id));
+    let recovered=null;
+    for(const post of matchingPosts){
+      const tagPattern=new RegExp(`<img\\b[^>]*class=["'][^"']*\\bwp-image-${id}\\b[^"']*["'][^>]*>`,'i');
+      const tag=String(post.content||'').match(tagPattern)?.[0]||'';
+      const src=tag.match(/\\bsrc=["']([^"']+)["']/i)?.[1]||'';
+      const sourceUrl=normalizeSourceAsset(src);
+      if(!sourceUrl)continue;
+      const alt=tag.match(/\\balt=["']([^"']*)["']/i)?.[1]||'';
+      recovered={id:Number(id),slug:`legacy-media-${id}`,source_url:sourceUrl,alt_text:decodeEntities(alt),title:post.title,caption:'',mime_type:''};
+      break;
+    }
+    if(recovered){result.set(Number(id),recovered);log('FEATURED_MEDIA_RECOVERED',{id,state:'CONTENT_WP_IMAGE',source_url:recovered.source_url});continue;}
+    const refs=matchingPosts.map(post=>({id:post.id,slug:post.slug,title:post.title,contentAssets:extractAssets(post.content).slice(0,3)}));
     log('FEATURED_MEDIA_MISSING',{id,http:direct.status(),posts:refs});
   }
   for(const id of ids) assert(result.has(id),`Legacy featured media missing ${id}`);
