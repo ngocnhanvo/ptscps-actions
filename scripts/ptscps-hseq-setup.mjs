@@ -628,51 +628,75 @@ async function qa(){
       }
       await p.screenshot({path:`${artifactDir}/desktop-hseq-menu.png`,fullPage:false});
 
-      // Regression for the real intermediate desktop width reported by the owner:
-      // opening a right-edge dropdown must never make the document horizontally scrollable.
-      const overflowView=await browser.newContext({viewport:{width:1185,height:900}});
-      const overflowPage=await overflowView.newPage();
-      try{
-        const overflowResponse=await overflowPage.goto(`${front}/hseq/giay-chung-nhan-skatmtcl?_qa_menu_overflow=${Date.now()}`,{waitUntil:'load',timeout:50000});
-        assert(overflowResponse?.status()===200,'HSEQ overflow regression page HTTP failure');
-        const before=await overflowPage.evaluate(()=>({
-          innerWidth:window.innerWidth,
-          clientWidth:document.documentElement.clientWidth,
-          documentScrollWidth:document.documentElement.scrollWidth,
-          bodyScrollWidth:document.body.scrollWidth,
-        }));
-        assert(before.documentScrollWidth<=before.clientWidth+2,`HSEQ pre-menu horizontal overflow at 1185px: ${JSON.stringify(before)}`);
-        assert(before.bodyScrollWidth<=before.clientWidth+2,`HSEQ pre-menu body overflow at 1185px: ${JSON.stringify(before)}`);
+      // Diagnose horizontal overflow across the desktop widths used in production.
+      // Keep this read-only: it must not mutate WordPress or trigger a build.
+      const overflowWidths=[1185,1366,1440,1536,1600,1624];
+      for(const overflowWidth of overflowWidths){
+        const overflowView=await browser.newContext({viewport:{width:overflowWidth,height:900}});
+        const overflowPage=await overflowView.newPage();
+        try{
+          const overflowResponse=await overflowPage.goto(`${front}/hseq/giay-chung-nhan-skatmtcl?_qa_menu_overflow=${overflowWidth}-${Date.now()}`,{waitUntil:'load',timeout:50000});
+          assert(overflowResponse?.status()===200,`HSEQ overflow regression page HTTP failure at ${overflowWidth}px`);
+          const collectOverflow=()=>overflowPage.evaluate(()=> {
+            const root=document.documentElement;
+            const clientWidth=root.clientWidth;
+            const elements=[...document.querySelectorAll('*')].map((node,index)=>{
+              const element=node;
+              const rect=element.getBoundingClientRect();
+              const style=getComputedStyle(element);
+              const rightOverflow=Math.max(0,rect.right-clientWidth);
+              const leftOverflow=Math.max(0,-rect.left);
+              return {
+                index,
+                tag:element.tagName.toLowerCase(),
+                id:element.id||'',
+                className:typeof element.className==='string'?element.className.slice(0,180):'',
+                rect:{left:rect.left,right:rect.right,width:rect.width,top:rect.top,bottom:rect.bottom},
+                rightOverflow,
+                leftOverflow,
+                position:style.position,
+                overflowX:style.overflowX,
+              };
+            }).filter(item=>(item.rightOverflow>1||item.leftOverflow>1)&&item.rect.width>0&&item.rect.bottom>0)
+              .sort((a,b)=>Math.max(b.rightOverflow,b.leftOverflow)-Math.max(a.rightOverflow,a.leftOverflow))
+              .slice(0,24);
+            return {
+              innerWidth:window.innerWidth,
+              clientWidth,
+              documentScrollWidth:root.scrollWidth,
+              bodyScrollWidth:document.body.scrollWidth,
+              scrollX:window.scrollX,
+              offenders:elements,
+            };
+          });
+          const before=await collectOverflow();
 
-        const overflowToggle=overflowPage.locator('#header-navrow button').filter({hasText:'HSEQ'}).first();
-        assert(await overflowToggle.isVisible(),'HSEQ overflow regression menu button missing');
-        await overflowToggle.click();
-        const overflowPanelId=await overflowToggle.getAttribute('aria-controls');
-        assert(overflowPanelId,'HSEQ overflow regression panel id missing');
-        const overflowPanel=overflowPage.locator(`#${overflowPanelId}`);
-        await overflowPanel.waitFor({state:'visible',timeout:5000});
-        await overflowPage.waitForTimeout(250);
-        const opened=await overflowPage.evaluate(panelId=>{
-          const panel=document.getElementById(panelId);
-          const rect=panel?.getBoundingClientRect();
-          return {
-            innerWidth:window.innerWidth,
-            clientWidth:document.documentElement.clientWidth,
-            documentScrollWidth:document.documentElement.scrollWidth,
-            bodyScrollWidth:document.body.scrollWidth,
-            panelLeft:rect?.left??null,
-            panelRight:rect?.right??null,
-            panelWidth:rect?.width??null,
-          };
-        },overflowPanelId);
-        assert(opened.documentScrollWidth<=opened.clientWidth+2,`HSEQ menu horizontal overflow at 1185px: ${JSON.stringify(opened)}`);
-        assert(opened.bodyScrollWidth<=opened.clientWidth+2,`HSEQ menu body overflow at 1185px: ${JSON.stringify(opened)}`);
-        assert(opened.panelLeft!==null&&opened.panelLeft>=6,`HSEQ menu panel escapes left viewport: ${JSON.stringify(opened)}`);
-        assert(opened.panelRight!==null&&opened.panelRight<=opened.innerWidth-6,`HSEQ menu panel escapes right viewport: ${JSON.stringify(opened)}`);
-        log('HEADER_MENU_OVERFLOW_PASS',opened);
-        await overflowPage.screenshot({path:`${artifactDir}/desktop-1185-hseq-menu-no-overflow.png`,fullPage:false});
-      }finally{
-        await overflowView.close();
+          const overflowToggle=overflowPage.locator('#header-navrow button').filter({hasText:'HSEQ'}).first();
+          assert(await overflowToggle.isVisible(),`HSEQ overflow regression menu button missing at ${overflowWidth}px`);
+          await overflowToggle.click();
+          const overflowPanelId=await overflowToggle.getAttribute('aria-controls');
+          assert(overflowPanelId,`HSEQ overflow regression panel id missing at ${overflowWidth}px`);
+          const overflowPanel=overflowPage.locator(`#${overflowPanelId}`);
+          await overflowPanel.waitFor({state:'visible',timeout:5000});
+          await overflowPage.waitForTimeout(250);
+
+          const opened=await collectOverflow();
+          const panelRect=await overflowPanel.evaluate(panel=>{
+            const rect=panel.getBoundingClientRect();
+            return {left:rect.left,right:rect.right,width:rect.width};
+          });
+          log('HEADER_MENU_OVERFLOW_DIAGNOSTIC',{overflowWidth,before,opened,panelRect});
+          assert(opened.documentScrollWidth<=opened.clientWidth+2,`HSEQ menu horizontal overflow at ${overflowWidth}px: ${JSON.stringify(opened)}`);
+          assert(opened.bodyScrollWidth<=opened.clientWidth+2,`HSEQ menu body overflow at ${overflowWidth}px: ${JSON.stringify(opened)}`);
+          assert(panelRect.left>=6,`HSEQ menu panel escapes left viewport at ${overflowWidth}px: ${JSON.stringify(panelRect)}`);
+          assert(panelRect.right<=opened.innerWidth-6,`HSEQ menu panel escapes right viewport at ${overflowWidth}px: ${JSON.stringify(panelRect)}`);
+          log('HEADER_MENU_OVERFLOW_PASS',{overflowWidth,...opened,panelRect});
+          if(overflowWidth===1624){
+            await overflowPage.screenshot({path:`${artifactDir}/desktop-1624-hseq-menu-overflow-diagnostic.png`,fullPage:false});
+          }
+        }finally{
+          await overflowView.close();
+        }
       }
     }else{
       const hamburger=p.locator('#hamburger-btn');
