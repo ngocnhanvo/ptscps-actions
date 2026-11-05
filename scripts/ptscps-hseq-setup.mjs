@@ -665,11 +665,14 @@ async function qa(){
               clientWidth,
               documentScrollWidth:root.scrollWidth,
               bodyScrollWidth:document.body.scrollWidth,
+              rootOverflowX:getComputedStyle(root).overflowX,
+              bodyOverflowX:getComputedStyle(document.body).overflowX,
               scrollX:window.scrollX,
               offenders:elements,
             };
           });
           const before=await collectOverflow();
+          assert(before.rootOverflowX==='clip'&&before.bodyOverflowX==='clip',`HSEQ root horizontal clip missing at ${overflowWidth}px: ${JSON.stringify(before)}`);
 
           const overflowToggle=overflowPage.locator('#header-navrow button').filter({hasText:'HSEQ'}).first();
           assert(await overflowToggle.isVisible(),`HSEQ overflow regression menu button missing at ${overflowWidth}px`);
