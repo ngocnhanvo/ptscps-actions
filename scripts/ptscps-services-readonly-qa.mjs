@@ -224,6 +224,110 @@ try {
     noAdminOrigin(await page.content(), `${viewport.name}-design-service-detail`);
     await page.screenshot({ path: `${artifactDir}/${viewport.name}-dich-vu-thiet-ke-detail.png`, fullPage: true });
     console.log(`SERVICES_READONLY_QA_DESIGN=${viewport.name}:PASS capabilities=4 projects=5 project_images=5`);
+    const repairService = services.find((item) => item.slug === 'dich-vu-sua-chua-bao-duong-cac-thiet-bi-va-cong-trinh-cong-nghiep');
+    assert(repairService, 'Repair service fixture missing');
+    const repairChildren = [
+      { title: 'Dịch vụ Bảo dưỡng, sửa chữa thiết bị tĩnh, thiết bị quay, thiết bị điện và tự động hóa', slug: 'dich-vu-bao-duong-sua-chua-thiet-bi-tinh-thiet-bi-quay-thiet-bi-dien-va-tu-dong-hoa' },
+      { title: 'Vận hành và bảo dưỡng sửa chữa các nhà máy, các công trình công nghiệp', slug: 'van-hanh-va-bao-duong-sua-chua-cac-nha-may-cac-cong-trinh-cong-nghiep' },
+      { title: 'Các dịch vụ khác', slug: 'cac-dich-vu-khac' },
+    ];
+    const repairProjectTitles = [
+      'Dự án bảo dưỡng sửa chữa van trong đợt bảo dưỡng tổng thể lần 4 – Nhà máy lọc dầu Dung Quất',
+      'Dự án cung cấp quy trình bảo dưỡng, bảo dưỡng hàng ngày, bảo dưỡng chiến dịch cho trạm nạp liệu ngầm sân bay Tân Sơn Nhất',
+      'Dự án bảo dưỡng sửa chữa và cung cấp vật tư cho toàn bộ van đường ống cho nhà máy Lọc hóa dầu Nghi Sơn',
+      'Dự án kiểm tra, hiệu chỉnh và sửa chữa van an toàn thuộc Gói 1 – PSV dự án DCSM (Turnaround) cho nhà máy Lọc hóa dầu Nghi Sơn',
+      'Thực hiện dịch vụ sửa chữa turbine hơi cho Nhà máy đạm Phú Mỹ',
+      'Dự án bảo dưỡng, sửa chữa van tại Nhà máy lọc hóa dầu Bình Sơn',
+      'Dự án sửa chữa tank két trên tàu FPSO RUBY II cho khách hàng VOFT',
+      'Bảo dưỡng, sửa chữa ống Floating Hose trên tàu FSO MV17 cho khách hàng MODEC',
+    ];
+
+    const repairParentResponse = await page.goto(`${front}/dich-vu/${repairService.slug}?_repair_parent_qa=${Date.now()}`, { waitUntil: 'load', timeout: 50000 });
+    assert(repairParentResponse?.status() === 200, `${viewport.name} repair parent HTTP ${repairParentResponse?.status()}`);
+    assert.equal(clean(await page.locator('h1').first().textContent()), repairService.title, `${viewport.name} repair parent H1 mismatch`);
+    const repairParentDescription = page.locator('[data-service-category-description]');
+    assert(await repairParentDescription.isVisible(), `${viewport.name} repair parent description missing`);
+    const repairParentText = clean(await repairParentDescription.textContent());
+    assert(repairParentText.includes('5000m2'), `${viewport.name} repair workshop introduction missing`);
+    assert(repairParentText.includes('ASME'), `${viewport.name} repair ASME introduction missing`);
+    const repairGroups = page.locator('[data-service-subcategories] a');
+    assert.equal(await repairGroups.count(), 3, `${viewport.name} repair child service count mismatch`);
+    assert.deepEqual((await repairGroups.locator('h3').allTextContents()).map(clean), repairChildren.map((item) => item.title), `${viewport.name} repair child service labels mismatch`);
+    const repairGroupHrefs = await repairGroups.evaluateAll((nodes) => nodes.map((node) => node.getAttribute('href') || ''));
+    assert.deepEqual(repairGroupHrefs.map((href) => new URL(href, frontUrl.origin).pathname), repairChildren.map((item) => `/dich-vu/${item.slug}`), `${viewport.name} repair child service href mismatch`);
+    assert.equal(await page.locator('[data-service-projects-heading]').count(), 0, `${viewport.name} repair parent should not render project cards`);
+    noAdminOrigin(await page.content(), `${viewport.name}-repair-parent`);
+    await page.screenshot({ path: `${artifactDir}/${viewport.name}-dich-vu-sua-chua-parent.png`, fullPage: true });
+    console.log(`SERVICES_READONLY_QA_REPAIR_PARENT=${viewport.name}:PASS children=3`);
+
+    const equipment = repairChildren[0];
+    const equipmentResponse = await page.goto(`${front}/dich-vu/${equipment.slug}?_repair_equipment_qa=${Date.now()}`, { waitUntil: 'load', timeout: 50000 });
+    assert(equipmentResponse?.status() === 200, `${viewport.name} repair equipment HTTP ${equipmentResponse?.status()}`);
+    assert.equal(clean(await page.locator('h1').first().textContent()), equipment.title, `${viewport.name} repair equipment H1 mismatch`);
+    const equipmentDescription = page.locator('[data-service-category-description]');
+    assert(await equipmentDescription.isVisible(), `${viewport.name} repair equipment description missing`);
+    const equipmentText = clean(await equipmentDescription.textContent());
+    for (const phrase of ['(1) Thiết bị tĩnh', '(2) Thiết bị quay', '(3) Thiết bị điện / Tự động hóa']) {
+      assert(equipmentText.includes(phrase), `${viewport.name} repair equipment section missing: ${phrase}`);
+    }
+    const repairCapabilities = page.locator('[data-service-capability-gallery] figure');
+    assert.equal(await repairCapabilities.count(), 16, `${viewport.name} repair capability count mismatch`);
+    const repairCapabilityImages = repairCapabilities.locator('img');
+    assert.equal(await repairCapabilityImages.count(), 16, `${viewport.name} repair capability image count mismatch`);
+    for (let i = 0; i < 16; i += 1) {
+      await repairCapabilityImages.nth(i).scrollIntoViewIfNeeded();
+      await page.waitForFunction((index) => {
+        const image = document.querySelectorAll('[data-service-capability-gallery] img')[index];
+        return image && image.complete && image.naturalWidth > 0;
+      }, i, { timeout: 12000 });
+    }
+    assert.equal(await page.locator('[data-service-projects-heading]').count(), 0, `${viewport.name} repair equipment should not render project cards`);
+    noAdminOrigin(await page.content(), `${viewport.name}-repair-equipment`);
+    await page.screenshot({ path: `${artifactDir}/${viewport.name}-dich-vu-sua-chua-thiet-bi.png`, fullPage: true });
+    console.log(`SERVICES_READONLY_QA_REPAIR_EQUIPMENT=${viewport.name}:PASS capabilities=16`);
+
+    const plant = repairChildren[1];
+    const plantResponse = await page.goto(`${front}/dich-vu/${plant.slug}?_repair_plant_qa=${Date.now()}`, { waitUntil: 'load', timeout: 50000 });
+    assert(plantResponse?.status() === 200, `${viewport.name} repair plant HTTP ${plantResponse?.status()}`);
+    assert.equal(clean(await page.locator('h1').first().textContent()), plant.title, `${viewport.name} repair plant H1 mismatch`);
+    const plantDescription = page.locator('[data-service-category-description]');
+    assert(await plantDescription.isVisible(), `${viewport.name} repair plant description missing`);
+    assert(clean(await plantDescription.textContent()).includes('Cung cấp quy trình vận hành bảo dưỡng'), `${viewport.name} repair plant intro missing`);
+    const plantHeading = page.locator('[data-service-projects-heading]');
+    assert(await plantHeading.isVisible(), `${viewport.name} repair plant project heading missing`);
+    assert.equal(clean(await plantHeading.textContent()), 'Các dự án đã thực hiện', `${viewport.name} repair plant project heading mismatch`);
+    const repairProjectCards = page.locator('[data-service-projects-heading] + div article');
+    assert.equal(await repairProjectCards.count(), 8, `${viewport.name} repair project card count mismatch`);
+    assert.deepEqual((await repairProjectCards.locator('h2').allTextContents()).map(clean), repairProjectTitles, `${viewport.name} repair project order/title mismatch`);
+    const repairProjectImages = repairProjectCards.locator('img');
+    assert.equal(await repairProjectImages.count(), 8, `${viewport.name} repair projects should show one representative image each`);
+    assert.equal(await repairProjectCards.locator('[data-service-project-gallery]').count(), 0, `${viewport.name} repair project gallery should not render`);
+    const repairScopeMetrics = await repairProjectCards.locator('[data-service-project-scope]').evaluateAll((nodes) => nodes.map((node) => ({
+      clientHeight: node.clientHeight,
+      scrollHeight: node.scrollHeight,
+      overflow: getComputedStyle(node).overflow,
+    })));
+    assert(repairScopeMetrics.every((item) => item.scrollHeight <= item.clientHeight + 2), `${viewport.name} repair project scope is visually truncated`);
+    assert(repairScopeMetrics.every((item) => item.overflow !== 'hidden'), `${viewport.name} repair project scope hides overflow`);
+    noAdminOrigin(await page.content(), `${viewport.name}-repair-plant`);
+    await page.screenshot({ path: `${artifactDir}/${viewport.name}-dich-vu-sua-chua-nha-may.png`, fullPage: true });
+    console.log(`SERVICES_READONLY_QA_REPAIR_PLANT=${viewport.name}:PASS projects=8 project_images=8`);
+
+    const other = repairChildren[2];
+    const otherResponse = await page.goto(`${front}/dich-vu/${other.slug}?_repair_other_qa=${Date.now()}`, { waitUntil: 'load', timeout: 50000 });
+    assert(otherResponse?.status() === 200, `${viewport.name} repair other HTTP ${otherResponse?.status()}`);
+    assert.equal(clean(await page.locator('h1').first().textContent()), other.title, `${viewport.name} repair other H1 mismatch`);
+    const otherDescription = page.locator('[data-service-category-description]');
+    assert(await otherDescription.isVisible(), `${viewport.name} repair other description missing`);
+    const otherText = clean(await otherDescription.textContent());
+    assert(otherText.includes('Lắp dựng giàn giáo'), `${viewport.name} repair other scaffolding content missing`);
+    assert(otherText.includes('OCIMF'), `${viewport.name} repair other OCIMF content missing`);
+    assert.equal(await page.locator('[data-service-projects-heading]').count(), 0, `${viewport.name} repair other should not render project cards`);
+    const repairOverflow = await page.evaluate(() => ({ client: document.documentElement.clientWidth, scroll: document.documentElement.scrollWidth }));
+    assert(repairOverflow.scroll <= repairOverflow.client + 2, `${viewport.name} repair nested route horizontal overflow`);
+    noAdminOrigin(await page.content(), `${viewport.name}-repair-other`);
+    await page.screenshot({ path: `${artifactDir}/${viewport.name}-dich-vu-sua-chua-khac.png`, fullPage: true });
+    console.log(`SERVICES_READONLY_QA_REPAIR_OTHER=${viewport.name}:PASS`);
     await context.close();
   }
 
