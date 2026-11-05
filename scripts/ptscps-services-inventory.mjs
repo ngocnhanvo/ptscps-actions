@@ -46,6 +46,25 @@ async function inspectLegacyServiceCards() {
   });
 }
 
+async function inspectLegacyRepairDetail() {
+  const legacy = 'https://ptscps.com.vn/dich-vu/dich-vu-sua-chua-bao-duong-cac-thiet-bi-va-cong-trinh-cong-nghiep';
+  const response = await fetch(legacy, { headers:{ 'User-Agent':'Mozilla/5.0 PTSCPS migration audit' } });
+  assert(response.ok, `Legacy repair detail HTTP ${response.status}`);
+  const html = await response.text();
+  const images = [...html.matchAll(/<img\\b[^>]*(?:src|data-src)=["']([^"']+)["'][^>]*>/gi)]
+    .map((match) => new URL(match[1], legacy).href)
+    .filter((url, index, rows) => rows.indexOf(url) === index);
+  const contentStart = html.search(/5000m2|5000\\s*m2|5000\\s*SQM/i);
+  const contentEnd = html.search(/Các dịch vụ sửa chữa bảo dưỡng được Công ty thực hiện bao gồm|We have been providing Maintenance and Repair services including/i);
+  const content = contentStart >= 0
+    ? html.slice(Math.max(0, contentStart - 2500), contentEnd > contentStart ? contentEnd + 2500 : contentStart + 12000)
+    : html;
+  const contentImages = [...content.matchAll(/<img\\b[^>]*(?:src|data-src)=["']([^"']+)["'][^>]*>/gi)]
+    .map((match) => new URL(match[1], legacy).href)
+    .filter((url, index, rows) => rows.indexOf(url) === index);
+  return { images, contentImages };
+}
+
 async function inspectProductCatRest() {
   const routeIndex = await fetch(wp + '/wp-json/', { headers:{Accept:'application/json'} });
   assert(routeIndex.ok, `REST index HTTP ${routeIndex.status}`);
@@ -61,7 +80,7 @@ const [{data: categories},{data: menus},{data: pages},products] = await Promise.
   pagedProducts(),
 ]);
 
-const [legacyMedia, productCatRest] = await Promise.all([inspectLegacyServiceCards(), inspectProductCatRest()]);
+const [legacyMedia, legacyRepair, productCatRest] = await Promise.all([inspectLegacyServiceCards(), inspectLegacyRepairDetail(), inspectProductCatRest()]);
 
 assert(Array.isArray(categories), 'Product categories payload invalid');
 assert(Array.isArray(pages), 'Pages payload invalid');
@@ -91,5 +110,6 @@ console.log('SERVICE_INVENTORY_PRODUCTS='+JSON.stringify(productRows));
 console.log('SERVICE_INVENTORY_PAGES='+JSON.stringify(pageRows));
 console.log('SERVICE_INVENTORY_HEADER_VI='+JSON.stringify(viMenu));
 console.log('SERVICE_INVENTORY_LEGACY_MEDIA='+JSON.stringify(legacyMedia));
+console.log('SERVICE_INVENTORY_LEGACY_REPAIR='+JSON.stringify(legacyRepair));
 console.log('SERVICE_INVENTORY_PRODUCT_CAT_REST='+JSON.stringify(productCatRest));
 console.log(`SERVICE_INVENTORY_SUMMARY=${JSON.stringify({categories:categories.length,products:productRows.length,pages:pageRows.length,menuItems:Array.isArray(viMenu?.items)?viMenu.items.length:0})}`);
