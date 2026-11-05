@@ -3,6 +3,15 @@
 Updated: 2026-11-05
 Code mode: `auto-build`
 
+## CURRENT CHECKPOINT — Project detail isolated from service landing content and production QA PASS (2026-11-05)
+
+- Root cause fixed in the generic product-detail route: `src/pages/ssr/products/[slug]/detail.astro` previously rendered `ExtractHTML` from the product-list page in an attempt to reuse a banner, which injected the entire `/dich-vu` landing content above project details. The detail route now renders only `ProductDetailsPage`; no project slug is hard-coded.
+- Astro `master` source `442ae298c236ba8df012a88468e0e0e1568c57b8` (`fix(projects): remove service listing from project details`) passed `source-commit-actions` run `41991543813`. The earlier v1 control request failed during Base64 decrypt before target checkout/apply and is superseded; do not rerun it.
+- Native WordPress Build Website trigger `41991745468` **PASS**; production deploy `41991850775` **PASS** and explicitly deployed Astro commit `442ae298c236ba8df012a88468e0e0e1568c57b8`, including signed staging activation plus public SSG/home smoke.
+- Regression guard commit `29fa728f1e187fda37cf508e7d81b8e681a41a34` adds a real project-detail browser check derived from the first repair project card instead of hard-coding its route. Production read-only Playwright run `41992279220` **PASS** on desktop and mobile: first H1 equals the Dung Quat project title, no `[data-services-category-grid]`, no service category description, and all existing service/menu regressions remain PASS.
+- Screenshot artifact `13398274004` contains `desktop-repair-project-detail.png` and `mobile-repair-project-detail.png`; both visually start at breadcrumb/project content with no service landing grid above it.
+- **Do not rerun this build/QA unless Astro/CMS changes or a new regression is observed.** Keep the project-detail isolation assertion in `scripts/ptscps-services-readonly-qa.mjs`.
+
 ## CURRENT CHECKPOINT — Repair service detail legacy flow aligned and production QA PASS (2026-11-05)
 
 - Scope completed: `dich-vu-bao-duong-sua-chua-thiet-bi-tinh-thiet-bi-quay-thiet-bi-dien-va-tu-dong-hoa`. The nested service detail no longer renders all capability images as a detached gallery after the text; content and media now follow the legacy sequence from CMS.
