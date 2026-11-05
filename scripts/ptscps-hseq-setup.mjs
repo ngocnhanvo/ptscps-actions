@@ -49,17 +49,18 @@ async function collectSourcePolicyDocs(p){
     window.scrollTo(0,0);
   });
   await p.waitForTimeout(500);
-  const rows=await p.locator('img').evaluateAll(images=>images.map((image,index)=>{
-    const rect=image.getBoundingClientRect();
-    const anchor=image.closest('a');
-    const candidates=[anchor?.href,image.currentSrc,image.src,image.getAttribute('data-src'),image.getAttribute('data-lazy-src')].filter(Boolean);
-    const url=candidates.find(value=>/\/wp-content\/uploads\/.*\.(?:png|jpe?g|webp)(?:[?#].*)?$/i.test(String(value))) || '';
-    return {index,url:String(url),alt:String(image.getAttribute('alt')||'').trim(),left:rect.left,top:rect.top,width:rect.width,height:rect.height};
+  const rows=await p.locator('a[href],img').evaluateAll(elements=>elements.flatMap((element,index)=>{
+    const candidates=element.tagName==='A'
+      ? [element.href]
+      : [element.currentSrc,element.src,element.getAttribute('data-src'),element.getAttribute('data-lazy-src')];
+    const alt=element.tagName==='IMG'?String(element.getAttribute('alt')||'').trim():'';
+    return candidates
+      .filter(Boolean)
+      .map(value=>({index,url:String(value),alt}))
+      .filter(row=>/\/wp-content\/uploads\/2024\/08\/.*\.(?:png|jpe?g|webp)(?:[?#].*)?$/i.test(row.url));
   }));
   const seen=new Set();
   return rows
-    .filter(row=>row.url && row.width>=170 && row.height>=230 && row.height>row.width*1.08)
-    .sort((a,b)=>Math.abs(a.top-b.top)>40?a.top-b.top:a.left-b.left)
     .filter(row=>{if(seen.has(row.url))return false;seen.add(row.url);return true;})
     .map(({url,alt})=>({url,alt}));
 }
