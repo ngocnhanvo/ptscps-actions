@@ -51,15 +51,15 @@ async function inspectLegacyRepairDetail() {
   const response = await fetch(legacy, { headers:{ 'User-Agent':'Mozilla/5.0 PTSCPS migration audit' } });
   assert(response.ok, `Legacy repair detail HTTP ${response.status}`);
   const html = await response.text();
-  const images = [...html.matchAll(/<img\\b[^>]*(?:src|data-src)=["']([^"']+)["'][^>]*>/gi)]
+  const images = [...html.matchAll(/<img\b[^>]*(?:src|data-src)=["']([^"']+)["'][^>]*>/gi)]
     .map((match) => new URL(match[1], legacy).href)
     .filter((url, index, rows) => rows.indexOf(url) === index);
-  const contentStart = html.search(/5000m2|5000\\s*m2|5000\\s*SQM/i);
+  const contentStart = html.search(/5000m2|5000\s*m2|5000\s*SQM/i);
   const contentEnd = html.search(/Các dịch vụ sửa chữa bảo dưỡng được Công ty thực hiện bao gồm|We have been providing Maintenance and Repair services including/i);
   const content = contentStart >= 0
     ? html.slice(Math.max(0, contentStart - 2500), contentEnd > contentStart ? contentEnd + 2500 : contentStart + 12000)
     : html;
-  const contentImages = [...content.matchAll(/<img\\b[^>]*(?:src|data-src)=["']([^"']+)["'][^>]*>/gi)]
+  const contentImages = [...content.matchAll(/<img\b[^>]*(?:src|data-src)=["']([^"']+)["'][^>]*>/gi)]
     .map((match) => new URL(match[1], legacy).href)
     .filter((url, index, rows) => rows.indexOf(url) === index);
   return { images, contentImages };
