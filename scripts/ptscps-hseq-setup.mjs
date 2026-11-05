@@ -39,9 +39,20 @@ async function login(){
   log('AUTH','PASS');
 }
 async function nonce(){
-  await page.goto(uri('/wp-admin/nav-menus.php?esc_full_admin=1'),{waitUntil:'domcontentloaded',timeout:45000});
-  const n=await page.evaluate(()=>String(globalThis.wpApiSettings?.nonce || '').trim());
-  assert(/^[A-Za-z0-9_-]{8,32}$/.test(n),'WordPress REST nonce missing'); return n;
+  const candidates=[
+    '/wp-admin/nav-menus.php?esc_full_admin=1',
+    '/wp-admin/edit-tags.php?taxonomy=product_cat&post_type=product&esc_full_admin=1',
+    '/wp-admin/post.php?post=82642&action=edit&esc_full_admin=1',
+  ];
+  for (const candidate of candidates){
+    await page.goto(uri(candidate),{waitUntil:'domcontentloaded',timeout:45000});
+    const n=await page.evaluate(()=>String(globalThis.wpApiSettings?.nonce || '').trim());
+    if (/^[A-Za-z0-9_-]{8,32}$/.test(n)){
+      log('REST_NONCE_SOURCE',candidate.split('?')[0]);
+      return n;
+    }
+  }
+  throw Error('WordPress REST nonce not available in the known full-admin editors');
 }
 async function api(method,path,n,data,headers={}){
   const response=await page.request.fetch(uri(path),{
