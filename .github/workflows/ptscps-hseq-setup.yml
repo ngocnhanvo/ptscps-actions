@@ -4,6 +4,8 @@ on:
     branches: [main]
     paths:
       - 'scripts/ptscps-hseq-setup.mjs'
+      - 'scripts/ptscps-wordpress-build-monitor.mjs'
+      - 'scripts/ptscps-wordpress-build-monitor.test.mjs'
       - '.github/workflows/ptscps-hseq-setup.yml'
 permissions:
   contents: read
@@ -46,6 +48,8 @@ jobs:
           PYTHON
       - name: Install Playwright driver without Chromium download
         run: npm install --no-save --no-package-lock --ignore-scripts --no-audit --no-fund playwright@1.64.0
+      - name: Verify WordPress build monitor contract
+        run: node scripts/ptscps-wordpress-build-monitor.test.mjs
       - name: Set up HSEQ in WordPress and perform QA
         env:
           WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}

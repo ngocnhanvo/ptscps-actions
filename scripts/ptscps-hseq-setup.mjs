@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdir } from 'node:fs/promises';
 import { chromium } from 'playwright';
+import { waitForWordPressBuild } from './ptscps-wordpress-build-monitor.mjs';
 
 const wp = String(process.env.WP_ORIGIN || '').replace(/\/$/, '');
 const front = String(process.env.FRONT_ORIGIN || '').replace(/\/$/, '');
@@ -342,48 +343,42 @@ async function buildThroughWordPress(){
   const button=page.locator('#vcs-build-btn-main');
   const force=page.locator('#vcs-force-build');
   assert(await button.count()===1&&await force.count()===1,'WordPress Build Website controls missing');
-  let status=await page.evaluate(()=>({
+  const readState=()=>page.evaluate(()=>({
     configured:globalThis.vcsBuild?.build_configured,
     active:Boolean(globalThis.vcsBuild?.initial_active),
-    pending:Number(globalThis.vcsBuild?.pending_count||0),
+    pending:Number(globalThis.vcsBuild?.pending_count||document.querySelector('#vcs-pending-count')?.textContent||0),
   }));
+  let status=await readState();
   assert([true,1,'1'].includes(status.configured),'WordPress Build Website not configured');
   log('BUILD_STATE',status);
+
   if(status.active){
-    // The Build Website UI verifies its persisted active flag with GitHub on load.
-    // Let that supported check clear stale state before assuming another build is live.
-    await page.waitForFunction(()=>{
-      const button=document.querySelector('#vcs-build-btn-main');
-      const force=document.querySelector('#vcs-force-build');
-      return Boolean(button)&&Boolean(force)&&(!button.disabled||!force.disabled);
-    },null,{timeout:25000}).catch(()=>null);
-    status=await page.evaluate(()=>({
-      configured:globalThis.vcsBuild?.build_configured,
-      active:Boolean(globalThis.vcsBuild?.initial_active),
-      pending:Number(document.querySelector('#vcs-pending-count')?.textContent||0),
-      disabled:Boolean(document.querySelector('#vcs-build-btn-main')?.disabled),
-      forceDisabled:Boolean(document.querySelector('#vcs-force-build')?.disabled),
-      message:String(document.querySelector('#vcs-status-text')?.textContent||'').trim(),
-    }));
-    log('BUILD_STATE_REFRESHED',status);
-    if(status.disabled&&status.forceDisabled){
-      log('BUILD','OTHER_BUILD_RUNNING_SKIP_DUPLICATE');return;
-    }
+    log('BUILD','EXISTING_BUILD_MONITOR');
+    const existing=await waitForWordPressBuild({page,log,expectTriggered:false});
+    log('BUILD_EXISTING_RESULT',existing);
+    await page.reload({waitUntil:'domcontentloaded',timeout:50000});
     if(!cmsWrites && await isPublished()){
-      log('BUILD','ACTIVE_BUILD_COMPLETED_AND_PUBLISHED');return;
+      log('BUILD','EXISTING_BUILD_COMPLETED_AND_PUBLISHED');
+      return;
     }
+    status=await readState();
+    assert(!status.active,'WordPress still reports an active build after monitor completion');
   }
+
   if(await button.isDisabled()){
     assert(!await force.isDisabled(),'Build disabled and force unavailable');
     await force.check();
   }
-  const acknowledge=page.waitForResponse(r=>r.url().startsWith(`${wp}/wp-admin/admin-ajax.php`)
+  const acknowledge=page.waitForResponse(r=>r.url().startsWith(wp + '/wp-admin/admin-ajax.php')
     &&r.request().method()==='POST'
     &&String(r.request().postData()||'').includes('action=vcs_trigger_build'),{timeout:45000});
   await button.click();
   const response=await acknowledge;
-  assert(response.ok()&&((await response.json())?.success===true),'Native WordPress Build Website rejected trigger');
+  const body=await response.json().catch(()=>null);
+  assert(response.ok()&&body?.success===true,'Native WordPress Build Website rejected trigger');
   log('BUILD','TRIGGERED_VIA_WORDPRESS');
+  const result=await waitForWordPressBuild({page,log,expectTriggered:true});
+  log('BUILD_RESULT',result);
 }
 async function qa(){
   for(let i=0;i<52;i++){
