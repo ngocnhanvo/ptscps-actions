@@ -3,13 +3,13 @@
 Updated: 2026-11-05
 Code mode: `auto-build`
 
-## CURRENT CHECKPOINT — HSEQ desktop dropdown horizontal overflow fixed and production QA PASS (2026-11-05)
+## CURRENT CHECKPOINT — HSEQ/desktop horizontal scrollbar fixed at document root and production QA PASS (2026-11-05)
 
-- Root cause was the generic desktop dropdown positioning: flipping `left/right` near the viewport edge did not guarantee the final rendered panel stayed inside the layout viewport, so opening HSEQ at intermediate desktop widths could increase `document.scrollWidth`.
-- Astro `master` commit `4548c470e38029b97dd7658b673cf0706cadeb2c` (`fix(header): clamp desktop dropdowns to viewport`) clamps non-mega dropdown width/position to an 8px viewport gutter instead of hiding overflow globally.
-- Native WordPress Build Website trigger `42042474880` **PASS**; production deploy `42042628923` **PASS** and explicitly deployed Astro commit `4548c470e38029b97dd7658b673cf0706cadeb2c`, including FTP-TLS upload, signed activation and public SSG/home smoke.
-- Production HSEQ regression `42043425600` **PASS**. At viewport `1185x900` after opening HSEQ, `clientWidth=1185`, `documentScrollWidth=1185`, `bodyScrollWidth=1185`, and dropdown bounds are `746.39..1026.39` with width `280`, so opening the menu no longer creates horizontal scrolling. Artifact `13424306805` includes `desktop-1185-hseq-menu-no-overflow.png`.
-- Regression source commit `52c9a26d33a1976524c0b25813834911419c75b9` keeps this measurement in `scripts/ptscps-hseq-setup.mjs`; final QA had `writes=0` and `HSEQ_BUILD=ALREADY_PUBLISHED_SKIP_TRIGGER`, so no redundant deploy was triggered by the regression.
+- The earlier dropdown clamp remains valid: Astro `master` commit `4548c470e38029b97dd7658b673cf0706cadeb2c` keeps non-mega desktop dropdown panels inside an 8px viewport gutter. Follow-up diagnostics showed production Chromium itself had `documentScrollWidth == clientWidth` before and after opening HSEQ across `900, 960, 1024, 1080, 1100, 1150, 1185, 1366, 1440, 1536, 1600, 1624` CSS px, so the remaining Windows screenshot was not reproduced as content-width overflow on Linux.
+- To remove the residual page-level horizontal scrollbar on classic-scrollbar browsers without disabling horizontal scrolling inside intentional child rails, Astro `master` commit `7bf2772eedfef032969414a12b2cc255cafd5120` (`fix(layout): clip root horizontal overflow`) applies `overflow-x: clip` to the document root/body instead of globally hiding individual components.
+- Native WordPress Build Website trigger `42051679965` **PASS**; production deploy `42051857639` **PASS**, explicitly deployed Astro commit `7bf2772eedfef032969414a12b2cc255cafd5120`, completed FTP-TLS upload + signed activation, and passed public SSG/home smoke. No independent Astro build path was used.
+- Final production HSEQ QA `42052989795` **PASS** from Actions commit `66648588b362bb40bd72089f883757f80a257a77`. The live page reports `rootOverflowX=clip`, `bodyOverflowX=clip`, `documentScrollWidth == clientWidth` and `bodyScrollWidth == clientWidth` at every tested desktop width before and after opening HSEQ; dropdown bounds remain within the viewport and `HSEQ_RESULT=PASS`.
+- Final QA was read-only with `HSEQ_CMS={status:PASS,pages:5,tables:5,writes:0}` and `HSEQ_BUILD=ALREADY_PUBLISHED_SKIP_TRIGGER`; do not rebuild/redeploy this fix again unless source/CMS changes or a new reproducible regression is observed.
 
 ## CURRENT CHECKPOINT — HSEQ full source/target parity, objective/certificate data and production QA PASS (2026-11-05)
 
