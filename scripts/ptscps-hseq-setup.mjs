@@ -312,7 +312,7 @@ async function buildThroughWordPress(){
   const button=page.locator('#vcs-build-btn-main');
   const force=page.locator('#vcs-force-build');
   assert(await button.count()===1&&await force.count()===1,'WordPress Build Website controls missing');
-  const status=await page.evaluate(()=>({
+  let status=await page.evaluate(()=>({
     configured:globalThis.vcsBuild?.build_configured,
     active:Boolean(globalThis.vcsBuild?.initial_active),
     pending:Number(globalThis.vcsBuild?.pending_count||0),
@@ -320,7 +320,28 @@ async function buildThroughWordPress(){
   assert([true,1,'1'].includes(status.configured),'WordPress Build Website not configured');
   log('BUILD_STATE',status);
   if(status.active){
-    log('BUILD','BUILD_ALREADY_RUNNING_SKIP_DUPLICATE');return;
+    // The Build Website UI verifies its persisted active flag with GitHub on load.
+    // Let that supported check clear stale state before assuming another build is live.
+    await page.waitForFunction(()=>{
+      const button=document.querySelector('#vcs-build-btn-main');
+      const force=document.querySelector('#vcs-force-build');
+      return Boolean(button)&&Boolean(force)&&(!button.disabled||!force.disabled);
+    },null,{timeout:25000}).catch(()=>null);
+    status=await page.evaluate(()=>({
+      configured:globalThis.vcsBuild?.build_configured,
+      active:Boolean(globalThis.vcsBuild?.initial_active),
+      pending:Number(document.querySelector('#vcs-pending-count')?.textContent||0),
+      disabled:Boolean(document.querySelector('#vcs-build-btn-main')?.disabled),
+      forceDisabled:Boolean(document.querySelector('#vcs-force-build')?.disabled),
+      message:String(document.querySelector('#vcs-status-text')?.textContent||'').trim(),
+    }));
+    log('BUILD_STATE_REFRESHED',status);
+    if(status.disabled&&status.forceDisabled){
+      log('BUILD','OTHER_BUILD_RUNNING_SKIP_DUPLICATE');return;
+    }
+    if(await isPublished()){
+      log('BUILD','ACTIVE_BUILD_COMPLETED_AND_PUBLISHED');return;
+    }
   }
   if(await button.isDisabled()){
     assert(!await force.isDisabled(),'Build disabled and force unavailable');
