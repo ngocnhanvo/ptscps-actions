@@ -74,15 +74,38 @@ async function ensureMedia(name,url,n){
   assert(source.ok(),`Legacy media source unavailable ${name} HTTP ${source.status()}`);
   const bytes=await source.body();
   assert(bytes.length>3000 && bytes.length<12*1024*1024,`Legacy media size not acceptable ${name}`);
-  const result=await api('POST','/wp-json/wp/v2/media',n,bytes,{
-    'Content-Type':filename.endsWith('.png')?'image/png':'image/jpeg',
-    'Content-Disposition':`attachment; filename="${filename}"`,
-  });
-  assert(result.response.ok() && Number(result.body?.id)>0,`Media upload failed ${name}: ${result.response.status()}`);
-  cmsWrites++;
-  const relative=new URL(result.body.source_url,wp).pathname;
-  log('MEDIA',{name,state:'UPLOADED',id:result.body.id,path:relative});
-  return relative;
+  // A network disconnect may happen after WordPress has already persisted the
+  // upload. Read back by filename before any one-time retry to avoid duplicates.
+  for(let attempt=1;attempt<=2;attempt++){
+    let result;
+    try{
+      result=await api('POST','/wp-json/wp/v2/media',n,bytes,{
+        'Content-Type':filename.endsWith('.png')?'image/png':'image/jpeg',
+        'Content-Disposition':`attachment; filename="${filename}"`,
+      });
+      if(result.response.ok() && Number(result.body?.id)>0){
+        cmsWrites++;
+        const relative=new URL(result.body.source_url,wp).pathname;
+        log('MEDIA',{name,state:'UPLOADED',id:result.body.id,path:relative});
+        return relative;
+      }
+      throw Error(`Media upload HTTP ${result.response.status()} for ${name}`);
+    }catch(error){
+      log('MEDIA_RETRY_DIAGNOSTIC',{name,attempt,error:String(error?.message||error).slice(0,180)});
+      await sleep(1400);
+      const check=await api('GET',`/wp-json/wp/v2/media?context=edit&search=${encodeURIComponent(filename)}&per_page=100&_fields=id,source_url`,n);
+      if(check.response.ok()){
+        const matched=(check.body||[]).filter(x=>new URL(String(x.source_url||'/'),wp).pathname.split('/').pop()===filename);
+        assert(matched.length<=1,`Ambiguous media after transport failure ${filename}`);
+        if(matched.length){
+          log('MEDIA',{name,state:'UPLOADED_RECOVERED',id:matched[0].id});
+          return new URL(matched[0].source_url,wp).pathname;
+        }
+      }
+      if(attempt===2)throw error;
+    }
+  }
+  throw Error('Media upload did not complete '+name);
 }
 function rowsFor(imagePaths){
   const nav=defs.slice(1).map(d=>['nav',d.title,'',dest(d),'','']);
