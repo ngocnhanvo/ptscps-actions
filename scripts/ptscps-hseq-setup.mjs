@@ -95,7 +95,7 @@ async function collectSourceLinkedAssets(p){
       height:mediaRect?.height??rect.height,
       excluded:Boolean(anchor.closest('header,footer,nav')),
     };
-  }).filter(row=>!row.excluded&&/\/wp-content\/uploads\/.*\.(?:png|jpe?g|webp|pdf)(?:[?#].*)?$/i.test(row.url))));
+  }).filter(row=>!row.excluded&&/\/wp-content\/uploads\/.*\.(?:png|jpe?g|webp|pdf)(?:[?#].*)?$/i.test(row.url)));
   const seen=new Set();
   return rows.sort((a,b)=>a.top-b.top||a.left-b.left).filter(row=>{
     const key=new URL(row.url).pathname;
