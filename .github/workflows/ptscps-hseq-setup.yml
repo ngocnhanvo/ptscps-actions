@@ -51,3 +51,11 @@ jobs:
           WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
           WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
         run: node scripts/ptscps-hseq-setup.mjs
+      - name: Upload HSEQ visual QA
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ptscps-hseq-${{ github.run_id }}
+          path: artifacts/ptscps-hseq/
+          if-no-files-found: warn
+          retention-days: 14

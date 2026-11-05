@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { mkdir } from 'node:fs/promises';
 import { chromium } from 'playwright';
 
 const wp = String(process.env.WP_ORIGIN || '').replace(/\/$/, '');
@@ -23,6 +24,8 @@ const defs = [
   {id:'hseq_04_vi',title:'Giấy chứng nhận HSEQ',slug:'giay-chung-nhan-skatmtcl',description:'Các chứng nhận hệ thống quản lý chất lượng, môi trường và an toàn',key:'hseq-certification'},
 ];
 const dest = d => `/hseq/${d.slug}`;
+const artifactDir='artifacts/ptscps-hseq';
+await mkdir(artifactDir,{recursive:true});
 const browser = await chromium.launch({headless:true});
 const ctx = await browser.newContext({viewport:{width:1440,height:900}});
 const page = await ctx.newPage();
@@ -361,6 +364,7 @@ async function qa(){
     assert(i<51,'HSEQ frontend did not publish after WordPress build');
     await sleep(15000);
   }
+  const expectedMenu=[{title:'Tất cả',href:'/hseq'},...defs.slice(1).map(d=>({title:d.title,href:dest(d)}))];
   for(const viewport of [{name:'desktop',width:1440,height:900},{name:'mobile',width:390,height:844}]){
     const view=await browser.newContext({viewport:{width:viewport.width,height:viewport.height}});
     const p=await view.newPage();
@@ -373,7 +377,34 @@ async function qa(){
       const link=p.locator(`[data-hseq-card-grid] a[href$="${d.slug}"]`);
       assert(await link.count()===1,`Missing HSEQ link ${d.slug}`);
     }
-    log('QA',{viewport:viewport.name,status:'PASS'});
+    await p.screenshot({path:`${artifactDir}/${viewport.name}-hseq.png`,fullPage:true});
+    if(viewport.name==='desktop'){
+      const toggle=p.locator('#header-navrow button').filter({hasText:'HSEQ'}).first();
+      assert(await toggle.isVisible(),'Desktop HSEQ menu button missing');
+      await toggle.click();
+      for(const item of expectedMenu){
+        const link=p.locator('#header-navrow a').filter({hasText:item.title}).first();
+        assert(await link.isVisible(),`Desktop HSEQ submenu missing ${item.title}`);
+        assert.equal(await link.getAttribute('href'),item.href,`Desktop HSEQ submenu href mismatch ${item.title}`);
+        assert.notEqual(await link.getAttribute('target'),'_blank',`Desktop HSEQ submenu opens new tab ${item.title}`);
+      }
+      await p.screenshot({path:`${artifactDir}/desktop-hseq-menu.png`,fullPage:false});
+    }else{
+      const hamburger=p.locator('#hamburger-btn');
+      assert(await hamburger.isVisible(),'Mobile hamburger missing');
+      await hamburger.click();
+      const toggle=p.locator('#mobile-menu-container [data-menu-toggle]').filter({hasText:'HSEQ'}).first();
+      assert(await toggle.isVisible(),'Mobile HSEQ menu toggle missing');
+      await toggle.click();
+      for(const item of expectedMenu){
+        const link=p.locator('#mobile-menu-container a').filter({hasText:item.title}).first();
+        assert(await link.isVisible(),`Mobile HSEQ submenu missing ${item.title}`);
+        assert.equal(await link.getAttribute('href'),item.href,`Mobile HSEQ submenu href mismatch ${item.title}`);
+        assert.notEqual(await link.getAttribute('target'),'_blank',`Mobile HSEQ submenu opens new tab ${item.title}`);
+      }
+      await p.screenshot({path:`${artifactDir}/mobile-hseq-menu.png`,fullPage:false});
+    }
+    log('QA',{viewport:viewport.name,status:'PASS',menu:'PASS'});
     await view.close();
   }
 }
