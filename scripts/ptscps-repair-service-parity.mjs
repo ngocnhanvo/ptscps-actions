@@ -25,16 +25,19 @@ const children = [
     title: 'Dịch vụ Bảo dưỡng, sửa chữa thiết bị tĩnh, thiết bị quay, thiết bị điện và tự động hóa',
     slug: 'dich-vu-bao-duong-sua-chua-thiet-bi-tinh-thiet-bi-quay-thiet-bi-dien-va-tu-dong-hoa',
     thumbnail: ['static-valve', 'Bảo dưỡng sửa chữa van', 'https://ptscps.com.vn/wp-content/uploads/2019/12/Preparation-for-Lapping-Ball-Valve.jpg'],
+    summary: '<p>Thực hiện kiểm tra, đại tu, sửa chữa và hiệu chỉnh thiết bị tĩnh, thiết bị quay và hệ thống điện/tự động hóa.</p><ul><li>Van, thiết bị trao đổi nhiệt, két và bình áp lực.</li><li>Bơm, turbine, máy nén, động cơ diesel và các thiết bị quay.</li><li>Động cơ điện đến 300KW, hệ thống AC/DC, kiểm tra định kỳ và CBM bằng hình ảnh nhiệt.</li></ul>',
   },
   {
     title: 'Vận hành và bảo dưỡng sửa chữa các nhà máy, các công trình công nghiệp',
     slug: 'van-hanh-va-bao-duong-sua-chua-cac-nha-may-cac-cong-trinh-cong-nghiep',
     thumbnail: ['plant-project', 'Bảo dưỡng sửa chữa tại nhà máy', 'https://ptscps.com.vn/wp-content/uploads/2019/12/binhson.png'],
+    summary: '<p>Cung cấp quy trình, nhân sự, vật tư và thiết bị cho vận hành, bảo dưỡng thường xuyên/định kỳ và sửa chữa lớn các hệ thống nhà máy, công trình công nghiệp.</p><ul><li>Kinh nghiệm bảo dưỡng van tại Dung Quất, Nghi Sơn và Bình Sơn.</li><li>Đã triển khai công việc tại Tân Sơn Nhất, Đạm Phú Mỹ, FPSO Ruby II và FSO MV17.</li></ul>',
   },
   {
     title: 'Các dịch vụ khác',
     slug: 'cac-dich-vu-khac',
     thumbnail: ['other-services', 'Dịch vụ sửa chữa bảo dưỡng khác', 'https://ptscps.com.vn/wp-content/uploads/2019/10/xuongckbd.jpg'],
+    summary: '<p>Các dịch vụ hỗ trợ bảo dưỡng và phục hồi cơ khí cho FPSO/FSO và thiết bị công nghiệp.</p><ul><li>Lắp dựng giàn giáo và chống ăn mòn.</li><li>Kiểm tra, sửa chữa, test floating hose theo OCIMF; kiểm tra và cân tâm thiết bị quay.</li><li>Đo UTM đường ống; doa, mạ và phun phủ phục hồi chi tiết, thiết bị cơ khí.</li></ul>',
   },
 ];
 
@@ -303,13 +306,14 @@ function relativeMediaPath(media) {
 
 function serviceDetailTableData(workshop, certificates) {
   return [
-    ['type', 'title', 'content', 'img'],
-    ['Loại', 'Tiêu đề', 'Nội dung', 'Hình ảnh'],
-    ['image', 'Xưởng cơ khí bảo dưỡng PTSC', '', `<img src="${relativeMediaPath(workshop)}" alt="Xưởng cơ khí bảo dưỡng PTSC">`],
-    ['prose', '', parent.asme, ''],
-    ['certificate', parent.certificates[0][1], '', `<img src="${relativeMediaPath(certificates[0])}" alt="${parent.certificates[0][1]}">`],
-    ['certificate', parent.certificates[1][1], '', `<img src="${relativeMediaPath(certificates[1])}" alt="${parent.certificates[1][1]}">`],
-    ['service-heading', '', 'Các dịch vụ sửa chữa bảo dưỡng được Công ty thực hiện bao gồm:', ''],
+    ['type', 'title', 'content', 'img', 'slug'],
+    ['Loại', 'Tiêu đề', 'Nội dung', 'Hình ảnh', 'Slug'],
+    ['image', 'Xưởng cơ khí bảo dưỡng PTSC', '', `<img src="${relativeMediaPath(workshop)}" alt="Xưởng cơ khí bảo dưỡng PTSC">`, ''],
+    ['prose', '', parent.asme, '', ''],
+    ['certificate', parent.certificates[0][1], '', `<img src="${relativeMediaPath(certificates[0])}" alt="${parent.certificates[0][1]}">`, ''],
+    ['certificate', parent.certificates[1][1], '', `<img src="${relativeMediaPath(certificates[1])}" alt="${parent.certificates[1][1]}">`, ''],
+    ['service-heading', '', 'Các dịch vụ sửa chữa bảo dưỡng được Công ty thực hiện bao gồm:', '', ''],
+    ...children.map((service) => ['service-summary', service.title, service.summary, '', service.slug]),
   ];
 }
 
@@ -326,11 +330,15 @@ async function readServiceDetailTable() {
 
 function verifyServiceDetailTable(table, workshop, certificates) {
   assert(table?.success, 'Repair parent ESC Table missing');
-  assert.deepEqual((table.fields || []).map((field) => String(field.key || '')), ['type', 'title', 'content', 'img'], 'Repair parent ESC Table fields mismatch');
+  assert.deepEqual((table.fields || []).map((field) => String(field.key || '')), ['type', 'title', 'content', 'img', 'slug'], 'Repair parent ESC Table fields mismatch');
   const items = Array.isArray(table.items) ? table.items : [];
-  assert.deepEqual(items.map((item) => String(item?.type || '')), ['image', 'prose', 'certificate', 'certificate', 'service-heading'], 'Repair parent ESC Table row types mismatch');
+  assert.deepEqual(items.map((item) => String(item?.type || '')), ['image', 'prose', 'certificate', 'certificate', 'service-heading', 'service-summary', 'service-summary', 'service-summary'], 'Repair parent ESC Table row types mismatch');
   assert(clean(items[1]?.content).includes('ASME'), 'Repair parent ESC Table ASME text missing');
   assert.equal(clean(items[4]?.content), 'Các dịch vụ sửa chữa bảo dưỡng được Công ty thực hiện bao gồm:', 'Repair parent ESC Table service heading mismatch');
+  assert.deepEqual(items.slice(5).map((item) => String(item?.slug || '')), children.map((service) => service.slug), 'Repair parent ESC Table service summary slugs mismatch');
+  for (let index = 0; index < children.length; index += 1) {
+    assert(clean(items[index + 5]?.content).length >= 120, `Repair parent ESC Table service summary too short ${children[index].slug}`);
+  }
   const expectedMedia = [workshop, ...certificates].map((media) => new URL(String(media.source_url), wp).pathname.split('/').pop());
   const actualMedia = [items[0]?.img, items[2]?.img, items[3]?.img].map((value) => String(value || ''));
   expectedMedia.forEach((name, index) => assert(name && actualMedia[index].includes(name), `Repair parent ESC Table media mismatch ${name}`));
