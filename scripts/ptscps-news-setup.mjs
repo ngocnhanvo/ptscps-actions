@@ -97,6 +97,22 @@ async function api(method,path,n,data){
 const titleOf=item=>clean(typeof item?.title==='object'?(item.title.raw||item.title.rendered):item?.title);
 
 async function inventoryTargetData(){
+  const allCategoriesResponse=await page.request.get(uri('/wp-json/wp/v2/categories?per_page=100&orderby=id&order=asc&_fields=id,slug,name,count,parent'),{timeout:30000,headers:{'Cache-Control':'no-cache'}});
+  assert(allCategoriesResponse.ok(),'Cannot query target category registry');
+  const allCategories=await allCategoriesResponse.json();
+  const galleryDiagnostic=await page.request.get(uri('/wp-json/wp/v2/pages?slug=thu-vien-pps&status=publish&per_page=20&_fields=id,slug,title,status,content'),{timeout:30000,headers:{'Cache-Control':'no-cache'}});
+  assert(galleryDiagnostic.ok(),'Cannot query target PPS gallery diagnostic');
+  const galleryPages=await galleryDiagnostic.json();
+  const postSamples=[];
+  for(const [kind,titles] of Object.entries({company:sourceInventory.company.titles,regional:sourceInventory.regional.titles,tender:sourceInventory.tender.titles})){
+    for(const title of titles.slice(0,3)){
+      const found=await page.request.get(uri(`/wp-json/wp/v2/posts?status=publish&search=${encodeURIComponent(title)}&per_page=20&_fields=id,slug,title,categories,date`),{timeout:30000,headers:{'Cache-Control':'no-cache'}});
+      assert(found.ok(),`Cannot search target posts for ${kind}`);
+      const rows=await found.json();
+      postSamples.push({kind,expected:title,matches:rows.map(row=>({id:row.id,slug:row.slug,title:clean(row.title?.rendered),categories:row.categories||[]}))});
+    }
+  }
+  log('TARGET_DIAGNOSTIC',{categories:allCategories.map(row=>({id:row.id,slug:row.slug,name:clean(row.name),count:Number(row.count||0),parent:Number(row.parent||0)})),galleryPages:galleryPages.map(row=>({id:row.id,slug:row.slug,title:clean(row.title?.rendered),contentLength:String(row.content?.rendered||'').length})),postSamples});
   const categories={};
   for(const slug of targetCategories){
     const response=await page.request.get(uri(`/wp-json/wp/v2/categories?slug=${encodeURIComponent(slug)}&per_page=20&_fields=id,slug,name,count`),{timeout:30000,headers:{'Cache-Control':'no-cache'}});
