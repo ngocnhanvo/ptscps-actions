@@ -151,7 +151,7 @@ async function readSource(){
   return {categories,posts:[...postsById.values()],gallery};
 }
 
-async function sourceMediaByIds(ids){
+async function sourceMediaByIds(ids,posts=[]){
   const result=new Map();
   for(let i=0;i<ids.length;i+=100){
     const chunk=ids.slice(i,i+100);
@@ -159,6 +159,16 @@ async function sourceMediaByIds(ids){
     const response=await context.request.get(legacy+`/wp-json/wp/v2/media?include=${chunk.join(',')}&per_page=100&_fields=id,slug,source_url,alt_text,title,caption,mime_type`,{timeout:50000,headers:{'Cache-Control':'no-cache'}});
     assert(response.ok(),`Legacy media batch HTTP ${response.status()}`);
     for(const row of await response.json()) result.set(Number(row.id),row);
+  }
+  for(const id of ids){
+    if(result.has(id))continue;
+    const direct=await context.request.get(legacy+`/wp-json/wp/v2/media/${id}?_fields=id,slug,source_url,alt_text,title,caption,mime_type`,{timeout:40000,headers:{'Cache-Control':'no-cache'}});
+    if(direct.ok()){
+      const row=await direct.json();
+      if(Number(row?.id)===Number(id)){result.set(Number(id),row);log('FEATURED_MEDIA_RECOVERED',{id,state:'DIRECT_READ'});continue;}
+    }
+    const refs=posts.filter(post=>Number(post.featuredMedia)===Number(id)).map(post=>({id:post.id,slug:post.slug,title:post.title,contentAssets:extractAssets(post.content).slice(0,3)}));
+    log('FEATURED_MEDIA_MISSING',{id,http:direct.status(),posts:refs});
   }
   for(const id of ids) assert(result.has(id),`Legacy featured media missing ${id}`);
   return result;
@@ -447,7 +457,7 @@ try{
   await ensureCategories(source,n);
 
   const featuredIds=[...new Set(source.posts.map(post=>post.featuredMedia).filter(Boolean))];
-  const featuredMap=await sourceMediaByIds(featuredIds);
+  const featuredMap=await sourceMediaByIds(featuredIds,source.posts);
   const assetSet=new Set();
   for(const post of source.posts){for(const url of extractAssets(post.content))assetSet.add(url);for(const url of extractAssets(post.excerpt))assetSet.add(url);}
   for(const row of featuredMap.values()){const url=normalizeSourceAsset(row.source_url);if(url)assetSet.add(url);}
