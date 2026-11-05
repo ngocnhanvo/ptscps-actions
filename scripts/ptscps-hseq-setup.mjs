@@ -84,6 +84,7 @@ async function inventorySource(){
     const response=await p.goto(legacy+'/hseq/chinh-sach-skatmtcl?_parity='+Date.now(),{waitUntil:'load',timeout:50000});
     assert(response?.status()===200,'Legacy HSEQ policy page unavailable');
     const rawDocs=await collectSourcePolicyDocs(p);
+    log('SOURCE_POLICY_CANDIDATES',rawDocs.map(doc=>({url:new URL(doc.url).pathname,alt:doc.alt})));
     assert.equal(rawDocs.length,3,`Legacy policy document count changed: expected 3, got ${rawDocs.length}`);
     const policyDocs=rawDocs.map((doc,index)=>({...doc,title:doc.alt||fallbackPolicyTitles[index]}));
     const navOrder=await visibleRelativeOrder(p,['Giới thiệu','Dịch vụ','HSEQ']);
