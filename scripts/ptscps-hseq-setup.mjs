@@ -67,9 +67,9 @@ async function ensureMedia(name,url,n){
   const filename=`hseq-${name}.${originalName.split('.').pop()}`;
   const list=await api('GET',`/wp-json/wp/v2/media?context=edit&search=${encodeURIComponent(filename)}&per_page=100&_fields=id,slug,source_url,title`,n);
   assert(list.response.ok(),`Media listing failed ${name}`);
-  const found=(list.body||[]).filter(x=>new URL(String(x.source_url||'https://invalid.invalid/')).pathname.split('/').pop()===filename);
+  const found=(list.body||[]).filter(x=>new URL(String(x.source_url||'/'),wp).pathname.split('/').pop()===filename);
   assert(found.length<=1,`Duplicate media ${filename}`);
-  if(found.length){log('MEDIA',{name,state:'SKIP_EXISTING',id:found[0].id});return new URL(found[0].source_url).pathname;}
+  if(found.length){log('MEDIA',{name,state:'SKIP_EXISTING',id:found[0].id});return new URL(found[0].source_url,wp).pathname;}
   const source=await page.request.get(url,{timeout:45000});
   assert(source.ok(),`Legacy media source unavailable ${name} HTTP ${source.status()}`);
   const bytes=await source.body();
@@ -80,7 +80,7 @@ async function ensureMedia(name,url,n){
   });
   assert(result.response.ok() && Number(result.body?.id)>0,`Media upload failed ${name}: ${result.response.status()}`);
   cmsWrites++;
-  const relative=new URL(result.body.source_url).pathname;
+  const relative=new URL(result.body.source_url,wp).pathname;
   log('MEDIA',{name,state:'UPLOADED',id:result.body.id,path:relative});
   return relative;
 }
