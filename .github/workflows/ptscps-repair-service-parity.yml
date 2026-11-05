@@ -1,0 +1,63 @@
+name: PTSCPS repair service legacy parity migration
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'audit/ptscps-repair-service-parity.ready'
+permissions:
+  contents: read
+concurrency:
+  group: ptscps-repair-service-parity
+  cancel-in-progress: false
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.0-noble
+      options: --ipc=host
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Resolve configured PTSCPS WordPress origin
+        shell: bash
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          from urllib.parse import urlsplit
+          vals={}
+          for raw in os.environ.get('ENV_FILE','').splitlines():
+              line=raw.strip()
+              if line.startswith('export '): line=line[7:].strip()
+              if '=' not in line: continue
+              k,v=line.split('=',1); vals[k.strip()]=v.strip().strip('"').strip("'")
+          u=urlsplit(vals.get('WC_URL',''))
+          if not (u.scheme=='https' and u.hostname and u.port in (None,443) and u.path in ('','/') and not u.username and not u.password and not u.query and not u.fragment):
+              raise SystemExit('invalid WC_URL')
+          with open(os.environ['GITHUB_ENV'],'a') as out: out.write('WP_ORIGIN=https://'+u.hostname+'\n')
+          PY
+      - name: Validate migration script syntax
+        run: node --check scripts/ptscps-repair-service-parity.mjs
+      - name: Install Playwright Node driver (Chromium preinstalled)
+        run: npm install --no-save --no-package-lock --ignore-scripts --no-audit --no-fund playwright@1.64.0
+      - name: Migrate repair service legacy data into WordPress
+        shell: bash
+        timeout-minutes: 32
+        env:
+          WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
+          WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
+        run: |
+          set +e
+          timeout --signal=TERM --kill-after=10s 30m node scripts/ptscps-repair-service-parity.mjs
+          exit_code=$?
+          if [[ "$exit_code" == 124 || "$exit_code" == 137 ]]; then
+            echo '::error::Repair service migration exceeded its 30-minute process limit.'
+          fi
+          exit "$exit_code"
