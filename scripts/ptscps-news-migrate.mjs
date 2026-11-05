@@ -30,6 +30,8 @@ const log=(key,value)=>console.log(`NEWS_MIGRATE_${key}=${typeof value==='string
 const uri=p=>wp+p;
 const sourceAssetRe=/(?:https?:)?\/\/ptscps\.com\.vn\/wp-content\/uploads\/[^\s"'()<>,]+|\/wp-content\/uploads\/[^\s"'()<>,]+/gi;
 const sourceAssetInTextRe=/(?:https?:)?\/\/ptscps\.com\.vn\/wp-content\/uploads\/|\/wp-content\/uploads\//i;
+const largeAssetThreshold=30*1024*1024;
+const maxAssetBytes=256*1024*1024;
 const targetCategoryBySourceId=new Map();
 const assetCache=new Map();
 const created={categories:[],media:[],posts:[],pages:[]};
@@ -270,6 +272,10 @@ function assetFilename(url,mime=''){
   }
   return assetSlug(url)+ext;
 }
+function assetPriority(url){
+  const ext=extname(new URL(url).pathname).toLowerCase();
+  return ['.mp4','.m4v','.mov','.webm'].includes(ext)?0:1;
+}
 
 async function lookupMedia(n,slug){
   const {response,body}=await api('GET',`/wp-json/wp/v2/media?context=edit&slug=${encodeURIComponent(slug)}&per_page=20&_fields=id,slug,source_url,alt_text,title,mime_type`,n);
@@ -296,14 +302,18 @@ async function ensureAsset(n,url,meta={}){
     assert(source.ok,`Legacy asset HTTP ${source.status}: ${normalized}`);
     const bytes=Buffer.from(await source.arrayBuffer());
     assert(bytes.length>0,`Legacy asset empty: ${normalized}`);
-    assert(bytes.length<=30*1024*1024,`Legacy asset exceeds 30MB: ${normalized}`);
+    assert(bytes.length<=maxAssetBytes,`Legacy asset exceeds 256MB safety cap: ${normalized}`);
+    if(bytes.length>largeAssetThreshold){
+      log('MEDIA_LARGE',{url:normalized,bytes:bytes.length,mib:Number((bytes.length/1024/1024).toFixed(1))});
+    }
     const contentType=String(source.headers.get('content-type')||meta.mime_type||'application/octet-stream').split(';')[0];
     const file=assetFilename(normalized,contentType);
+    const uploadTimeout=bytes.length>largeAssetThreshold?240000:90000;
     let createdMedia=null;
     for(let attempt=1;attempt<=3&&!createdMedia;attempt++){
       const upload=await page.request.post(uri('/wp-json/wp/v2/media'),{
         headers:{'X-WP-Nonce':n,'Content-Type':contentType,'Content-Disposition':`attachment; filename="${file}"`},
-        data:bytes,timeout:90000,
+        data:bytes,timeout:uploadTimeout,
       }).catch(()=>null);
       const body=upload?await upload.json().catch(()=>null):null;
       if(upload?.ok()&&body?.id){createdMedia=body;break;}
@@ -514,7 +524,7 @@ try{
   for(const row of featuredMap.values()){const url=normalizeSourceAsset(row.source_url);if(url)assetSet.add(url);}
   for(const url of extractAssets(source.gallery.content))assetSet.add(url);
   log('MEDIA_PLAN',{uniqueAssets:assetSet.size,featuredAttachments:featuredIds.length});
-  const assets=[...assetSet];
+  const assets=[...assetSet].sort((a,b)=>assetPriority(a)-assetPriority(b));
   const mediaConcurrency=2;
   for(let i=0;i<assets.length;i+=mediaConcurrency){
     await Promise.all(assets.slice(i,i+mediaConcurrency).map(url=>ensureAsset(n,url)));
