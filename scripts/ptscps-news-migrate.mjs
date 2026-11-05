@@ -170,14 +170,19 @@ async function sourceMediaByIds(ids,posts=[]){
     const matchingPosts=posts.filter(post=>Number(post.featuredMedia)===Number(id));
     let recovered=null;
     for(const post of matchingPosts){
-      const tagPattern=new RegExp(`<img\\b[^>]*class=["'][^"']*\\bwp-image-${id}\\b[^"']*["'][^>]*>`,'i');
-      const tag=String(post.content||'').match(tagPattern)?.[0]||'';
-      const src=tag.match(/\\bsrc=["']([^"']+)["']/i)?.[1]||'';
-      const sourceUrl=normalizeSourceAsset(src);
-      if(!sourceUrl)continue;
-      const alt=tag.match(/\\balt=["']([^"']*)["']/i)?.[1]||'';
-      recovered={id:Number(id),slug:`legacy-media-${id}`,source_url:sourceUrl,alt_text:decodeEntities(alt),title:post.title,caption:'',mime_type:''};
-      break;
+      const expectedClass=`wp-image-${id}`;
+      const tags=String(post.content||'').match(/<img\b[^>]*>/gi)||[];
+      for(const tag of tags){
+        const className=tag.match(/\bclass=["']([^"']*)["']/i)?.[1]||'';
+        if(!className.split(/\s+/).includes(expectedClass))continue;
+        const src=tag.match(/\bsrc=["']([^"']+)["']/i)?.[1]||'';
+        const sourceUrl=normalizeSourceAsset(src);
+        if(!sourceUrl)continue;
+        const alt=tag.match(/\balt=["']([^"']*)["']/i)?.[1]||'';
+        recovered={id:Number(id),slug:`legacy-media-${id}`,source_url:sourceUrl,alt_text:decodeEntities(alt),title:post.title,caption:'',mime_type:''};
+        break;
+      }
+      if(recovered)break;
     }
     if(recovered){result.set(Number(id),recovered);log('FEATURED_MEDIA_RECOVERED',{id,state:'CONTENT_WP_IMAGE',source_url:recovered.source_url});continue;}
     const refs=matchingPosts.map(post=>({id:post.id,slug:post.slug,title:post.title,contentAssets:extractAssets(post.content).slice(0,3)}));
