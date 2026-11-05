@@ -307,9 +307,18 @@ async function setCategoryThumbnail(termId, mediaId, slug) {
 
 function verifyDescription(actualValue, expectedHtml, key) {
   const actual = String(actualValue ?? '');
-  const expectedCore = clean(String(expectedHtml ?? '').split('<figure')[0]);
   const actualText = clean(actual);
-  assert(expectedCore && actualText.includes(expectedCore), `Description core text mismatch ${key}`);
+  const requiredByKey = {
+    parent: ['5000m2', 'ASME'],
+    equipment: ['(1) Thiết bị tĩnh', 'Heat exchanger', '(2) Thiết bị quay', 'Reciprocating Compressor Overhaul', '(3) Thiết bị điện / Tự động hóa'],
+    plants: ['Cung cấp quy trình vận hành bảo dưỡng', 'đại tu máy nén pittông'],
+    other: ['Lắp dựng giàn giáo', 'floating hose', 'Đo UTM', 'Doa, mạ & phun phủ'],
+  };
+  const required = requiredByKey[key] || [clean(String(expectedHtml ?? '').split('<figure')[0])];
+  for (const phrase of required) {
+    const needle = clean(phrase);
+    assert(needle && actualText.includes(needle), `Description phrase missing ${key}: ${needle}`);
+  }
   const imageNames = [...String(expectedHtml ?? '').matchAll(/<img[^>]+src="([^"]+)"/gi)]
     .map((match) => String(match[1]).split('/').pop()?.split('?')[0] || '')
     .filter(Boolean);
