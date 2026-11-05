@@ -260,13 +260,22 @@ async function lookupMedia(n,slug){
   assert(response.ok(),`Target media lookup failed ${slug}`);assert((body||[]).length<=1,`Duplicate target media ${slug}`);return body?.[0]||null;
 }
 
+function mediaPath(value){
+  const raw=String(value||'').trim();
+  assert(raw,'Target media source_url missing');
+  return new URL(raw,wp).pathname;
+}
+
 async function ensureAsset(n,url,meta={}){
   const normalized=normalizeSourceAsset(url);if(!normalized)return null;
   if(assetCache.has(normalized))return assetCache.get(normalized);
   const promise=(async()=>{
     const slug=assetSlug(normalized);
     let media=await lookupMedia(n,slug);
-    if(media){return {id:Number(media.id),url:String(media.source_url||''),path:new URL(media.source_url).pathname,state:'existing'};}
+    if(media){
+      const mediaUrl=String(media.source_url||'');
+      return {id:Number(media.id),url:mediaUrl,path:mediaPath(mediaUrl),state:'existing'};
+    }
     const source=await fetch(normalized,{headers:{'User-Agent':'PTSCPS News migration/1.0'},signal:AbortSignal.timeout(60000)});
     assert(source.ok,`Legacy asset HTTP ${source.status}: ${normalized}`);
     const bytes=Buffer.from(await source.arrayBuffer());
@@ -296,9 +305,8 @@ async function ensureAsset(n,url,meta={}){
     const update=await api('POST',`/wp-json/wp/v2/media/${createdMedia.id}`,n,metadata);
     assert(update.response.ok(),`Target media metadata update failed ${createdMedia.id}`);
     media=update.body||createdMedia;created.media.push(Number(media.id));writes++;
-    const absolute=String(media.source_url||createdMedia.source_url||'');
-    assert(absolute,'Target media source_url missing');
-    return {id:Number(media.id),url:absolute,path:new URL(absolute).pathname,state:'created'};
+    const mediaUrl=String(media.source_url||createdMedia.source_url||'');
+    return {id:Number(media.id),url:mediaUrl,path:mediaPath(mediaUrl),state:'created'};
   })();
   assetCache.set(normalized,promise);
   return promise;
