@@ -256,13 +256,31 @@ async function ensureMedia(nonce, key, title, sourceUrl) {
   assert(bytes.length > 1500, `Legacy image too small ${key}`);
   const contentType = source.headers.get('content-type')?.split(';')[0] || 'image/jpeg';
   const file = `${slug}.${extensionFrom(sourceUrl, contentType)}`;
-  const upload = await page.request.post(`${wp}/wp-json/wp/v2/media`, { headers: { 'X-WP-Nonce':nonce, 'Content-Type':contentType, 'Content-Disposition':`attachment; filename="${file}"` }, data:bytes, timeout:60000 });
-  const body = await upload.json().catch(()=>({}));
-  assert(upload.ok() && Number(body?.id)>0, `Media upload failed ${key} HTTP ${upload.status()}`);
-  const meta = await jsonRequest('POST', `/wp-json/wp/v2/media/${body.id}`, nonce, { alt_text:title, title, caption:'' });
+  let created = null;
+  for (let attempt = 1; attempt <= 3 && !created; attempt++) {
+    try {
+      const upload = await page.request.post(`${wp}/wp-json/wp/v2/media`, {
+        headers: { 'X-WP-Nonce':nonce, 'Content-Type':contentType, 'Content-Disposition':`attachment; filename="${file}"` },
+        data:bytes,
+        timeout:60000,
+      });
+      const body = await upload.json().catch(()=>({}));
+      if (upload.ok() && Number(body?.id)>0) created = body;
+      else report('MEDIA_UPLOAD_RETRY', { key, attempt, http:upload.status() });
+    } catch (error) {
+      report('MEDIA_UPLOAD_RETRY', { key, attempt, transport:error?.message || 'error' });
+    }
+    if (!created) {
+      await sleep(900 * attempt);
+      media = await findMedia(nonce, slug).catch(()=>null);
+      if (media) created = media;
+    }
+  }
+  assert(created && Number(created.id)>0, `Media upload failed ${key}`);
+  const meta = await jsonRequest('POST', `/wp-json/wp/v2/media/${created.id}`, nonce, { alt_text:title, title, caption:'' });
   assert(meta.res.ok(), `Media metadata failed ${key}`);
   media = await findMedia(nonce, slug);
-  assert(media && Number(media.id)===Number(body.id), `Media readback failed ${key}`);
+  assert(media && Number(media.id)===Number(created.id), `Media readback failed ${key}`);
   report('MEDIA', { key, id:media.id, state:'CREATED_VERIFIED' });
   return media;
 }
