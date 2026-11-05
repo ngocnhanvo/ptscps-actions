@@ -266,9 +266,12 @@ async function ensureMenu(n){
   const top=(header.items||[]).filter(x=>String(x.label||'')==='HSEQ');
   assert(top.length<=1,'Duplicated HSEQ top menu');
   const desired=[{title:'Tất cả',url:'/hseq'},...defs.slice(1).map(x=>({title:x.title,url:dest(x)}))];
-  const same=top.length===1&&desired.every(w=>top[0].children?.some(c=>c.label===w.title&&String(c.href||'').replace(/^\/+|\/+$/g,'')===w.url.replace(/^\/+|\/+$/g,'')))&&top[0].children?.length===desired.length;
+  const same=top.length===1
+    &&top[0].children?.length===desired.length
+    &&desired.every((w,i)=>top[0].children?.[i]?.label===w.title
+      &&String(top[0].children?.[i]?.href||'').replace(/^\/+|\/+$/g,'')===w.url.replace(/^\/+|\/+$/g,''));
   if(same){log('MENU','SKIP_EXISTING');return;}
-  const all=await api('GET',`/wp-json/wp/v2/menu-items?context=edit&per_page=100&_fields=id,title,menus,parent,url,status`,n);
+  const all=await api('GET',`/wp-json/wp/v2/menu-items?context=edit&per_page=100&_fields=id,title,menus,parent,url,status,menu_order`,n);
   assert(all.response.ok(),'Cannot read current WordPress menu items');
   const items=(all.body||[]).filter(x=>{
     const menuIds=Array.isArray(x.menus)?x.menus:[x.menus];
@@ -282,12 +285,13 @@ async function ensureMenu(n){
     assert(created.response.ok(),`HSEQ parent menu creation failed HTTP ${created.response.status()}`);
     parentId=created.body.id;cmsWrites++;
   }
-  for(const expected of desired){
+  for(const [index,expected] of desired.entries()){
     const matches=items.filter(x=>Number(x.parent||0)===Number(parentId)&&titleOf(x)===expected.title);
     assert(matches.length<=1,`Duplicate HSEQ submenu ${expected.title}`);
-    const data={title:expected.title,type:'custom',url:expected.url,menus:Number(header.id),status:'publish',parent:Number(parentId)};
+    const menuOrder=201+index;
+    const data={title:expected.title,type:'custom',url:expected.url,menus:Number(header.id),status:'publish',parent:Number(parentId),menu_order:menuOrder};
     if(matches.length){
-      if(String(matches[0].url||'')===expected.url)continue;
+      if(String(matches[0].url||'')===expected.url&&Number(matches[0].menu_order||0)===menuOrder)continue;
       const update=await api('POST',`/wp-json/wp/v2/menu-items/${matches[0].id}`,n,data);
       assert(update.response.ok(),`Cannot update HSEQ menu ${expected.title}`);cmsWrites++;
     }else{
@@ -295,7 +299,17 @@ async function ensureMenu(n){
       assert(created.response.ok(),`Cannot create HSEQ menu ${expected.title}`);cmsWrites++;
     }
   }
-  log('MENU','PASS');
+  for(let attempt=0;attempt<8;attempt++){
+    await sleep(500);
+    const verify=await page.request.get(uri(`/wp-json/esc-api/v1/menus?_hseq_menu=${Date.now()}`),{timeout:30000,headers:{'Cache-Control':'no-cache'}});
+    assert(verify.ok(),'Cannot verify HSEQ Header menu');
+    const current=(await verify.json())?.menus?.Header?.vi?.items?.find(x=>String(x.label||'')==='HSEQ');
+    const children=current?.children||[];
+    if(children.length===desired.length&&desired.every((w,i)=>children[i]?.label===w.title&&String(children[i]?.href||'').replace(/^\/+|\/+$/g,'')===w.url.replace(/^\/+|\/+$/g,''))){
+      log('MENU',{status:'PASS',children:desired.map(x=>x.title)});return;
+    }
+  }
+  throw Error('HSEQ submenu order readback mismatch');
 }
 
 
@@ -376,6 +390,14 @@ async function qa(){
     for(const d of defs.slice(1)){
       const link=p.locator(`[data-hseq-card-grid] a[href$="${d.slug}"]`);
       assert(await link.count()===1,`Missing HSEQ link ${d.slug}`);
+    }
+    const images=p.locator('[data-hseq-card-grid] img');
+    for(let i=0;i<await images.count();i++){
+      await images.nth(i).scrollIntoViewIfNeeded();
+      await p.waitForFunction(index=>{
+        const image=document.querySelectorAll('[data-hseq-card-grid] img')[index];
+        return image&&image.complete&&image.naturalWidth>0;
+      },i,{timeout:12000});
     }
     await p.screenshot({path:`${artifactDir}/${viewport.name}-hseq.png`,fullPage:true});
     if(viewport.name==='desktop'){
