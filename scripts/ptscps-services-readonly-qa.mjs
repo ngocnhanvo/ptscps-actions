@@ -424,6 +424,19 @@ try {
     await page.screenshot({ path: `${artifactDir}/${viewport.name}-dich-vu-sua-chua-nha-may.png`, fullPage: true });
     console.log(`SERVICES_READONLY_QA_REPAIR_PLANT=${viewport.name}:PASS projects=8 project_images=8`);
 
+    const firstRepairProject = repairProjectCards.first();
+    const firstRepairProjectTitle = clean(await firstRepairProject.locator('h2').textContent());
+    const firstRepairProjectHref = await firstRepairProject.locator('a').first().getAttribute('href');
+    assert(firstRepairProjectTitle && firstRepairProjectHref, `${viewport.name} repair project detail fixture missing`);
+    const repairProjectDetailResponse = await page.goto(new URL(firstRepairProjectHref, frontUrl.origin).href + `?_repair_project_detail_qa=${Date.now()}`, { waitUntil: 'load', timeout: 50000 });
+    assert.equal(repairProjectDetailResponse?.status(), 200, `${viewport.name} repair project detail HTTP ${repairProjectDetailResponse?.status()}`);
+    assert.equal(clean(await page.locator('h1').first().textContent()), firstRepairProjectTitle, `${viewport.name} repair project detail first H1 mismatch`);
+    assert.equal(await page.locator('[data-services-category-grid]').count(), 0, `${viewport.name} repair project detail leaked service landing grid`);
+    assert.equal(await page.locator('[data-service-category-description]').count(), 0, `${viewport.name} repair project detail leaked service category description`);
+    noAdminOrigin(await page.content(), `${viewport.name}-repair-project-detail`);
+    await page.screenshot({ path: `${artifactDir}/${viewport.name}-repair-project-detail.png`, fullPage: true });
+    console.log(`SERVICES_READONLY_QA_REPAIR_PROJECT_DETAIL=${viewport.name}:PASS title=${firstRepairProjectTitle}`);
+
     const other = repairChildren[2];
     const otherResponse = await page.goto(`${front}/dich-vu/${other.slug}?_repair_other_qa=${Date.now()}`, { waitUntil: 'load', timeout: 50000 });
     assert(otherResponse?.status() === 200, `${viewport.name} repair other HTTP ${otherResponse?.status()}`);
