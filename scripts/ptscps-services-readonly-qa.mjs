@@ -80,11 +80,10 @@ try {
       return { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width) };
     }));
     if (viewport.name === 'desktop') {
-      const firstRowY = metrics[0]?.y;
-      assert.equal(metrics.filter((item) => Math.abs(item.y - firstRowY) <= 4).length, 3, 'desktop service detail should use three project columns');
-      assert(metrics.every((item) => item.width >= 330), 'desktop service project cards are too narrow');
-      const lastCard = metrics.at(-1);
-      assert(lastCard && Math.abs((lastCard.x + lastCard.width / 2) - viewport.width / 2) <= 60, 'desktop incomplete project row should be centered');
+      assert(metrics.every((item) => item.width >= 1000), 'desktop service project cards should use the full content row');
+      assert(metrics.every((item, index) => index === 0 || item.y > metrics[index - 1].y + 100), 'desktop service detail should use one project per row');
+      const xPositions = metrics.map((item) => item.x);
+      assert(Math.max(...xPositions) - Math.min(...xPositions) <= 4, 'desktop service project rows should share one left edge');
     } else {
       assert(metrics.every((item) => item.width >= 340), 'mobile service project cards should use the full content width');
       assert(metrics.length < 2 || metrics[1].y > metrics[0].y + 100, 'mobile service detail should use one project column');
@@ -99,6 +98,13 @@ try {
         return image && image.complete && image.naturalWidth > 0;
       }, i, { timeout: 12000 });
     }
+    const scopeMetrics = await projectCards.locator('[data-service-project-scope]').evaluateAll((nodes) => nodes.map((node) => ({
+      clientHeight: node.clientHeight,
+      scrollHeight: node.scrollHeight,
+      overflow: getComputedStyle(node).overflow,
+    })));
+    assert(scopeMetrics.every((item) => item.scrollHeight <= item.clientHeight + 2), `${viewport.name} service project description is visually truncated`);
+    assert(scopeMetrics.every((item) => item.overflow !== 'hidden'), `${viewport.name} service project description still hides overflow`);
     const detailOverflow = await page.evaluate(() => ({ client: document.documentElement.clientWidth, scroll: document.documentElement.scrollWidth }));
     assert(detailOverflow.scroll <= detailOverflow.client + 2, `${viewport.name} detail horizontal overflow`);
     noAdminOrigin(await page.content(), `${viewport.name}-service-detail`);
@@ -165,9 +171,22 @@ try {
     assert(await page.locator('[data-service-projects-heading]').isVisible(), `${viewport.name} design project heading missing`);
     const designProjectCards = page.locator('[data-service-projects-heading] + div article');
     assert.equal(await designProjectCards.count(), 5, `${viewport.name} design project card count mismatch`);
+    const designMetrics = await designProjectCards.evaluateAll((nodes) => nodes.map((node) => {
+      const rect = node.getBoundingClientRect();
+      return { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width) };
+    }));
+    assert(designMetrics.every((item, index) => index === 0 || item.y > designMetrics[index - 1].y + 100), `${viewport.name} design service should use one project per row`);
+    assert(designMetrics.every((item) => item.width >= (viewport.name === 'desktop' ? 1000 : 340)), `${viewport.name} design project row width mismatch`);
     assert.deepEqual((await designProjectCards.locator('h2').allTextContents()).map(clean), expectedProjects.map((item) => item.title), `${viewport.name} design project titles mismatch`);
     const designScopes = (await designProjectCards.locator('[data-service-project-scope]').allTextContents()).map(clean);
     assert.deepEqual(designScopes, expectedProjects.map((item) => item.scope), `${viewport.name} design project scopes mismatch`);
+    const designScopeMetrics = await designProjectCards.locator('[data-service-project-scope]').evaluateAll((nodes) => nodes.map((node) => ({
+      clientHeight: node.clientHeight,
+      scrollHeight: node.scrollHeight,
+      overflow: getComputedStyle(node).overflow,
+    })));
+    assert(designScopeMetrics.every((item) => item.scrollHeight <= item.clientHeight + 2), `${viewport.name} design project scope is visually truncated`);
+    assert(designScopeMetrics.every((item) => item.overflow !== 'hidden'), `${viewport.name} design project scope still hides overflow`);
     const designProjectImages = designProjectCards.locator('img');
     assert.equal(await designProjectImages.count(), 11, `${viewport.name} design project image count mismatch`);
     assert.equal(await designProjectCards.locator('[data-service-project-gallery]').count(), 4, `${viewport.name} design gallery group count mismatch`);
