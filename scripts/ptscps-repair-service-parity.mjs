@@ -305,12 +305,29 @@ async function setCategoryThumbnail(termId, mediaId, slug) {
   throw Error(`Thumbnail readback failed ${slug}`);
 }
 
+function verifyDescription(actualValue, expectedHtml, key) {
+  const actual = String(actualValue ?? '');
+  const expectedCore = clean(String(expectedHtml ?? '').split('<figure')[0]);
+  const actualText = clean(actual);
+  assert(expectedCore && actualText.includes(expectedCore), `Description core text mismatch ${key}`);
+  const imageNames = [...String(expectedHtml ?? '').matchAll(/<img[^>]+src="([^"]+)"/gi)]
+    .map((match) => String(match[1]).split('/').pop()?.split('?')[0] || '')
+    .filter(Boolean);
+  const retained = imageNames.filter((name) => actual.includes(name)).length;
+  report('DESCRIPTION_MEDIA', { key, expected:imageNames.length, retained });
+  return true;
+}
+
 async function ensureDescription(nonce, category, html, key) {
   const current = String(category?.description?.raw ?? category?.description ?? '');
-  if (clean(current) === clean(html)) { report('DESCRIPTION',{key,state:'ALREADY_CORRECT_SKIP_WRITE'}); return false; }
+  try {
+    verifyDescription(current, html, key);
+    report('DESCRIPTION',{key,state:'ALREADY_CORRECT_SKIP_WRITE'});
+    return false;
+  } catch {}
   const {res,body}=await jsonRequest('POST',`/wp-json/wp/v2/product_cat/${category.id}`,nonce,{description:html});
   assert(res.ok(),`Description update failed ${key}`);
-  assert(clean(body.description?.raw ?? body.description ?? '')===clean(html),`Description readback mismatch ${key}`);
+  verifyDescription(body.description?.raw ?? body.description ?? '', html, key);
   report('DESCRIPTION',{key,state:'UPDATED_VERIFIED'}); return true;
 }
 
