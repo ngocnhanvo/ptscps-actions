@@ -34,6 +34,7 @@ const largeAssetThreshold=30*1024*1024;
 const maxAssetBytes=256*1024*1024;
 const targetCategoryBySourceId=new Map();
 const assetCache=new Map();
+const sourceAssetFallbacks=new Map();
 const created={categories:[],media:[],posts:[],pages:[]};
 const updated={categories:[],posts:[],pages:[]};
 let writes=0;
@@ -298,7 +299,19 @@ async function ensureAsset(n,url,meta={}){
       const mediaUrl=String(media.source_url||'');
       return {id:Number(media.id),url:mediaUrl,path:mediaPath(mediaUrl),state:'existing'};
     }
-    const source=await fetch(normalized,{headers:{'User-Agent':'PTSCPS News migration/1.0'},signal:AbortSignal.timeout(60000)});
+    let source=await fetch(normalized,{headers:{'User-Agent':'PTSCPS News migration/1.0'},signal:AbortSignal.timeout(60000)});
+    let resolvedSource=normalized;
+    if(source.status===404){
+      for(const fallback of sourceAssetFallbacks.get(normalized)||[]){
+        const candidate=await fetch(fallback,{headers:{'User-Agent':'PTSCPS News migration/1.0'},signal:AbortSignal.timeout(60000)}).catch(()=>null);
+        if(candidate?.ok){
+          source=candidate;
+          resolvedSource=fallback;
+          log('MEDIA_SOURCE_RECOVERED',{requested:normalized,resolved:fallback});
+          break;
+        }
+      }
+    }
     assert(source.ok,`Legacy asset HTTP ${source.status}: ${normalized}`);
     const bytes=Buffer.from(await source.arrayBuffer());
     assert(bytes.length>0,`Legacy asset empty: ${normalized}`);
@@ -307,7 +320,7 @@ async function ensureAsset(n,url,meta={}){
       log('MEDIA_LARGE',{url:normalized,bytes:bytes.length,mib:Number((bytes.length/1024/1024).toFixed(1))});
     }
     const contentType=String(source.headers.get('content-type')||meta.mime_type||'application/octet-stream').split(';')[0];
-    const file=assetFilename(normalized,contentType);
+    const file=assetFilename(resolvedSource,contentType);
     const uploadTimeout=bytes.length>largeAssetThreshold?240000:90000;
     let createdMedia=null;
     for(let attempt=1;attempt<=3&&!createdMedia;attempt++){
@@ -336,6 +349,22 @@ async function ensureAsset(n,url,meta={}){
   })();
   assetCache.set(normalized,promise);
   return promise;
+}
+
+function registerResponsiveFallbacks(html){
+  for(const tag of String(html||'').match(/<img\b[^>]*>/gi)||[]){
+    const src=tag.match(/\bsrc=(["'])([^"']+)\1/i)?.[2]||'';
+    const original=normalizeSourceAsset(src);
+    if(!original)continue;
+    const srcset=tag.match(/\bsrcset=(["'])([\s\S]*?)\1/i)?.[2]||'';
+    const candidates=[...(srcset.match(sourceAssetRe)||[])]
+      .map(normalizeSourceAsset)
+      .filter(value=>value&&value!==original)
+      .reverse();
+    if(!candidates.length)continue;
+    const existing=sourceAssetFallbacks.get(original)||[];
+    sourceAssetFallbacks.set(original,[...new Set([...candidates,...existing])]);
+  }
 }
 
 function stripLegacyResponsiveAttrs(html){
@@ -520,9 +549,16 @@ try{
   const featuredIds=[...new Set(source.posts.map(post=>post.featuredMedia).filter(Boolean))];
   const featuredMap=await sourceMediaByIds(featuredIds,source.posts);
   const assetSet=new Set();
-  for(const post of source.posts){for(const url of extractAssets(post.content))assetSet.add(url);for(const url of extractAssets(post.excerpt))assetSet.add(url);}
+  for(const post of source.posts){
+    registerResponsiveFallbacks(post.content);
+    registerResponsiveFallbacks(post.excerpt);
+    for(const url of extractAssets(post.content))assetSet.add(url);
+    for(const url of extractAssets(post.excerpt))assetSet.add(url);
+  }
   for(const row of featuredMap.values()){const url=normalizeSourceAsset(row.source_url);if(url)assetSet.add(url);}
+  registerResponsiveFallbacks(source.gallery.content);
   for(const url of extractAssets(source.gallery.content))assetSet.add(url);
+  log('MEDIA_RESPONSIVE_FALLBACKS',{sources:sourceAssetFallbacks.size});
   log('MEDIA_PLAN',{uniqueAssets:assetSet.size,featuredAttachments:featuredIds.length});
   const assets=[...assetSet].sort((a,b)=>assetPriority(a)-assetPriority(b));
   const mediaConcurrency=2;
