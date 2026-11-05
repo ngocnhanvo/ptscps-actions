@@ -22,6 +22,7 @@ const fallbackPolicyTitles = [
   'Chính sách sức khỏe, an toàn, môi trường và chất lượng',
   'Chính sách dừng công việc',
 ];
+const certificateTitles = ['ISO 9001 - 2015','ISO 14001 - 2015','ISO 45001 - 2018'];
 const defs = [
   {id:'hseq_00_vi',title:'HSEQ',slug:'hseq',description:'Sức khỏe · An toàn · Môi trường · Chất lượng',root:true,key:'hseq-overview'},
   {id:'hseq_01_vi',title:'Chính sách HSEQ',slug:'chinh-sach-skatmtcl',description:'Cam kết về an toàn, sức khỏe và chất lượng dịch vụ',key:'hseq-policy'},
@@ -73,6 +74,55 @@ async function collectSourcePolicyDocs(p){
     return {url:preferred.url,alt:preferred.alt};
   });
 }
+async function collectSourceLinkedAssets(p){
+  await p.evaluate(async()=>{
+    const height=Math.max(document.body.scrollHeight,document.documentElement.scrollHeight);
+    for(let y=0;y<height;y+=600){window.scrollTo(0,y);await new Promise(r=>setTimeout(r,80));}
+    window.scrollTo(0,0);
+  });
+  await p.waitForTimeout(400);
+  const rows=await p.locator('a[href]').evaluateAll(anchors=>anchors.map((anchor,index)=>{
+    const href=String(anchor.href||'');
+    const rect=anchor.getBoundingClientRect();
+    const media=anchor.querySelector('img');
+    const mediaRect=media?.getBoundingClientRect();
+    return {
+      index,
+      url:href,
+      top:(mediaRect?.top??rect.top)+window.scrollY,
+      left:(mediaRect?.left??rect.left),
+      width:mediaRect?.width??rect.width,
+      height:mediaRect?.height??rect.height,
+      excluded:Boolean(anchor.closest('header,footer,nav')),
+    };
+  }).filter(row=>!row.excluded&&/\/wp-content\/uploads\/.*\.(?:png|jpe?g|webp|pdf)(?:[?#].*)?$/i.test(row.url))));
+  const seen=new Set();
+  return rows.sort((a,b)=>a.top-b.top||a.left-b.left).filter(row=>{
+    const key=new URL(row.url).pathname;
+    if(seen.has(key))return false;
+    seen.add(key);return true;
+  }).map(row=>({url:row.url,kind:/\.pdf(?:[?#].*)?$/i.test(row.url)?'pdf':'image'}));
+}
+async function collectSourceCertificateImages(p){
+  await p.evaluate(async()=>{
+    const height=Math.max(document.body.scrollHeight,document.documentElement.scrollHeight);
+    for(let y=0;y<height;y+=500){window.scrollTo(0,y);await new Promise(r=>setTimeout(r,90));}
+    window.scrollTo(0,0);
+  });
+  await p.waitForTimeout(500);
+  const rows=await p.locator('img').evaluateAll(images=>images.map((image,index)=>{
+    const rect=image.getBoundingClientRect();
+    const candidates=[image.closest('a')?.href,image.currentSrc,image.src,image.getAttribute('data-src'),image.getAttribute('data-lazy-src')].filter(Boolean);
+    const url=candidates.find(value=>/\/wp-content\/uploads\/.*\.(?:png|jpe?g|webp)(?:[?#].*)?$/i.test(String(value)))||'';
+    return {index,url:String(url),top:rect.top+window.scrollY,left:rect.left,width:rect.width,height:rect.height,excluded:Boolean(image.closest('header,footer,nav'))};
+  }).filter(row=>row.url&&!row.excluded&&row.width>=160&&row.height>=160));
+  const seen=new Set();
+  return rows.sort((a,b)=>a.top-b.top||a.left-b.left).filter(row=>{
+    const key=new URL(row.url).pathname;
+    if(seen.has(key))return false;
+    seen.add(key);return true;
+  }).map(row=>({url:row.url}));
+}
 async function visibleRelativeOrder(p,labels,scope='body'){
   const wanted=labels.map(label=>({label,key:norm(label)}));
   const nodes=await p.locator(`${scope} a,${scope} button`).evaluateAll(elements=>elements.map(element=>{
@@ -99,8 +149,30 @@ async function inventorySource(){
     const navOrder=await visibleRelativeOrder(p,['Giới thiệu','Dịch vụ','HSEQ']);
     assert.deepEqual(navOrder,['Giới thiệu','Dịch vụ','HSEQ'],'Legacy HSEQ relative top menu order changed');
     await p.screenshot({path:`${artifactDir}/source-desktop-policy.png`,fullPage:true});
-    log('SOURCE_INVENTORY_PASS',{policyDocuments:policyDocs.map(doc=>({title:doc.title,url:new URL(doc.url).pathname})),navOrder});
-    return {policyDocs,navOrder};
+
+    const objectiveResponse=await p.goto(legacy+'/hseq/muc-tieu-skatmtcl?_parity='+Date.now(),{waitUntil:'load',timeout:50000});
+    assert(objectiveResponse?.status()===200,'Legacy HSEQ objective page unavailable');
+    const objectiveAssets=await collectSourceLinkedAssets(p);
+    log('SOURCE_OBJECTIVE_CANDIDATES',objectiveAssets.map(asset=>({kind:asset.kind,url:new URL(asset.url).pathname})));
+    assert.equal(objectiveAssets.filter(asset=>asset.kind==='image').length,1,`Legacy objective image count changed: ${objectiveAssets.filter(asset=>asset.kind==='image').length}`);
+    assert.equal(objectiveAssets.filter(asset=>asset.kind==='pdf').length,1,`Legacy objective PDF count changed: ${objectiveAssets.filter(asset=>asset.kind==='pdf').length}`);
+    await p.screenshot({path:`${artifactDir}/source-desktop-objective.png`,fullPage:true});
+
+    const certificateResponse=await p.goto(legacy+'/hseq/giay-chung-nhan-skatmtcl?_parity='+Date.now(),{waitUntil:'load',timeout:50000});
+    assert(certificateResponse?.status()===200,'Legacy HSEQ certificate page unavailable');
+    const certificateImages=await collectSourceCertificateImages(p);
+    log('SOURCE_CERTIFICATE_CANDIDATES',certificateImages.map(asset=>new URL(asset.url).pathname));
+    assert.equal(certificateImages.length,certificateTitles.length,`Legacy certificate image count changed: expected ${certificateTitles.length}, got ${certificateImages.length}`);
+    const certificates=certificateTitles.map((title,index)=>({title,url:certificateImages[index].url}));
+    await p.screenshot({path:`${artifactDir}/source-desktop-certificates.png`,fullPage:true});
+
+    log('SOURCE_INVENTORY_PASS',{
+      policyDocuments:policyDocs.map(doc=>({title:doc.title,url:new URL(doc.url).pathname})),
+      objectiveAssets:objectiveAssets.map(asset=>({kind:asset.kind,url:new URL(asset.url).pathname})),
+      certificates:certificates.map(cert=>({title:cert.title,url:new URL(cert.url).pathname})),
+      navOrder
+    });
+    return {policyDocs,objectiveAssets,certificates,navOrder};
   }finally{await source.close();}
 }
 
@@ -137,7 +209,8 @@ async function api(method,path,n,data,headers={}){
 }
 async function ensureMedia(name,url,n){
   const originalName=new URL(url).pathname.split('/').pop();
-  const filename=`hseq-${name}.${originalName.split('.').pop()}`;
+  const extension=(originalName.split('.').pop()||'bin').toLowerCase();
+  const filename=`hseq-${name}.${extension}`;
   const list=await api('GET',`/wp-json/wp/v2/media?context=edit&search=${encodeURIComponent(filename)}&per_page=100&_fields=id,slug,source_url,title`,n);
   assert(list.response.ok(),`Media listing failed ${name}`);
   const found=(list.body||[]).filter(x=>new URL(String(x.source_url||'/'),wp).pathname.split('/').pop()===filename);
@@ -146,14 +219,14 @@ async function ensureMedia(name,url,n){
   const source=await page.request.get(url,{timeout:45000});
   assert(source.ok(),`Legacy media source unavailable ${name} HTTP ${source.status()}`);
   const bytes=await source.body();
-  assert(bytes.length>3000 && bytes.length<12*1024*1024,`Legacy media size not acceptable ${name}`);
+  assert(bytes.length>3000 && bytes.length<20*1024*1024,`Legacy media size not acceptable ${name}`);
   // A network disconnect may happen after WordPress has already persisted the
   // upload. Read back by filename before any one-time retry to avoid duplicates.
   for(let attempt=1;attempt<=2;attempt++){
     let result;
     try{
       result=await api('POST','/wp-json/wp/v2/media',n,bytes,{
-        'Content-Type':filename.endsWith('.png')?'image/png':'image/jpeg',
+        'Content-Type':extension==='png'?'image/png':extension==='webp'?'image/webp':extension==='pdf'?'application/pdf':'image/jpeg',
         'Content-Disposition':`attachment; filename="${filename}"`,
       });
       if(result.response.ok() && Number(result.body?.id)>0){
@@ -187,6 +260,15 @@ function rowsFor(imagePaths){
   const policyDocuments=sourceInventory.policyDocs.map((doc,index)=>[
     'document',doc.title,'','',img(imagePaths.policyDocuments[index],doc.title),'Phóng to tài liệu'
   ]);
+  const objectiveDocuments=sourceInventory.objectiveAssets.map((asset,index)=>{
+    const media=imagePaths.objectiveAssets[index];
+    return asset.kind==='pdf'
+      ? ['document','Tài liệu Mục tiêu HSEQ (PDF)','',''+media,'','Mở tài liệu PDF']
+      : ['document','Mục tiêu HSEQ','','',img(media,'Tài liệu mục tiêu HSEQ'),'Phóng to tài liệu'];
+  });
+  const certificates=sourceInventory.certificates.map((cert,index)=>[
+    'certificate',cert.title,'','',''+img(imagePaths.certificates[index],cert.title),'Phóng to chứng nhận'
+  ]);
   return [
     [...nav,...cards],
     [...nav,
@@ -194,16 +276,14 @@ function rowsFor(imagePaths){
       ...policyDocuments],
     [...nav,
       ['prose','','Mục tiêu liên tục nâng cao chất lượng dịch vụ phục vụ khách hàng, đảm bảo yếu tố an toàn, không gây tác động xấu tới môi trường, cộng đồng và các bên liên quan.','','',''],
-      ['document','Mục tiêu HSEQ','','https://ptscps.com.vn/wp-content/uploads/2022/04/2.-Ke-hoach-thuc-hien-muc-tieu-2022-2.pdf',img(imagePaths.objective,'Tài liệu mục tiêu HSEQ'),'Xem tài liệu PDF']],
+      ...objectiveDocuments],
     [...nav,
       ['prose','','Hệ thống quản lý của Công ty được xây dựng trên nguyên tắc áp dụng hài hòa và đồng bộ các tiêu chuẩn quốc tế về hệ thống quản lý: Chất lượng (ISO 9001:2015), Sức khỏe nghề nghiệp và an toàn (ISO 45001:2018) và Môi trường (ISO 14001:2015) để cung cấp các dịch vụ đảm bảo chất lượng, an toàn, không gây tác động xấu tới môi trường, cộng đồng và các bên quan tâm.','','',''],
       ['prose','','Hệ thống quản lý của Công ty được xây dựng trên nguyên tắc tiếp cận theo quá trình với 3 hoạt động cơ bản là Điều hành, Hỗ trợ và Kiểm soát.','','',''],
       ['document','Mô hình quản lý HSEQ','','',img(imagePaths.system,'Sơ đồ hệ thống quản lý HSEQ'),'Phóng to sơ đồ']],
     [...nav,
       ['prose','','Các hệ thống quản lý của công ty đáp ứng những tiêu chuẩn ISO về chất lượng, môi trường và sức khỏe nghề nghiệp, an toàn.','','',''],
-      ['certificate','ISO 9001:2015','Hệ thống quản lý chất lượng','','',''],
-      ['certificate','ISO 14001:2015','Hệ thống quản lý môi trường','','',''],
-      ['certificate','ISO 45001:2018','Hệ thống quản lý an toàn và sức khỏe nghề nghiệp','','','']],
+      ...certificates],
   ];
 }
 async function readTable(id){
@@ -218,11 +298,16 @@ async function ensureTable(def,rows){
   if(previouslyPopulated){
     const keys=(existing.fields||[]).map(f=>String(f.key||''));
     assert(fields.every((field,i)=>keys[i]===field),`Existing ${def.id} has different field schema; preserving CMS data`);
-    if(existing.items.length===rows.length){
+    const certificateImages=def.id==='hseq_04_vi'
+      ? existing.items.filter(item=>String(item?.type||'').trim().toLowerCase()==='certificate'&&item?.img).length
+      : 0;
+    const objectiveNeedsExpansion=def.id==='hseq_02_vi'&&existing.items.length<rows.length;
+    const certificateNeedsImages=def.id==='hseq_04_vi'&&certificateImages<sourceInventory.certificates.length;
+    if(existing.items.length===rows.length&&!certificateNeedsImages){
       log('TABLE',{id:def.id,state:'SKIP_EXISTING',rows:rows.length});return;
     }
-    assert(def.id==='hseq_01_vi'&&existing.items.length<rows.length,`Refusing destructive or unexpected HSEQ table resize ${def.id}: ${existing.items.length} -> ${rows.length}`);
-    log('TABLE',{id:def.id,state:'EXPAND_FOR_SOURCE_PARITY',from:existing.items.length,to:rows.length});
+    assert((def.id==='hseq_01_vi'||objectiveNeedsExpansion||certificateNeedsImages)&&existing.items.length<=rows.length,`Refusing destructive or unexpected HSEQ table change ${def.id}: ${existing.items.length} -> ${rows.length}`);
+    log('TABLE',{id:def.id,state:'UPDATE_FOR_SOURCE_PARITY',from:existing.items.length,to:rows.length,certificateImages});
   }
   if(!existing){
     await page.goto(uri('/wp-admin/admin.php?page=tablepress&action=add'),{waitUntil:'domcontentloaded',timeout:45000});
@@ -244,7 +329,7 @@ async function ensureTable(def,rows){
     for(let i=0;i<12;i++){await sleep(700);existing=await readTable(def.id).catch(()=>null);if(existing)break;}
     assert(existing,`ESC Table renaming failed ${def.id}`);
   }
-  if(existing?.items?.length)assert(def.id==='hseq_01_vi'&&existing.items.length<rows.length,`Refusing overwrite of populated ${def.id}`);
+  if(existing?.items?.length)assert(['hseq_01_vi','hseq_02_vi','hseq_04_vi'].includes(def.id)&&existing.items.length<=rows.length,`Refusing overwrite of populated ${def.id}`);
   await page.goto(uri(`/wp-admin/admin.php?page=tablepress&action=edit&table_id=${def.id}`),{waitUntil:'domcontentloaded',timeout:45000});
   await page.waitForFunction(()=>Boolean(window.tp?.editor?.options?.data && window.tp?.callbacks?.append),null,{timeout:30000});
   await page.locator('#table-name').fill(def.title);
@@ -435,8 +520,14 @@ async function isPublished(){
     const relative=await visibleRelativeOrder(probe,sourceInventory.navOrder,'#header-navrow');
     if(JSON.stringify(relative)!==JSON.stringify(sourceInventory.navOrder))return false;
     const policyResponse=await probe.goto(`${front}/hseq/chinh-sach-skatmtcl?_hseq_policy_publish=${Date.now()}`,{waitUntil:'domcontentloaded',timeout:40000}).catch(()=>null);
-    if(policyResponse?.status()!==200)return false;
-    return await probe.locator('button[data-gallery-trigger]').count()===sourceInventory.policyDocs.length;
+    if(policyResponse?.status()!==200||await probe.locator('button[data-gallery-trigger]').count()!==sourceInventory.policyDocs.length)return false;
+    const objectiveResponse=await probe.goto(`${front}/hseq/muc-tieu-skatmtcl?_hseq_objective_publish=${Date.now()}`,{waitUntil:'domcontentloaded',timeout:40000}).catch(()=>null);
+    if(objectiveResponse?.status()!==200)return false;
+    if(await probe.locator('button[data-gallery-trigger]').count()!==sourceInventory.objectiveAssets.filter(asset=>asset.kind==='image').length)return false;
+    if(await probe.locator('article a[target="_blank"]').count()<sourceInventory.objectiveAssets.filter(asset=>asset.kind==='pdf').length)return false;
+    const certificateResponse=await probe.goto(`${front}/hseq/giay-chung-nhan-skatmtcl?_hseq_certificate_publish=${Date.now()}`,{waitUntil:'domcontentloaded',timeout:40000}).catch(()=>null);
+    if(certificateResponse?.status()!==200)return false;
+    return await probe.locator('button[data-gallery-trigger]').count()===sourceInventory.certificates.length;
   }finally{
     await probe.close();
   }
@@ -571,6 +662,41 @@ async function qa(){
     assert(targetOverflow<=viewport.width+2,`HSEQ policy horizontal overflow ${viewport.name}: ${targetOverflow}`);
     await p.screenshot({path:`${artifactDir}/target-${viewport.name}-policy.png`,fullPage:true});
 
+    const objectiveResponse=await p.goto(`${front}/hseq/muc-tieu-skatmtcl?_qa_objective=${Date.now()}`,{waitUntil:'load',timeout:50000});
+    assert(objectiveResponse?.status()===200,`HSEQ objective ${viewport.name} HTTP failure`);
+    const objectiveImages=p.locator('button[data-gallery-trigger] img');
+    assert.equal(await objectiveImages.count(),sourceInventory.objectiveAssets.filter(asset=>asset.kind==='image').length,`DATA_PARITY_FAIL objective images ${viewport.name}`);
+    for(let i=0;i<await objectiveImages.count();i++){
+      await objectiveImages.nth(i).scrollIntoViewIfNeeded();
+      await p.waitForFunction(index=>{
+        const node=document.querySelectorAll('button[data-gallery-trigger] img')[index];
+        return node instanceof HTMLImageElement&&node.complete&&node.naturalWidth>0&&node.naturalHeight>0;
+      },i,{timeout:15000});
+      const dimensions=await objectiveImages.nth(i).evaluate(node=>({naturalWidth:node.naturalWidth,naturalHeight:node.naturalHeight,src:node.currentSrc||node.src}));
+      log('OBJECTIVE_IMAGE_LOADED',{viewport:viewport.name,index:i+1,...dimensions});
+    }
+    const objectivePdfLinks=p.locator('article a[target="_blank"]');
+    assert(await objectivePdfLinks.count()>=sourceInventory.objectiveAssets.filter(asset=>asset.kind==='pdf').length,`DATA_PARITY_FAIL objective PDF links ${viewport.name}`);
+    await p.screenshot({path:`${artifactDir}/target-${viewport.name}-objective.png`,fullPage:true});
+
+    const certificateResponse=await p.goto(`${front}/hseq/giay-chung-nhan-skatmtcl?_qa_certificates=${Date.now()}`,{waitUntil:'load',timeout:50000});
+    assert(certificateResponse?.status()===200,`HSEQ certificates ${viewport.name} HTTP failure`);
+    const certButtons=p.locator('button[data-gallery-trigger]');
+    assert.equal(await certButtons.count(),sourceInventory.certificates.length,`DATA_PARITY_FAIL certificate images ${viewport.name}`);
+    const certHeadings=(await p.locator('article h2').allTextContents()).map(clean);
+    for(const expected of sourceInventory.certificates.map(cert=>cert.title))assert(certHeadings.includes(expected),`DATA_PARITY_FAIL missing certificate title ${expected}`);
+    const certImages=certButtons.locator('img');
+    for(let i=0;i<await certImages.count();i++){
+      await certImages.nth(i).scrollIntoViewIfNeeded();
+      await p.waitForFunction(index=>{
+        const node=document.querySelectorAll('button[data-gallery-trigger] img')[index];
+        return node instanceof HTMLImageElement&&node.complete&&node.naturalWidth>0&&node.naturalHeight>0;
+      },i,{timeout:15000});
+      const dimensions=await certImages.nth(i).evaluate(node=>({naturalWidth:node.naturalWidth,naturalHeight:node.naturalHeight,src:node.currentSrc||node.src}));
+      log('CERTIFICATE_IMAGE_LOADED',{viewport:viewport.name,index:i+1,...dimensions});
+    }
+    await p.screenshot({path:`${artifactDir}/target-${viewport.name}-certificates.png`,fullPage:true});
+
     const legacyView=await browser.newContext({viewport:{width:viewport.width,height:viewport.height}});
     const legacyPage=await legacyView.newPage();
     const legacyResponse=await legacyPage.goto(legacy+'/hseq/chinh-sach-skatmtcl?_qa_source='+Date.now(),{waitUntil:'load',timeout:50000});
@@ -578,13 +704,27 @@ async function qa(){
     const legacyDocs=await collectSourcePolicyDocs(legacyPage);
     assert.equal(legacyDocs.length,sourceInventory.policyDocs.length,`SOURCE_INVENTORY_FAIL policy documents changed ${viewport.name}`);
     await legacyPage.screenshot({path:`${artifactDir}/source-${viewport.name}-policy.png`,fullPage:true});
+    const legacyObjective=await legacyPage.goto(legacy+'/hseq/muc-tieu-skatmtcl?_qa_source='+Date.now(),{waitUntil:'load',timeout:50000});
+    assert(legacyObjective?.status()===200,`Legacy objective ${viewport.name} HTTP failure`);
+    const legacyObjectiveAssets=await collectSourceLinkedAssets(legacyPage);
+    assert.equal(legacyObjectiveAssets.length,sourceInventory.objectiveAssets.length,`SOURCE_INVENTORY_FAIL objective assets changed ${viewport.name}`);
+    await legacyPage.screenshot({path:`${artifactDir}/source-${viewport.name}-objective.png`,fullPage:true});
+    const legacyCertificates=await legacyPage.goto(legacy+'/hseq/giay-chung-nhan-skatmtcl?_qa_source='+Date.now(),{waitUntil:'load',timeout:50000});
+    assert(legacyCertificates?.status()===200,`Legacy certificates ${viewport.name} HTTP failure`);
+    const legacyCertificateImages=await collectSourceCertificateImages(legacyPage);
+    assert.equal(legacyCertificateImages.length,sourceInventory.certificates.length,`SOURCE_INVENTORY_FAIL certificate assets changed ${viewport.name}`);
+    await legacyPage.screenshot({path:`${artifactDir}/source-${viewport.name}-certificates.png`,fullPage:true});
     await legacyView.close();
 
     if(viewport.name==='desktop'){
       const relative=await visibleRelativeOrder(p,sourceInventory.navOrder,'#header-navrow');
       assert.deepEqual(relative,sourceInventory.navOrder,'NAV_PARITY_FAIL HSEQ top-level relative order');
       log('NAV_PARITY_PASS',{relativeOrder:relative});
-      log('DATA_PARITY_PASS',{policyDocuments:sourceInventory.policyDocs.length});
+      log('DATA_PARITY_PASS',{
+        policyDocuments:sourceInventory.policyDocs.length,
+        objectiveAssets:sourceInventory.objectiveAssets.length,
+        certificates:sourceInventory.certificates.length
+      });
     }
     log('VISUAL_PARITY_PASS',{viewport:viewport.name,approvedException:'HSEQ presentation redesigned; source content/media/navigation preserved'});
     log('QA',{viewport:viewport.name,status:'PASS',menu:'PASS'});
@@ -596,8 +736,10 @@ try{
   sourceInventory=await inventorySource();
   await login();
   const n=await nonce();
-  const media={policyDocuments:[]};
+  const media={policyDocuments:[],objectiveAssets:[],certificates:[]};
   for(const [index,doc] of sourceInventory.policyDocs.entries())media.policyDocuments.push(await ensureMedia(`policy-${index+1}`,doc.url,n));
+  for(const [index,asset] of sourceInventory.objectiveAssets.entries())media.objectiveAssets.push(await ensureMedia(`objective-${index+1}`,asset.url,n));
+  for(const [index,cert] of sourceInventory.certificates.entries())media.certificates.push(await ensureMedia(`certificate-${index+1}`,cert.url,n));
   for(const [key,url] of Object.entries(fileSources))media[key]=await ensureMedia(key,url,n);
   const rows=rowsFor(media);
   for(let i=0;i<defs.length;i++)await ensureTable(defs[i],rows[i]);
