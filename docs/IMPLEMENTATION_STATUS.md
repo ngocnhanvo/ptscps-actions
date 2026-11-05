@@ -3,6 +3,15 @@
 Updated: 2026-11-05
 Code mode: `auto-build`
 
+## CURRENT CHECKPOINT — Project detail semantics aligned and production QA PASS (2026-11-05)
+
+- Astro `master` source `886ac10d5158283f997a6c4987281c612b4c8975` (`fix(projects): use project category semantics on detail pages`) keeps generic product behavior outside project routes while treating `/dich-vu/...` / service-root detail entries as projects.
+- Project detail breadcrumb now uses the real project category label from CMS and links to `/dich-vu/{categorySlug}` instead of `Sản phẩm`; the price/contact-price row is suppressed for projects, related-card quote CTAs are hidden, and the related section title is `Dự án tương tự` (`Similar projects` for EN).
+- Native WordPress Build Website trigger `41994641705` **PASS**; production deploy `41994757566` **PASS** and explicitly deployed Astro commit `886ac10d5158283f997a6c4987281c612b4c8975`, including signed staging activation plus public SSG/home smoke.
+- Production read-only Playwright QA `41995157303` **PASS** on desktop/mobile. Project detail regression, parent/child service routes and category routes remain PASS. Screenshot artifact `13399184214` visually confirms the project category breadcrumb, no visible quote CTA, and `Dự án tương tự` cards without quote buttons on desktop/mobile.
+- The matching project category routes are healthy in the same QA (`SERVICES_READONLY_QA_REPAIR_PLANT=PASS` desktop/mobile and `SERVICES_READONLY_QA_CATEGORY=van-hanh-va-bao-duong-fpso-fso-mopu:PASS`), so the breadcrumb destination is backed by an existing live category route.
+- **Do not rerun this build/QA unless Astro/CMS changes or a new regression is observed.** Preserve project-only semantics in `ProductDetailsPage.astro`; do not globally remove e-commerce behavior from real product routes.
+
 ## CURRENT CHECKPOINT — Project detail isolated from service landing content and production QA PASS (2026-11-05)
 
 - Root cause fixed in the generic product-detail route: `src/pages/ssr/products/[slug]/detail.astro` previously rendered `ExtractHTML` from the product-list page in an attempt to reuse a banner, which injected the entire `/dich-vu` landing content above project details. The detail route now renders only `ProductDetailsPage`; no project slug is hard-coded.
