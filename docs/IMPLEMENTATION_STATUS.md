@@ -3,6 +3,14 @@
 Updated: 2026-11-05
 Code mode: `auto-build`
 
+## CURRENT CHECKPOINT — News legacy inventory complete; CMS migration blocked by missing source product_lang (2026-11-05)
+
+- Scope requested: add native `Tin tức` Header menu and corresponding `/tin-tuc`, `/c/tin-tuc/hoat-dong-cua-cong-ty`, `/c/tin-tuc/dau-khi-trong-nuoc-va-khu-vuc`, `/thu-vien-pps`, `/thu-moi-chao-gia` routes/pages. Astro `master` commit `ea539628cbf7154a19d7faa4fcb9cbe01bf67360` already contains the reusable News listing routes and PPS route; it has not been released for this News task because target CMS data is still absent.
+- Legacy source inventory run `42066129536` PASS (`INVENTORY_ONLY_PASS`): categories `tin-tuc=173`, `hoat-dong-cua-cong-ty=217`, `dau-khi-trong-nuoc-va-khu-vuc=1`, `thu-moi-chao-gia=6`, **226 unique Posts**, PPS gallery Page id `2` with 8 visible image tags. Target inventory before any writes contains only `Uncategorized`, no migrated News Posts and no `thu-vien-pps` Page.
+- Language metadata probe run `42067013752` PASS read-only: raw Post has `acf:{}` with no language fields; `/wp-json/acf/v3/posts/<id>` and `/wp-json/acf/v3/pages/2` both return 404. `NEWS_SOURCE_LANGUAGE_BLOCKER` therefore remains real: legacy Posts/Page do not expose ACF `product_lang`.
+- Per Knowledge `wordpress-content-locale.md`, Page/Post language must come from each record's `product_lang`; do not infer `vi` from Vietnamese text, URL, menu, or locale. **No target CMS/category/Post/Page/menu writes and no News build/deploy have been performed.**
+- News workflow is intentionally left in `NEWS_INVENTORY_ONLY=1` until a valid source language mapping is provided/approved. Do not rerun the superseded failures `42058920040`, `42059810523`, or `42064850383`; use `42066129536` + `42067013752` as current source evidence.
+
 ## CURRENT CHECKPOINT — HSEQ/desktop horizontal scrollbar fixed at document root and production QA PASS (2026-11-05)
 
 - The earlier dropdown clamp remains valid: Astro `master` commit `4548c470e38029b97dd7658b673cf0706cadeb2c` keeps non-mega desktop dropdown panels inside an 8px viewport gutter. Follow-up diagnostics showed production Chromium itself had `documentScrollWidth == clientWidth` before and after opening HSEQ across `900, 960, 1024, 1080, 1100, 1150, 1185, 1366, 1440, 1536, 1600, 1624` CSS px, so the remaining Windows screenshot was not reproduced as content-width overflow on Linux.
