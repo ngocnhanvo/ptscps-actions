@@ -326,26 +326,69 @@ try {
     assert(equipmentResponse?.status() === 200, `${viewport.name} repair equipment HTTP ${equipmentResponse?.status()}`);
     assert.equal(clean(await page.locator('h1').first().textContent()), equipment.title, `${viewport.name} repair equipment H1 mismatch`);
     const equipmentDescription = page.locator('[data-service-category-description]');
-    assert(await equipmentDescription.isVisible(), `${viewport.name} repair equipment description missing`);
-    const equipmentText = clean(await equipmentDescription.textContent());
-    for (const phrase of ['(1) Thiết bị tĩnh', '(2) Thiết bị quay', '(3) Thiết bị điện / Tự động hóa']) {
-      assert(equipmentText.includes(phrase), `${viewport.name} repair equipment section missing: ${phrase}`);
-    }
-    const repairCapabilities = page.locator('[data-service-capability-gallery] figure');
-    assert.equal(await repairCapabilities.count(), 16, `${viewport.name} repair capability count mismatch`);
-    const repairCapabilityImages = repairCapabilities.locator('img');
-    assert.equal(await repairCapabilityImages.count(), 16, `${viewport.name} repair capability image count mismatch`);
+    assert.equal(await equipmentDescription.count(), 0, `${viewport.name} repair equipment should use ESC Table content flow instead of taxonomy description`);
+    const equipmentFlow = page.locator('[data-service-detail-content][data-service-detail-flow="true"]');
+    assert(await equipmentFlow.isVisible(), `${viewport.name} repair equipment ESC Table content flow missing`);
+    const equipmentBlocks = equipmentFlow.locator('[data-service-detail-block]');
+    assert.deepEqual(
+      await equipmentBlocks.evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-service-detail-block') || '')),
+      ['section-heading', 'subheading', 'prose', 'gallery', 'subheading', 'prose', 'gallery', 'subheading', 'prose', 'gallery', 'section-heading', 'prose', 'subheading', 'gallery', 'subheading', 'gallery', 'section-heading', 'prose', 'gallery'],
+      `${viewport.name} repair equipment legacy content block order mismatch`,
+    );
+    assert.deepEqual(
+      (await equipmentFlow.locator('[data-service-detail-block="section-heading"]').allTextContents()).map(clean),
+      ['(1) Thiết bị tĩnh', '(2) Thiết bị quay', '(3) Thiết bị điện / Tự động hóa'],
+      `${viewport.name} repair equipment section heading order mismatch`,
+    );
+    assert.deepEqual(
+      (await equipmentFlow.locator('[data-service-detail-block="subheading"]').allTextContents()).map(clean),
+      [
+        'Bảo dưỡng/sửa chữa van các loại',
+        'Bảo dưỡng sửa chữa các thiết bị trao đổi nhiệt (Heat exchanger)',
+        'Bảo dưỡng sửa chữa các két, bình áp lực (tank and vessel)',
+        'Revamping Steam Turbines package for Phu My Fertilizer',
+        'Reciprocating Compressor Overhaul',
+      ],
+      `${viewport.name} repair equipment subheading order mismatch`,
+    );
+    const equipmentGalleries = equipmentFlow.locator('[data-service-detail-gallery]');
+    assert.equal(await equipmentGalleries.count(), 6, `${viewport.name} repair equipment gallery group count mismatch`);
+    assert.deepEqual(
+      await equipmentGalleries.evaluateAll((nodes) => nodes.map((node) => node.querySelectorAll('figure').length)),
+      [2, 2, 2, 4, 4, 2],
+      `${viewport.name} repair equipment gallery sizes mismatch`,
+    );
+    const equipmentImages = equipmentFlow.locator('img');
+    assert.equal(await equipmentImages.count(), 16, `${viewport.name} repair equipment image count mismatch`);
     for (let i = 0; i < 16; i += 1) {
-      await repairCapabilityImages.nth(i).scrollIntoViewIfNeeded();
+      await equipmentImages.nth(i).scrollIntoViewIfNeeded();
       await page.waitForFunction((index) => {
-        const image = document.querySelectorAll('[data-service-capability-gallery] img')[index];
+        const image = document.querySelectorAll('[data-service-detail-flow="true"] img')[index];
         return image && image.complete && image.naturalWidth > 0;
       }, i, { timeout: 12000 });
     }
+    const equipmentBlockY = await equipmentBlocks.evaluateAll((nodes) => nodes.map((node) => Math.round(node.getBoundingClientRect().top + window.scrollY)));
+    for (let index = 1; index < equipmentBlockY.length; index += 1) {
+      assert(equipmentBlockY[index] > equipmentBlockY[index - 1] + 4, `${viewport.name} repair equipment blocks should keep legacy vertical order`);
+    }
+    const equipmentGalleryBoxes = await equipmentGalleries.evaluateAll((nodes) => nodes.map((node) => Array.from(node.querySelectorAll('figure')).map((figure) => {
+      const rect = figure.getBoundingClientRect();
+      return { x: Math.round(rect.x), y: Math.round(rect.y) };
+    })));
+    for (const boxes of equipmentGalleryBoxes) {
+      if (viewport.name === 'desktop') {
+        assert(Math.max(...boxes.map((box) => box.y)) - Math.min(...boxes.map((box) => box.y)) <= 4, 'desktop repair equipment gallery should stay on one row per legacy group');
+      } else {
+        for (let index = 1; index < boxes.length; index += 1) {
+          assert(boxes[index].y > boxes[index - 1].y + 20, 'mobile repair equipment gallery should stack images vertically');
+        }
+      }
+    }
+    assert.equal(await page.locator('[data-service-capability-gallery]').count(), 0, `${viewport.name} repair equipment should not duplicate capability gallery after ESC Table flow`);
     assert.equal(await page.locator('[data-service-projects-heading]').count(), 0, `${viewport.name} repair equipment should not render project cards`);
     noAdminOrigin(await page.content(), `${viewport.name}-repair-equipment`);
     await page.screenshot({ path: `${artifactDir}/${viewport.name}-dich-vu-sua-chua-thiet-bi.png`, fullPage: true });
-    console.log(`SERVICES_READONLY_QA_REPAIR_EQUIPMENT=${viewport.name}:PASS capabilities=16`);
+    console.log(`SERVICES_READONLY_QA_REPAIR_EQUIPMENT=${viewport.name}:PASS flow_blocks=19 galleries=6 images=16`);
 
     const plant = repairChildren[1];
     const plantResponse = await page.goto(`${front}/dich-vu/${plant.slug}?_repair_plant_qa=${Date.now()}`, { waitUntil: 'load', timeout: 50000 });
