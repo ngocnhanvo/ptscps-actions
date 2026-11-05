@@ -1,7 +1,16 @@
 # PTSCPS implementation checkpoint
 
-Updated: 2026-11-02
+Updated: 2026-11-05
 Code mode: `auto-build`
+
+## CURRENT CHECKPOINT — Repair service detail legacy flow aligned and production QA PASS (2026-11-05)
+
+- Scope completed: `dich-vu-bao-duong-sua-chua-thiet-bi-tinh-thiet-bi-quay-thiet-bi-dien-va-tu-dong-hoa`. The nested service detail no longer renders all capability images as a detached gallery after the text; content and media now follow the legacy sequence from CMS.
+- CMS migration run `41987398204` **PASS**. ESC Table `pub_service_dich-vu-bao-duong-sua-chua-thiet-bi-tinh-thiet-bi-quay-thiet-bi-dien-va-tu-dong-hoa` read back with `29` rows and `16` media items (`CREATED_VERIFIED`). Earlier runs `41985729490` and `41986460583` failed while testing taxonomy-description image storage and are superseded; **do not rerun them**.
+- Astro `master` source `5514dac1e4ea159fd57d247a097e7d14f2a454ce` renders the generic ESC Table detail flow in CMS order, groups adjacent `gallery-image` rows, suppresses the old taxonomy description/capability gallery when a content flow exists, and does not hard-code the service slug.
+- Native WordPress Build Website trigger `41988133432` **PASS**; production deploy `41988260123` **PASS** from Astro source `5514dac1e4ea159fd57d247a097e7d14f2a454ce`, including build/package/FTPS activation and public SSG smoke.
+- Production read-only Playwright QA `41989276180` **PASS** on desktop and mobile: `19` ordered content blocks, `6` gallery groups sized `[2,2,2,4,4,2]`, `16` loaded images, no duplicate capability gallery, and parent/plant/other/menu regressions PASS. Screenshot artifact: `13396899538`.
+- **Do not rerun this migration/build/QA unless CMS/source changes or a new regression is observed.** If further visual refinement is requested, start from artifact `13396899538` and adjust only the shared ESC Table/Tailwind presentation while preserving CMS order and data ownership.
 
 ## CURRENT CHECKPOINT — VI/EN AI Agent live regression PASS (2026-11-02)
 
