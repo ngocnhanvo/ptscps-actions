@@ -3,14 +3,16 @@
 Updated: 2026-11-05
 Code mode: `auto-build`
 
-## CURRENT CHECKPOINT — HSEQ CMS pages, nested routes, Header menu and production QA PASS (2026-11-05)
+## CURRENT CHECKPOINT — HSEQ source/target parity, production data and image-load QA PASS (2026-11-05)
 
-- HSEQ is live from WordPress-owned CMS data: 5 Pages (`hseq` ID `82890` plus child IDs `82893`/`82895`/`82897`/`82899`), 5 ESC Tables (`hseq_00_vi` through `hseq_04_vi`), and verified legacy media IDs `82871`/`82872`/`82873`. Latest idempotency run `42018467034` read all of them back as `SKIP_EXISTING`; do not re-upload or recreate them.
-- Astro `master` `784ba1cb9dc010af1c3c132d7a868eafd059b0bc` publishes nested `/hseq/<slug>` SSG routes and the reusable `HseqSections.astro`. Production deploy `42011201590` **PASS** with signed activation plus public SSG/home smoke.
-- Native `Header.vi` contains one top-level `HSEQ` click/tap menu with exact ordered children: `Tất cả`, `Chính sách HSEQ`, `Mục tiêu HSEQ`, `Hệ thống quản lý HSEQ`, `Giấy chứng nhận HSEQ`, linked to the root/child routes. Latest desktop/mobile QA run `42018467034` **PASS** with `menu=PASS`; visual artifact `13410961022`.
-- HSEQ automation is idempotent: validation run `42018467034` reported `writes=0`, `HSEQ_BUILD=ALREADY_PUBLISHED_SKIP_TRIGGER`, `HSEQ_FRONT_READY=PASS`, and `HSEQ_RESULT=PASS`; it did not start another production build.
-- Actions `dabd4449ce8623f7ea814cab35a917a7144e365c` adds the WordPress build-result monitor required by Knowledge. Mock contract `HSEQ_BUILD_MONITOR_TEST=PASS`; future HSEQ-triggered builds lock the exact GitHub run ID through the native WordPress status API, monitor to terminal result, fail on build failure/non-retryable status errors, bound transient retries, and only continue frontend QA after build success.
-- **Do not rerun HSEQ migration/build unless source/CMS changes or a new regression is observed.** Preserve WordPress ownership of Pages/ESC Tables/Header menu and do not hard-code HSEQ Header links in Astro.
+- Acceptance baseline: `https://ptscps.com.vn/hseq/chinh-sach-skatmtcl`; target: `https://ptscps.thegioihosting.io.vn/hseq/chinh-sach-skatmtcl`. HSEQ remains WordPress-owned: 5 Pages (`hseq` ID `82890` plus child IDs `82893`/`82895`/`82897`/`82899`) and 5 ESC Tables (`hseq_00_vi` through `hseq_04_vi`).
+- Independent legacy inventory identified the exact three policy documents by source stems `PTS082024005`, `PTS082024006`, `PTS082024007`. WordPress media read-back uses policy media IDs `82907`/`82908`/`82909`; final run `42026834484` reported all as `SKIP_EXISTING`, so do not re-upload/recreate them.
+- Native `Header.vi` now preserves source navigation semantics: relative top-level order `Giới thiệu → Dịch vụ → HSEQ`; HSEQ children remain exactly `Tất cả`, `Chính sách HSEQ`, `Mục tiêu HSEQ`, `Hệ thống quản lý HSEQ`, `Giấy chứng nhận HSEQ`, with the verified internal routes and no new-tab target.
+- Astro `master` `784ba1cb9dc010af1c3c132d7a868eafd059b0bc` provides nested `/hseq/<slug>` SSG routes and reusable `HseqSections.astro`. WordPress-triggered production deploy `42023793694` **PASS** after the policy/menu parity migration. Later validation did not create another production build.
+- Final source→target parity QA `42026834484` **PASS** on desktop/mobile; artifact `13414052658`. Required gates are all satisfied: `SOURCE_INVENTORY_PASS`, `DATA_PARITY_PASS` (`policyDocuments=3`), `NAV_PARITY_PASS` (`Giới thiệu → Dịch vụ → HSEQ`), and `VISUAL_PARITY_PASS` for both viewports. Approved exception: HSEQ presentation is redesigned while source content/media/navigation are preserved.
+- Policy images are verified as actually loaded, not merely present in DOM: final QA logged 3/3 `HSEQ_POLICY_IMAGE_LOADED` on desktop and 3/3 on mobile with positive `naturalWidth`/`naturalHeight`; screenshots show all three policy documents. Final run also reported `writes=0`, `HSEQ_BUILD=ALREADY_PUBLISHED_SKIP_TRIGGER`, `HSEQ_FRONT_READY=PASS`, and `HSEQ_RESULT=PASS`.
+- Actions current source `ee2d4c0c3f8ff3f7c9a9543d79ef59ce17a07c42` adds the image-load parity guard on top of the independent source oracle and exact-run build monitor. Keep these regression gates; do not weaken them to target-only counts/screenshots.
+- **Do not rerun HSEQ migration/build unless source/CMS/source code changes or a new regression is observed.** Preserve WordPress ownership of Pages/ESC Tables/Header menu; do not hard-code HSEQ Header links or legacy policy data into Astro.
 
 ## CURRENT CHECKPOINT — Project detail semantics aligned and production QA PASS (2026-11-05)
 
