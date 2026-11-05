@@ -59,10 +59,19 @@ async function collectSourcePolicyDocs(p){
       .map(value=>({index,url:String(value),alt}))
       .filter(row=>/\/wp-content\/uploads\/2024\/08\/.*\.(?:png|jpe?g|webp)(?:[?#].*)?$/i.test(row.url));
   }));
-  const seen=new Set();
-  return rows
-    .filter(row=>{if(seen.has(row.url))return false;seen.add(row.url);return true;})
-    .map(({url,alt})=>({url,alt}));
+  const stems=['PTS082024005','PTS082024006','PTS082024007'];
+  return stems.map(stem=>{
+    const matches=rows.filter(row=>new URL(row.url).pathname.split('/').pop()?.startsWith(stem));
+    assert(matches.length>0,`Legacy policy document asset missing ${stem}`);
+    const preferred=[...matches].sort((a,b)=>{
+      const aName=new URL(a.url).pathname.split('/').pop()||'';
+      const bName=new URL(b.url).pathname.split('/').pop()||'';
+      const aThumb=/-\d+x\d+\./.test(aName)?1:0;
+      const bThumb=/-\d+x\d+\./.test(bName)?1:0;
+      return aThumb-bThumb||aName.length-bName.length;
+    })[0];
+    return {url:preferred.url,alt:preferred.alt};
+  });
 }
 async function visibleRelativeOrder(p,labels,scope='body'){
   const wanted=labels.map(label=>({label,key:norm(label)}));
