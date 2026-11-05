@@ -448,10 +448,29 @@ function verifyDescription(actualValue, expectedHtml, key) {
     assert(needle && actualText.includes(needle), `Description phrase missing ${key}: ${needle}`);
   }
   if (key === 'equipment') {
-    const grids = actual.match(/class=["'][^"']*\bservice-media-grid\b[^"']*["']/gi) || [];
     const images = actual.match(/<img\b/gi) || [];
-    assert.equal(grids.length, 6, 'Repair equipment description must preserve six legacy media groups');
     assert.equal(images.length, 16, 'Repair equipment description must preserve sixteen legacy images');
+    const orderMarkers = [
+      '(1) Thiết bị tĩnh',
+      `${mediaPrefix}-static-valve`,
+      'Bảo dưỡng sửa chữa các thiết bị trao đổi nhiệt (Heat exchanger)',
+      `${mediaPrefix}-heat-exchanger-1`,
+      'Bảo dưỡng sửa chữa các két, bình áp lực',
+      `${mediaPrefix}-tank-vessel-1`,
+      '(2) Thiết bị quay',
+      'Revamping Steam Turbines package for Phu My Fertilizer',
+      `${mediaPrefix}-phu-my-1`,
+      'Reciprocating Compressor Overhaul',
+      `${mediaPrefix}-compressor-1`,
+      '(3) Thiết bị điện / Tự động hóa',
+      `${mediaPrefix}-electrical-1`,
+    ];
+    let previous = -1;
+    for (const marker of orderMarkers) {
+      const position = actual.indexOf(marker);
+      assert(position > previous, `Repair equipment legacy order mismatch at ${marker}`);
+      previous = position;
+    }
   }
   if (key === 'parent') {
     assert.equal(actualText, clean(expectedHtml), 'Repair parent taxonomy description should contain only the introductory paragraph');
@@ -496,7 +515,7 @@ async function ensureProject(nonce, category, project, order) {
 
 function descriptionWithMedia(text, media, captions) {
   const figure=(index)=>`<figure><img src="${relativeMediaPath(media[index])}" alt="${captions[index]||''}" /><figcaption>${captions[index]||''}</figcaption></figure>`;
-  const mediaGrid=(from,to)=>`<div class="service-media-grid">${Array.from({length:to-from+1},(_,offset)=>figure(from+offset)).join('')}</div>`;
+  const mediaGrid=(from,to)=>Array.from({length:to-from+1},(_,offset)=>figure(from+offset)).join('');
   const groups = [
     ['{{MEDIA_0_1}}', 0, 1],
     ['{{MEDIA_2_3}}', 2, 3],
