@@ -630,7 +630,7 @@ async function qa(){
 
       // Diagnose horizontal overflow across the desktop widths used in production.
       // Keep this read-only: it must not mutate WordPress or trigger a build.
-      const overflowWidths=[1185,1366,1440,1536,1600,1624];
+      const overflowWidths=[900,960,1024,1080,1100,1150,1185,1366,1440,1536,1600,1624];
       for(const overflowWidth of overflowWidths){
         const overflowView=await browser.newContext({viewport:{width:overflowWidth,height:900}});
         const overflowPage=await overflowView.newPage();
