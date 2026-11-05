@@ -627,6 +627,53 @@ async function qa(){
         assert.notEqual(await link.getAttribute('target'),'_blank',`Desktop HSEQ submenu opens new tab ${item.title}`);
       }
       await p.screenshot({path:`${artifactDir}/desktop-hseq-menu.png`,fullPage:false});
+
+      // Regression for the real intermediate desktop width reported by the owner:
+      // opening a right-edge dropdown must never make the document horizontally scrollable.
+      const overflowView=await browser.newContext({viewport:{width:1185,height:900}});
+      const overflowPage=await overflowView.newPage();
+      try{
+        const overflowResponse=await overflowPage.goto(`${front}/hseq/giay-chung-nhan-skatmtcl?_qa_menu_overflow=${Date.now()}`,{waitUntil:'load',timeout:50000});
+        assert(overflowResponse?.status()===200,'HSEQ overflow regression page HTTP failure');
+        const before=await overflowPage.evaluate(()=>({
+          innerWidth:window.innerWidth,
+          clientWidth:document.documentElement.clientWidth,
+          documentScrollWidth:document.documentElement.scrollWidth,
+          bodyScrollWidth:document.body.scrollWidth,
+        }));
+        assert(before.documentScrollWidth<=before.clientWidth+2,`HSEQ pre-menu horizontal overflow at 1185px: ${JSON.stringify(before)}`);
+        assert(before.bodyScrollWidth<=before.clientWidth+2,`HSEQ pre-menu body overflow at 1185px: ${JSON.stringify(before)}`);
+
+        const overflowToggle=overflowPage.locator('#header-navrow button').filter({hasText:'HSEQ'}).first();
+        assert(await overflowToggle.isVisible(),'HSEQ overflow regression menu button missing');
+        await overflowToggle.click();
+        const overflowPanelId=await overflowToggle.getAttribute('aria-controls');
+        assert(overflowPanelId,'HSEQ overflow regression panel id missing');
+        const overflowPanel=overflowPage.locator(`#${overflowPanelId}`);
+        await overflowPanel.waitFor({state:'visible',timeout:5000});
+        await overflowPage.waitForTimeout(250);
+        const opened=await overflowPage.evaluate(panelId=>{
+          const panel=document.getElementById(panelId);
+          const rect=panel?.getBoundingClientRect();
+          return {
+            innerWidth:window.innerWidth,
+            clientWidth:document.documentElement.clientWidth,
+            documentScrollWidth:document.documentElement.scrollWidth,
+            bodyScrollWidth:document.body.scrollWidth,
+            panelLeft:rect?.left??null,
+            panelRight:rect?.right??null,
+            panelWidth:rect?.width??null,
+          };
+        },overflowPanelId);
+        assert(opened.documentScrollWidth<=opened.clientWidth+2,`HSEQ menu horizontal overflow at 1185px: ${JSON.stringify(opened)}`);
+        assert(opened.bodyScrollWidth<=opened.clientWidth+2,`HSEQ menu body overflow at 1185px: ${JSON.stringify(opened)}`);
+        assert(opened.panelLeft!==null&&opened.panelLeft>=6,`HSEQ menu panel escapes left viewport: ${JSON.stringify(opened)}`);
+        assert(opened.panelRight!==null&&opened.panelRight<=opened.innerWidth-6,`HSEQ menu panel escapes right viewport: ${JSON.stringify(opened)}`);
+        log('HEADER_MENU_OVERFLOW_PASS',opened);
+        await overflowPage.screenshot({path:`${artifactDir}/desktop-1185-hseq-menu-no-overflow.png`,fullPage:false});
+      }finally{
+        await overflowView.close();
+      }
     }else{
       const hamburger=p.locator('#hamburger-btn');
       assert(await hamburger.isVisible(),'Mobile hamburger missing');
