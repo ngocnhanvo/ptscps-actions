@@ -88,8 +88,15 @@ try {
       assert(metrics.every((item) => item.width >= 340), 'mobile service project cards should use the full content width');
       assert(metrics.length < 2 || metrics[1].y > metrics[0].y + 100, 'mobile service detail should use one project column');
     }
+    const firstProjectBox = await projectCards.first().boundingBox();
     const mediaBox = await page.locator('[data-service-projects-heading] + div article > a > div').first().boundingBox();
-    assert(mediaBox && mediaBox.width / mediaBox.height > 1.25 && mediaBox.width / mediaBox.height < 1.42, `${viewport.name} project media is not approximately 4:3`);
+    assert(firstProjectBox && mediaBox, `${viewport.name} project card/media box missing`);
+    if (viewport.name === 'desktop') {
+      assert(Math.abs(mediaBox.height - firstProjectBox.height) <= 4, 'desktop service media should fill the full compact card height');
+      assert(firstProjectBox.height <= 460, 'desktop service project card still has excessive empty height');
+    } else {
+      assert(mediaBox.width / mediaBox.height > 1.25 && mediaBox.width / mediaBox.height < 1.42, 'mobile project media is not approximately 4:3');
+    }
     const projectImages = projectCards.locator('img');
     assert.equal(await projectImages.count(), await projectCards.count(), `${viewport.name} service projects should show exactly one representative image per card`);
     assert.equal(await projectCards.locator('[data-service-project-gallery]').count(), 0, `${viewport.name} service project gallery should not render`);
@@ -179,6 +186,15 @@ try {
     }));
     assert(designMetrics.every((item, index) => index === 0 || item.y > designMetrics[index - 1].y + 100), `${viewport.name} design service should use one project per row`);
     assert(designMetrics.every((item) => item.width >= (viewport.name === 'desktop' ? 1000 : 340)), `${viewport.name} design project row width mismatch`);
+    const designFirstProjectBox = await designProjectCards.first().boundingBox();
+    const designMediaBox = await designProjectCards.first().locator(':scope > a > div').boundingBox();
+    assert(designFirstProjectBox && designMediaBox, `${viewport.name} design project card/media box missing`);
+    if (viewport.name === 'desktop') {
+      assert(Math.abs(designMediaBox.height - designFirstProjectBox.height) <= 4, 'desktop design project media should fill the full compact card height');
+      assert(designFirstProjectBox.height <= 560, 'desktop design project card still has excessive empty height');
+    } else {
+      assert(designMediaBox.width / designMediaBox.height > 1.25 && designMediaBox.width / designMediaBox.height < 1.42, 'mobile design project media is not approximately 4:3');
+    }
     assert.deepEqual((await designProjectCards.locator('h2').allTextContents()).map(clean), expectedProjects.map((item) => item.title), `${viewport.name} design project titles mismatch`);
     const designScopes = (await designProjectCards.locator('[data-service-project-scope]').allTextContents()).map(clean);
     assert.deepEqual(designScopes, expectedProjects.map((item) => item.scope), `${viewport.name} design project scopes mismatch`);
