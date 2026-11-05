@@ -1,0 +1,53 @@
+name: PTSCPS HSEQ CMS setup and visual QA
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/ptscps-hseq-setup.mjs'
+      - '.github/workflows/ptscps-hseq-setup.yml'
+permissions:
+  contents: read
+concurrency:
+  group: ptscps-hseq-cms-setup
+  cancel-in-progress: false
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 32
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.0-noble
+      options: --ipc=host
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Resolve configured project origins
+        shell: bash
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PYTHON'
+          import os,re
+          from urllib.parse import urlsplit
+          values=dict(re.findall(r'^\s*(?:export\s+)?(WC_URL|WC_URL_CLIENT)\s*=\s*(.+)\s*$', os.environ.get('ENV_FILE',''), re.M))
+          def url(key):
+              raw=values.get(key,'').strip().strip('"\'')
+              v=urlsplit(raw)
+              if v.scheme!='https' or not v.hostname or v.path not in ('','/') or v.username or v.password or v.query or v.fragment:
+                  raise SystemExit('INVALID_ORIGIN '+key)
+              return 'https://'+v.hostname
+          wp,front=url('WC_URL'),url('WC_URL_CLIENT')
+          if wp==front: raise SystemExit('ORIGIN_COLLISION')
+          with open(os.environ['GITHUB_ENV'],'a') as f:
+              f.write('WP_ORIGIN='+wp+'\nFRONT_ORIGIN='+front+'\n')
+          print('HSEQ_CONFIG=PASS')
+          PYTHON
+      - name: Install Playwright driver without Chromium download
+        run: npm install --no-save --no-package-lock --ignore-scripts --no-audit --no-fund playwright@1.64.0
+      - name: Set up HSEQ in WordPress and perform QA
+        env:
+          WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
+          WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
+        run: node scripts/ptscps-hseq-setup.mjs
