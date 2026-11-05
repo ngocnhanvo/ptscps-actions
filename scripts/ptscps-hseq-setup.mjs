@@ -321,7 +321,20 @@ async function isPublished(){
     const body=await response.text();
     if(!body.includes('data-hseq-section')||!body.includes(d.title))return false;
   }
-  return true;
+  const expectedMenu=['Tất cả',...defs.slice(1).map(d=>d.title)];
+  const probe=await ctx.newPage();
+  try{
+    const response=await probe.goto(`${front}/hseq?_hseq_menu_publish=${Date.now()}`,{waitUntil:'domcontentloaded',timeout:40000}).catch(()=>null);
+    if(response?.status()!==200)return false;
+    const toggle=probe.locator('#header-navrow button').filter({hasText:'HSEQ'}).first();
+    if(await toggle.count()!==1)return false;
+    const panelId=await toggle.getAttribute('aria-controls');
+    if(!panelId)return false;
+    const labels=(await probe.locator(`#${panelId} a`).allTextContents()).map(clean);
+    return JSON.stringify(labels)===JSON.stringify(expectedMenu);
+  }finally{
+    await probe.close();
+  }
 }
 async function buildThroughWordPress(){
   if(!cmsWrites && await isPublished()){log('BUILD','ALREADY_PUBLISHED_SKIP_TRIGGER');return;}
