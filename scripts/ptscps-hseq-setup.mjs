@@ -267,7 +267,10 @@ async function ensureMenu(n){
   if(same){log('MENU','SKIP_EXISTING');return;}
   const all=await api('GET',`/wp-json/wp/v2/menu-items?context=edit&per_page=100&_fields=id,title,menus,parent,url,status`,n);
   assert(all.response.ok(),'Cannot read current WordPress menu items');
-  const items=(all.body||[]).filter(x=>(x.menus||[]).includes(Number(header.id)));
+  const items=(all.body||[]).filter(x=>{
+    const menuIds=Array.isArray(x.menus)?x.menus:[x.menus];
+    return menuIds.some(id=>Number(id)===Number(header.id));
+  });
   const existingParent=items.filter(x=>titleOf(x)==='HSEQ'&&Number(x.parent||0)===0);
   assert(existingParent.length<=1,'Ambiguous HSEQ parent');
   let parentId=existingParent[0]?.id;
