@@ -59,10 +59,37 @@ async function login(){
 }
 
 async function nonce(){
-  for(const candidate of ['/wp-admin/nav-menus.php?esc_full_admin=1','/wp-admin/edit.php?esc_full_admin=1']){
-    await page.goto(uri(candidate),{waitUntil:'domcontentloaded',timeout:45000});
+  let headerMenuId=0;
+  try{
+    const menuResponse=await page.request.get(uri('/wp-json/esc-api/v1/menus?_news_nonce='+Date.now()),{
+      timeout:30000,headers:{'Cache-Control':'no-cache'},
+    });
+    if(menuResponse.ok()) headerMenuId=Number((await menuResponse.json())?.menus?.Header?.vi?.id||0);
+  }catch{}
+
+  const candidates=[
+    ...(headerMenuId?[`/wp-admin/nav-menus.php?action=edit&menu=${headerMenuId}&esc_full_admin=1`]:[]),
+    '/wp-admin/post.php?post=82642&action=edit&esc_full_admin=1',
+    '/wp-admin/edit-tags.php?taxonomy=product_cat&post_type=product&esc_full_admin=1',
+  ];
+  for(const candidate of candidates){
+    await page.goto(uri(candidate),{waitUntil:'domcontentloaded',timeout:50000});
     const value=await page.evaluate(()=>String(globalThis.wpApiSettings?.nonce||'').trim());
-    if(/^[A-Za-z0-9_-]{8,32}$/.test(value)){log('REST_NONCE_SOURCE',candidate.split('?')[0]);return value;}
+    if(/^[A-Za-z0-9_-]{8,32}$/.test(value)){
+      log('REST_NONCE_SOURCE',candidate.split('?')[0]);
+      return value;
+    }
+  }
+
+  const ajax=await page.request.post(uri('/wp-admin/admin-ajax.php'),{
+    form:{action:'rest-nonce'},timeout:30000,
+  }).catch(()=>null);
+  if(ajax?.ok()){
+    const value=(await ajax.text()).trim();
+    if(/^[A-Za-z0-9_-]{8,32}$/.test(value)){
+      log('REST_NONCE_SOURCE','admin-ajax');
+      return value;
+    }
   }
   throw Error('WordPress REST nonce unavailable');
 }
