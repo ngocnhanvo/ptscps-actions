@@ -250,6 +250,22 @@ try {
     const repairParentText = clean(await repairParentDescription.textContent());
     assert(repairParentText.includes('5000m2'), `${viewport.name} repair workshop introduction missing`);
     assert(repairParentText.includes('ASME'), `${viewport.name} repair ASME introduction missing`);
+    const repairParentImages = repairParentDescription.locator('img');
+    assert.equal(await repairParentImages.count(), 3, `${viewport.name} repair parent legacy media count mismatch`);
+    const repairParentSources = await repairParentImages.evaluateAll((nodes) => nodes.map((node) => node.getAttribute('src') || ''));
+    for (const mediaKey of ['ptscps-repair-workshop', 'ptscps-repair-asme-u', 'ptscps-repair-asme-s']) {
+      assert(repairParentSources.some((src) => src.includes(mediaKey)), `${viewport.name} repair parent media missing ${mediaKey}`);
+    }
+    const repairCertificateGrid = repairParentDescription.locator('.service-certificates');
+    assert.equal(await repairCertificateGrid.count(), 1, `${viewport.name} repair certificate grid missing`);
+    assert.equal(await repairCertificateGrid.locator('img').count(), 2, `${viewport.name} repair certificate count mismatch`);
+    for (let i = 0; i < 3; i += 1) {
+      await repairParentImages.nth(i).scrollIntoViewIfNeeded();
+      await page.waitForFunction((index) => {
+        const image = document.querySelectorAll('[data-service-category-description] img')[index];
+        return image && image.complete && image.naturalWidth > 0;
+      }, i, { timeout: 12000 });
+    }
     const repairGroups = page.locator('[data-service-subcategories] a');
     assert.equal(await repairGroups.count(), 3, `${viewport.name} repair child service count mismatch`);
     assert.deepEqual((await repairGroups.locator('h3').allTextContents()).map(clean), repairChildren.map((item) => item.title), `${viewport.name} repair child service labels mismatch`);

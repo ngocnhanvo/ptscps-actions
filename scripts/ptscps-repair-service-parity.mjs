@@ -10,8 +10,13 @@ const parentSlug = 'dich-vu-sua-chua-bao-duong-cac-thiet-bi-va-cong-trinh-cong-n
 const mediaPrefix = 'ptscps-repair';
 
 const parent = {
-  intro: 'Công ty đã đầu tư xây dựng khu nhà xưởng để thực hiện dịch vụ sửa chữa bảo dưỡng trên diện tích 5000m2 nằm trong khu vực Cảng hạ lưu PTSC, đồng thời cũng đã đầu tư đầy đủ trang thiết bị nhằm phục vụ công tác bảo dưỡng, sửa chữa trên các tàu FPSO/FSO và thực hiện các dịch vụ khác cho khách hàng. Công ty đã được cấp chứng chỉ ASME (American Society of Mechanical Engineers) về thiết kế, sản xuất chế tạo và sửa chữa nồi hơi và bình chịu áp lực.',
+  intro: 'Công ty đã đầu tư xây dựng khu nhà xưởng để thực hiện dịch vụ sửa chữa bảo dưỡng trên diện tích 5000m2 nằm trong khu vực Cảng hạ lưu PTSC, đồng thời cũng đã đầu tư đầy đủ trang thiết bị nhằm phục vụ công tác bảo dưỡng, sửa chữa trên các tàu FPSO/FSO và thực hiện các dịch vụ khác cho khách hàng.',
+  asme: 'Công ty đã được cấp chứng chỉ ASME (American Society of Mechanical Engineers) về thiết kế, sản xuất chế tạo và sửa chữa nồi hơi và bình chịu áp lực.',
   image: ['workshop', 'Xưởng cơ khí bảo dưỡng PTSC', 'https://ptscps.com.vn/wp-content/uploads/2019/10/xuongckbd.jpg'],
+  certificates: [
+    ['asme-u', 'Chứng chỉ ASME U', 'https://ptscps.com.vn/wp-content/uploads/2019/12/PPS-ASME-U.png'],
+    ['asme-s', 'Chứng chỉ ASME S', 'https://ptscps.com.vn/wp-content/uploads/2019/12/PPS-ASME-S.png'],
+  ],
 };
 
 const children = [
@@ -329,6 +334,10 @@ function verifyDescription(actualValue, expectedHtml, key) {
     .filter(Boolean);
   const retained = imageNames.filter((name) => actual.includes(name)).length;
   report('DESCRIPTION_MEDIA', { key, expected:imageNames.length, retained });
+  if (key === 'parent') {
+    assert.equal(retained, imageNames.length, `Description media missing ${key}: expected ${imageNames.length}, retained ${retained}`);
+    assert(/class=["'][^"']*\bservice-certificates\b/.test(actual), 'Parent certificate grid marker missing');
+  }
   return true;
 }
 
@@ -376,7 +385,9 @@ try {
   await login(); const nonce=await restNonce();
   const parentCategory=await findCategory(nonce,parentSlug); assert(parentCategory,`Parent category missing ${parentSlug}`);
   const workshop=await ensureMedia(nonce,...parent.image);
-  const parentHtml=`<p>${parent.intro}</p><figure><img src="${relativeMediaPath(workshop)}" alt="Xưởng cơ khí bảo dưỡng PTSC" /></figure><p><strong>Các dịch vụ sửa chữa bảo dưỡng được Công ty thực hiện gồm ba nhóm dịch vụ chính dưới đây.</strong></p>`;
+  const certificates=[]; for(const spec of parent.certificates) certificates.push(await ensureMedia(nonce,...spec));
+  const certificateHtml=certificates.map((media,index)=>`<figure><img src="${relativeMediaPath(media)}" alt="${parent.certificates[index][1]}" /></figure>`).join('');
+  const parentHtml=`<p>${parent.intro}</p><figure><img src="${relativeMediaPath(workshop)}" alt="Xưởng cơ khí bảo dưỡng PTSC" /></figure><p>${parent.asme}</p><div class="service-certificates">${certificateHtml}</div><p><strong>Các dịch vụ sửa chữa bảo dưỡng được Công ty thực hiện bao gồm:</strong></p>`;
   await ensureDescription(nonce,parentCategory,parentHtml,'parent');
   const childRows=[]; for(const spec of children) childRows.push(await ensureChildCategory(nonce,parentCategory.id,spec));
   await ensureCategoryOrder(parentCategory.id,childRows);
