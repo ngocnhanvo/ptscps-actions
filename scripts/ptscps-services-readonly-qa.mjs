@@ -91,6 +91,8 @@ try {
     const mediaBox = await page.locator('[data-service-projects-heading] + div article > a > div').first().boundingBox();
     assert(mediaBox && mediaBox.width / mediaBox.height > 1.25 && mediaBox.width / mediaBox.height < 1.42, `${viewport.name} project media is not approximately 4:3`);
     const projectImages = projectCards.locator('img');
+    assert.equal(await projectImages.count(), await projectCards.count(), `${viewport.name} service projects should show exactly one representative image per card`);
+    assert.equal(await projectCards.locator('[data-service-project-gallery]').count(), 0, `${viewport.name} service project gallery should not render`);
     for (let i = 0; i < await projectImages.count(); i += 1) {
       await projectImages.nth(i).scrollIntoViewIfNeeded();
       await page.waitForFunction((index) => {
@@ -188,8 +190,8 @@ try {
     assert(designScopeMetrics.every((item) => item.scrollHeight <= item.clientHeight + 2), `${viewport.name} design project scope is visually truncated`);
     assert(designScopeMetrics.every((item) => item.overflow !== 'hidden'), `${viewport.name} design project scope still hides overflow`);
     const designProjectImages = designProjectCards.locator('img');
-    assert.equal(await designProjectImages.count(), 11, `${viewport.name} design project image count mismatch`);
-    assert.equal(await designProjectCards.locator('[data-service-project-gallery]').count(), 4, `${viewport.name} design gallery group count mismatch`);
+    assert.equal(await designProjectImages.count(), await designProjectCards.count(), `${viewport.name} design projects should show exactly one representative image per card`);
+    assert.equal(await designProjectCards.locator('[data-service-project-gallery]').count(), 0, `${viewport.name} design project gallery should not render`);
     for (let i = 0; i < await designProjectImages.count(); i += 1) {
       await designProjectImages.nth(i).scrollIntoViewIfNeeded();
       await page.waitForFunction((index) => {
@@ -205,7 +207,7 @@ try {
     assert(designOverflow.scroll <= designOverflow.client + 2, `${viewport.name} design detail horizontal overflow`);
     noAdminOrigin(await page.content(), `${viewport.name}-design-service-detail`);
     await page.screenshot({ path: `${artifactDir}/${viewport.name}-dich-vu-thiet-ke-detail.png`, fullPage: true });
-    console.log(`SERVICES_READONLY_QA_DESIGN=${viewport.name}:PASS capabilities=4 projects=5 project_images=11`);
+    console.log(`SERVICES_READONLY_QA_DESIGN=${viewport.name}:PASS capabilities=4 projects=5 project_images=5`);
     await context.close();
   }
 
