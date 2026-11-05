@@ -198,13 +198,19 @@ async function setAcf(name,value){
 async function ensurePage(def,parentId,n){
   const r=await api('GET',`/wp-json/wp/v2/pages?context=edit&status=publish,draft,pending,private&slug=${encodeURIComponent(def.slug)}&per_page=30&_fields=id,parent,slug,status,content,acf`,n);
   assert(r.response.ok(),`Page lookup failed ${def.slug} ${r.response.status()}`);
-  const matches=(r.body||[]).filter(x=>x.slug===def.slug && Number(x.parent||0)===Number(parentId));
-  assert(matches.length<=1,`Duplicate HSEQ Page ${def.slug}`);
+  const matches=(r.body||[]).filter(x=>x.slug===def.slug);
+  assert(matches.length<=1,`Duplicate HSEQ Page slug ${def.slug}`);
   const desired=`[table id=${def.id} /]`;
   if(matches.length){
     const current=matches[0];
     const rendered=String(current.content?.raw||current.content?.rendered||'');
     if(current.status==='publish'&&rendered.includes(def.id)&&String(current.acf?.action||'')==='IntroPage'){
+      if(Number(current.parent||0)!==Number(parentId)){
+        assert(String(current.acf?.key||'')===def.key,`Unexpected parent for non-HSEQ Page ${def.slug}`);
+        const updated=await api('POST',`/wp-json/wp/v2/pages/${current.id}`,n,{parent:Number(parentId)});
+        assert(updated.response.ok()&&Number(updated.body?.parent||0)===Number(parentId),`Cannot recover HSEQ parent for ${def.slug}`);
+        cmsWrites++;
+      }
       log('PAGE',{slug:def.slug,id:current.id,state:'SKIP_EXISTING'});return current.id;
     }
     // Preserve pre-existing content; do not overwrite partial or different CMS pages.
@@ -226,8 +232,8 @@ async function ensurePage(def,parentId,n){
     raw.dispatchEvent(new Event('change',{bubbles:true}));
   },desired);
   assert((await page.locator('#content').inputValue()).includes(def.id),'Shortcode not applied to Classic Editor');
-  const parent=page.locator('#parent_id');
-  if(parentId && await parent.count())await parent.selectOption(String(parentId));
+  // Hierarchy is set through authenticated WordPress REST after publication.
+  // Classic Editor hides #parent_id and Playwright cannot select a hidden control.
   await page.locator('#save-post').click();
   await page.waitForURL(/post\.php\?post=\d+&action=edit/,{timeout:45000});
   const id=Number(await page.locator('#post_ID').inputValue());assert(id>0,'New HSEQ Page id missing');
@@ -238,6 +244,10 @@ async function ensurePage(def,parentId,n){
   }else if(await page.locator('#post_name').count()) await page.locator('#post_name').fill(def.slug);
   else throw Error('Cannot set HSEQ slug '+def.slug);
   const nav=page.waitForNavigation({waitUntil:'domcontentloaded',timeout:45000});await page.locator('#publish').click();await nav;
+  if(parentId){
+    const moved=await api('POST',`/wp-json/wp/v2/pages/${id}`,n,{parent:Number(parentId)});
+    assert(moved.response.ok()&&Number(moved.body?.parent||0)===Number(parentId),`HSEQ Page parent update failed ${def.slug}`);
+  }
   const check=await api('GET',`/wp-json/wp/v2/pages/${id}?context=edit&_fields=id,parent,slug,status,acf,content`,n);
   assert(check.response.ok(),'HSEQ Page cannot be read back');
   assert(check.body.status==='publish'&&check.body.slug===def.slug&&Number(check.body.parent||0)===Number(parentId),`HSEQ Page publication mismatch ${def.slug}`);
