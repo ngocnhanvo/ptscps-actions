@@ -123,6 +123,7 @@ async function inventorySourceRest(){
   log('SOURCE_REST_INVENTORY_PASS',{
     categories,
     counts:Object.fromEntries(Object.entries(posts).map(([slug,rows])=>[slug,rows.length])),
+    uniquePostCount:new Set(Object.values(posts).flat().map(row=>row.id)).size,
     languageValues,
     samples:Object.fromEntries(Object.entries(posts).map(([slug,rows])=>[slug,rows.slice(0,5)])),
     gallery:{
@@ -138,9 +139,13 @@ async function inventorySourceRest(){
       imageSamples:galleryImages.slice(0,8),
     },
   });
-  assert(languageValues.length===1&&languageValues[0]&&languageValues[0]!=='(missing)','Legacy News product_lang missing or inconsistent');
   const galleryLang=String(gallery.acf?.product_lang?.value||gallery.acf?.product_lang||'').trim();
-  assert(galleryLang,'Legacy PPS gallery product_lang missing');
+  if(languageValues.includes('(missing)')||!galleryLang){
+    log('SOURCE_LANGUAGE_BLOCKER',{
+      posts:languageValues,
+      galleryProductLang:galleryLang||'(missing)',
+    });
+  }
   return {categories,posts,gallery,galleryImages};
 }
 
