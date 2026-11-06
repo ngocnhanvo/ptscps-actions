@@ -603,31 +603,41 @@ async function ensureEnglishHeader(n, targetPages) {
     ['Giới thiệu', 'About Us'], ['Dịch vụ', 'Services'], ['HSEQ', 'HSEQ'], ['Tin tức', 'News'],
     ['Tuyển dụng', 'Careers'], ['Liên hệ', 'Contact'], ['Trang chủ', 'Home'], ['Home', 'Home'],
     ['Thư mời chào giá', 'Invitation for Quotation'], ['Thư viện PPS', 'PPS Library'],
+    ['Hồ sơ năng lực', 'Company Brochure'],
   ]);
   const pagesViBySlug = new Map(targetPages.filter(p => acfValue(p.acf?.product_lang) !== 'en').map(p => [p.slug, p]));
   const pagesEnByOrigin = new Map(targetPages.filter(p => acfValue(p.acf?.product_lang) === 'en' && Number(acfValue(p.acf?.origin_page_id) || 0) > 0)
     .map(p => [Number(acfValue(p.acf?.origin_page_id)), p]));
+  const homeVi = targetPages.find(p => acfValue(p.acf?.product_lang) !== 'en' && acfValue(p.acf?.key) === 'home');
+  const homeEn = targetPages.find(p => acfValue(p.acf?.product_lang) === 'en' && acfValue(p.acf?.key) === 'home')
+    || (homeVi ? pagesEnByOrigin.get(Number(homeVi.id)) : null);
+  const internalOrigins = new Set([new URL(wp).origin, new URL(front).origin]);
 
-  const normalizePath = href => {
+  const resolveHref = href => {
     try {
       const u = new URL(String(href || ''), wp);
-      if (u.origin !== wp) return null;
-      return u.pathname.replace(/^\/+|\/+$/g, '');
+      return { external: !internalOrigins.has(u.origin), path: u.pathname.replace(/^\/+|\/+$/g, '') };
     } catch { return null; }
   };
   const desired = [];
   const walk = (items, parentKey = '') => {
     for (const item of items || []) {
       const label = String(item.label || '').trim();
-      const path = normalizePath(item.href);
-      const isGroup = !path || String(item.href || '') === '#' || String(item.href || '') === '';
+      const rawHref = String(item.href || '').trim();
+      const resolvedHref = resolveHref(rawHref);
+      const isPlaceholder = !rawHref || rawHref === '#';
       let translated = null;
-      if (!isGroup && path) {
-        const slug = path.split('/').pop();
-        const viPage = pagesViBySlug.get(slug);
-        const enPage = viPage ? pagesEnByOrigin.get(Number(viPage.id)) : null;
-        if (enPage) translated = { title: plain(enPage.title?.raw ?? enPage.title?.rendered), url: `/${enPage.slug}`, target: item.target || '' };
-        else if (/^https?:\/\//i.test(String(item.href || ''))) translated = { title: groupLabels.get(label) || label, url: item.href, target: item.target || '' };
+      if (!isPlaceholder && resolvedHref) {
+        if (resolvedHref.external) {
+          translated = { title: groupLabels.get(label) || label, url: rawHref, target: item.target || '' };
+        } else if (!resolvedHref.path) {
+          if (homeEn) translated = { title: groupLabels.get(label) || plain(homeEn.title?.raw ?? homeEn.title?.rendered) || 'Home', url: `/${homeEn.slug}`, target: item.target || '' };
+        } else {
+          const slug = resolvedHref.path.split('/').pop();
+          const viPage = pagesViBySlug.get(slug);
+          const enPage = viPage ? pagesEnByOrigin.get(Number(viPage.id)) : null;
+          if (enPage) translated = { title: plain(enPage.title?.raw ?? enPage.title?.rendered), url: `/${enPage.slug}`, target: item.target || '' };
+        }
       } else {
         const childStart = desired.length;
         const key = `${parentKey}/${label}`;
@@ -691,21 +701,19 @@ async function triggerBuildAndWait() {
     pending: globalThis.vcsBuild?.pending_count,
   }));
   assert(state.configured === true || state.configured === 1 || state.configured === '1', 'WordPress Build Website is not configured');
-  if (!state.active) {
-    const force = page.locator('#vcs-force-build');
-    if (await button.isDisabled()) {
-      assert(await force.count() === 1 && !await force.isDisabled(), 'Build disabled and force unavailable');
-      await force.check();
-    }
-    const ack = page.waitForResponse(response => response.url().startsWith(wp + '/wp-admin/admin-ajax.php')
-      && response.request().method() === 'POST'
-      && String(response.request().postData() || '').includes('action=vcs_trigger_build'), { timeout: 45000 });
-    await button.click();
-    const response = await ack;
-    const body = await response.json().catch(() => null);
-    assert(response.ok() && body?.success, 'WordPress Build Website rejected trigger');
-    log('BUILD', 'TRIGGERED_VIA_WORDPRESS');
-  } else log('BUILD', 'ACTIVE_RECONCILE_EXISTING');
+  const force = page.locator('#vcs-force-build');
+  if (state.active || await button.isDisabled()) {
+    assert(await force.count() === 1 && !await force.isDisabled(), 'Active/stale build requires force control');
+    if (!await force.isChecked()) await force.check();
+  }
+  const ack = page.waitForResponse(response => response.url().startsWith(wp + '/wp-admin/admin-ajax.php')
+    && response.request().method() === 'POST'
+    && String(response.request().postData() || '').includes('action=vcs_trigger_build'), { timeout: 45000 });
+  await button.click();
+  const response = await ack;
+  const body = await response.json().catch(() => null);
+  assert(response.ok() && body?.success, 'WordPress Build Website rejected trigger');
+  log('BUILD', state.active ? 'TRIGGERED_VIA_WORDPRESS_FORCE_STALE_ACTIVE' : 'TRIGGERED_VIA_WORDPRESS');
   const build = await waitForWordPressBuild({ page, wpOrigin: wp, logPrefix: 'PTSCPS_LOCALIZED_BUILD' });
   log('BUILD_RESULT', build);
   return build;
