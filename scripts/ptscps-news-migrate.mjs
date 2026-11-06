@@ -630,6 +630,14 @@ async function ensureAsset(n,url,meta={}){
       log('MEDIA_DERIVATIVE_REUSE',{requested:normalized,canonical:original,mediaId:Number(originalMedia.id)});
       return {id:Number(originalMedia.id),url:mediaUrl,path:mediaPath(mediaUrl),state:'existing-derivative-reuse'};
     }
+    for(const fallback of sourceAssetFallbacks.get(normalized)||[]){
+      const sibling=normalizeSourceAsset(fallback);if(!sibling)continue;
+      const siblingMedia=await lookupMedia(n,assetSlug(sibling));
+      if(!siblingMedia)continue;
+      const mediaUrl=String(siblingMedia.source_url||'');
+      log('MEDIA_SIBLING_REUSE',{requested:normalized,canonical:sibling,mediaId:Number(siblingMedia.id)});
+      return {id:Number(siblingMedia.id),url:mediaUrl,path:mediaPath(mediaUrl),state:'existing-sibling-reuse'};
+    }
     let source=await fetch(normalized,{headers:{'User-Agent':'PTSCPS News migration/1.0'},signal:AbortSignal.timeout(60000)});
     let resolvedSource=normalized;
     let attemptedFallbacks=[];
