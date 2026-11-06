@@ -55,14 +55,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          changed="$(git -c safe.directory="$GITHUB_WORKSPACE" show --pretty='' --name-only "$GITHUB_SHA")"
-          if grep -Fxq 'scripts/ptscps-news-migrate.mjs' <<<"$changed"; then
-            echo 'run_migration=1' >> "$GITHUB_OUTPUT"
-            echo 'NEWS_SCOPE=MIGRATE_AND_RELEASE'
-          else
-            echo 'run_migration=0' >> "$GITHUB_OUTPUT"
-            echo 'NEWS_SCOPE=RELEASE_ONLY_DATA_ALREADY_VERIFIED'
-          fi
+          python3 - <<'PYTHON'
+          import json, os
+          with open(os.environ['GITHUB_EVENT_PATH'], encoding='utf-8') as handle:
+              event=json.load(handle)
+          head=event.get('head_commit') or {}
+          changed=set()
+          for key in ('added','modified','removed'):
+              changed.update(str(path) for path in (head.get(key) or []))
+          migrate='scripts/ptscps-news-migrate.mjs' in changed
+          with open(os.environ['GITHUB_OUTPUT'],'a',encoding='utf-8') as output:
+              output.write(f"run_migration={'1' if migrate else '0'}\n")
+          print('NEWS_SCOPE=' + ('MIGRATE_AND_RELEASE' if migrate else 'RELEASE_ONLY_DATA_ALREADY_VERIFIED'))
+          print('NEWS_SCOPE_CHANGED_PATHS=' + json.dumps(sorted(changed),ensure_ascii=False))
+          PYTHON
       - name: Migrate verified legacy News content and media
         if: steps.scope.outputs.run_migration == '1'
         env:
