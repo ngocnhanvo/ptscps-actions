@@ -321,6 +321,13 @@ async function publishedProbe(){
     if(!(await probe.locator('body').innerText().catch(()=>'' )).includes('Thư viện PPS'))return false;
     const expectedGalleryImages=Number(sourceRestInventory?.galleryImages?.length||0);
     if(expectedGalleryImages>0&&await probe.locator('#main-content img').count()!==expectedGalleryImages)return false;
+    const galleryGrid=probe.locator('.news-gallery-content .gallery').first();
+    if(await galleryGrid.count()!==1)return false;
+    const galleryLayout=await galleryGrid.evaluate(node=>({
+      display:getComputedStyle(node).display,
+      columns:getComputedStyle(node).gridTemplateColumns.split(/\s+/).filter(Boolean).length,
+    }));
+    if(galleryLayout.display!=='grid'||galleryLayout.columns!==4)return false;
     const response=await probe.goto(front+'/tin-tuc?_news_menu='+Date.now(),{waitUntil:'domcontentloaded',timeout:40000}).catch(()=>null);
     if(response?.status()!==200)return false;
     const toggle=probe.locator('#header-navrow button').filter({hasText:'Tin tức'}).first();
@@ -382,6 +389,15 @@ async function qa(){
     const expectedGalleryImages=Number(sourceRestInventory?.galleryImages?.length||0);
     assert(expectedGalleryImages>0,'Source gallery image inventory missing');
     assert.equal(await p.locator('#main-content img').count(),expectedGalleryImages,`Thư viện PPS image-count mismatch ${viewport.name}`);
+    const galleryGrid=p.locator('.news-gallery-content .gallery').first();
+    assert.equal(await galleryGrid.count(),1,`Thư viện PPS gallery grid missing ${viewport.name}`);
+    const galleryLayout=await galleryGrid.evaluate(node=>({
+      display:getComputedStyle(node).display,
+      columns:getComputedStyle(node).gridTemplateColumns.split(/\s+/).filter(Boolean).length,
+    }));
+    const expectedGalleryColumns=viewport.name==='desktop'?4:2;
+    assert.equal(galleryLayout.display,'grid',`Thư viện PPS gallery display mismatch ${viewport.name}`);
+    assert.equal(galleryLayout.columns,expectedGalleryColumns,`Thư viện PPS gallery columns mismatch ${viewport.name}`);
     assert(await p.evaluate(()=>document.documentElement.scrollWidth<=document.documentElement.clientWidth+2),`Thư viện PPS horizontal overflow ${viewport.name}`);
     await p.screenshot({path:`${artifactDir}/${viewport.name}-gallery.png`,fullPage:true});
     const allNews=await p.goto(front+'/tin-tuc?_news_qa='+Date.now(),{waitUntil:'load',timeout:50000});
