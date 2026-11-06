@@ -746,12 +746,16 @@ async function ensureAsset(n,url,meta={}){
         }
       }
       if(!source.ok){
-        const archiveCandidates=[...new Set([
+        const archiveBaseCandidates=[...new Set([
           normalized,
           ...wordpressDerivativeFallbacks(normalized),
           ...responsiveFallbacks,
           ...responsiveFallbacks.flatMap(wordpressDerivativeFallbacks),
         ].map(normalizeSourceAsset).filter(Boolean))];
+        const archiveCandidates=[...new Set(archiveBaseCandidates.flatMap(candidate=>[
+          candidate,
+          legacyMediaAlias(candidate),
+        ]).filter(Boolean))];
         for(const archiveCandidate of archiveCandidates){
           const snapshots=await waybackSnapshots(archiveCandidate);
           for(const snapshot of snapshots){
