@@ -38,12 +38,18 @@ const sourceAssetFallbacks=new Map();
 const sourceAssetContexts=new Map();
 const targetMediaLookupCache=new Map();
 const legacyMediaAliasOrigin='https://www.ptsc.com.vn';
+const verifiedRecovery8492={
+  canonicalSource:'https://ptscps.com.vn/wp-content/uploads/2019/09/124-1024x767.jpg',
+  url:'https://media.vietq.vn/files/kimlien/2019/09/15/PVN%20Le%20chao%20co%20gian%20HaiThach%20MocTinh.jpg',
+  article:'https://vietq.vn/fitch-ratings-xep-hang-tap-doan-dau-khi-viet-nam-pvn-o-muc-trien-vong-tich-cuc-bb-d163534.html',
+  note:'Exact syndicated 2019 article image: Le chao co tren gian mo dau khi Hai Thach - Moc Tinh',
+};
 const verifiedExternalAssetRecoveries=new Map([
-  ['https://ptscps.com.vn/wp-content/uploads/2019/09/124-1024x767.jpg',{
-    url:'https://media.vietq.vn/files/kimlien/2019/09/15/PVN%20Le%20chao%20co%20gian%20HaiThach%20MocTinh.jpg',
-    article:'https://vietq.vn/fitch-ratings-xep-hang-tap-doan-dau-khi-viet-nam-pvn-o-muc-trien-vong-tich-cuc-bb-d163534.html',
-    note:'Exact syndicated 2019 article image: Le chao co tren gian mo dau khi Hai Thach - Moc Tinh',
-  }],
+  ['https://ptscps.com.vn/wp-content/uploads/2019/09/124-1024x767.jpg',verifiedRecovery8492],
+  ['https://ptscps.com.vn/wp-content/uploads/2019/09/124.jpg',verifiedRecovery8492],
+  ['https://ptscps.com.vn/wp-content/uploads/2019/09/124-300x225.jpg',verifiedRecovery8492],
+  ['https://ptscps.com.vn/wp-content/uploads/2019/09/124-768x575.jpg',verifiedRecovery8492],
+  ['https://ptscps.com.vn/wp-content/uploads/2019/09/124-400x300.jpg',verifiedRecovery8492],
 ]);
 const mediaLookupConcurrency=6;
 const created={categories:[],media:[],posts:[],pages:[]};
@@ -432,10 +438,13 @@ async function ensureAsset(n,url,meta={}){
   const normalized=normalizeSourceAsset(url);if(!normalized)return null;
   if(assetCache.has(normalized))return assetCache.get(normalized);
   const promise=(async()=>{
-    const slug=assetSlug(normalized);
+    const verifiedRecovery=verifiedExternalAssetRecoveries.get(normalized);
+    const canonicalNormalized=verifiedRecovery?.canonicalSource||normalized;
+    const slug=assetSlug(canonicalNormalized);
     let media=await lookupMedia(n,slug);
     if(media){
       const mediaUrl=String(media.source_url||'');
+      if(canonicalNormalized!==normalized)log('MEDIA_CANONICAL_REUSE',{requested:normalized,canonical:canonicalNormalized,mediaId:Number(media.id)});
       return {id:Number(media.id),url:mediaUrl,path:mediaPath(mediaUrl),state:'existing'};
     }
     let source=await fetch(normalized,{headers:{'User-Agent':'PTSCPS News migration/1.0'},signal:AbortSignal.timeout(60000)});
@@ -443,7 +452,6 @@ async function ensureAsset(n,url,meta={}){
     let attemptedFallbacks=[];
     if(source.status===404){
       const responsiveFallbacks=sourceAssetFallbacks.get(normalized)||[];
-      const verifiedRecovery=verifiedExternalAssetRecoveries.get(normalized);
       attemptedFallbacks=[...new Set([
         verifiedRecovery?.url,
         legacyMediaAlias(normalized),
