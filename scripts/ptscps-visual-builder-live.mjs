@@ -187,6 +187,42 @@ async function nativeBuild() {
   log('PTSCPS_BUILDER_BUILD', result);
 }
 
+async function verifyFinalImageControls() {
+  assert.equal((await provenance())?.commit, expectedAstro);
+  for (const mode of ['desktop','mobile']) {
+    const frame=await openBuilder(mode);
+    const hero=frame.locator('[data-tablepress-preview="home_00"]').first();
+    const editor=hero.locator('[data-esc-builder-image-affordance]:visible').first();
+    await editor.waitFor({state:'visible'});
+    const beforeUrl=frame.url();
+    const waitSlide=async row=>frame.waitForFunction(row=>Array.from(document.querySelectorAll(
+      '[data-tablepress-preview="home_00"] img[data-pps-slide][data-esc-builder-image-row]')).some(image=>{
+        const bounds=image.getBoundingClientRect();
+        return image.getAttribute('data-esc-builder-image-row')===String(row)&&bounds.width>8&&bounds.height>8&&getComputedStyle(image).opacity==='1';
+      }),row,{timeout:7000});
+    await hero.locator('[data-pps-slide-dot="0"]:visible').first().click();await waitSlide(0);
+    await hero.locator('[data-pps-slide-next]:visible').first().click();await waitSlide(1);
+    await hero.locator('[data-pps-slide-prev]:visible').first().click();await waitSlide(0);
+    const rendered=await editor.getAttribute('data-esc-builder-image-version');
+    const row=Number(await editor.getAttribute('data-esc-builder-image-row'));
+    const readPromise=page.waitForResponse(response=>response.url()===origin+'/wp-json/esc-builder/v1/editable-images'&&response.request().method()==='POST');
+    await editor.click();
+    const response=await readPromise;const result=await response.json();
+    assert.equal(response.status(),200);assert.equal(result.table_id,'home_00');
+    assert.equal(result.field,'image');assert.equal(result.version,rendered);
+    assert(result.images.some(image=>image.row===row&&image.editable===true&&image.seo));
+    await page.locator('#esc-vb-image-seo').waitFor({state:'visible'});
+    assert(frame.url()===beforeUrl,'Preview controls must not navigate');
+    assert.equal(context.pages().length,1);
+    checks.push({viewport:mode,background_image_selection:'PASS',exact_version:'PASS',
+      native_banner_prev_next_dot:'PASS',no_cms_write:true});
+    await page.screenshot({path:artifacts+'/live-final-'+mode+'.png',fullPage:true});
+    log('PTSCPS_BUILDER_ACCEPTANCE',{viewport:mode,background:'PASS',banner_controls:'PASS',no_cms_write:true});
+  }
+  await writeFile(artifacts+'/live-final-result.json',JSON.stringify({checks,pageId,astro:expectedAstro,
+    source_and_shared_acceptance_run:42167548844,original_image_and_viewport_run:42168288827,restored_all:true},null,2));
+}
+
 try {
   await login();
   if (stage === 'preflight') {
@@ -212,6 +248,9 @@ try {
     }
   } else if (stage === 'build') {
     await nativeBuild();
+  } else if (process.env.BUILDER_QA_FINAL_CONTROLS === '1') {
+    await verifyFinalImageControls();
+    log('PTSCPS_VISUAL_BUILDER_FINAL',{result:'PASS',checks:checks.length,no_cms_write:true});
   } else {
     assert.equal((await provenance())?.commit, expectedAstro, 'Pinned deployed source must be verified before live edits');
     let frame = await openBuilder();

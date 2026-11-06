@@ -67,6 +67,7 @@ jobs:
               f.write('BUILDER_RELEASE_PHASE='+phase+'\n')
               f.write('BUILDER_QA_SKIP_SHARED='+('1' if request.get('skip_completed_shared') is True else '0')+'\n')
               f.write('BUILDER_QA_SKIP_TEXT='+('1' if request.get('skip_completed_text') is True else '0')+'\n')
+              f.write('BUILDER_QA_FINAL_CONTROLS='+('1' if request.get('verify_final_controls') is True else '0')+'\n')
           print('PTSCPS_BUILDER_LEASES=PASS; target=PTSCPS; production_branches=master')
           PY
       - uses: actions/setup-node@v4
