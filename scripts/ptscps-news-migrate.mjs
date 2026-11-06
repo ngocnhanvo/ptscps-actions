@@ -392,14 +392,24 @@ async function currentPtscArticleFallbacks(value){
     }
     if(!html)continue;
     for(const tag of html.match(/<img\b[^>]*>/gi)||[]){
-      const raw=tag.match(/\bsrc=(["'])([^"']+)\1/i)?.[2]||tag.match(/\bdata-src=(["'])([^"']+)\1/i)?.[2]||'';
-      if(!raw)continue;
-      try{
-        const candidate=new URL(raw,legacyMediaAliasOrigin);
-        if(!/^https?:$/.test(candidate.protocol)||!/(^|\.)ptsc\.com\.vn$/i.test(candidate.hostname))continue;
-        if(assetStem(candidate.href)!==wantedStem)continue;
-        matches.push(candidate.href);
-      }catch{}
+      const candidates=new Set();
+      for(const match of tag.matchAll(/\b(?:src|data-src|data-original|data-lazy-src)=(["'])([^"']+)\1/gi)){
+        if(match[2])candidates.add(match[2]);
+      }
+      for(const match of tag.matchAll(/\b(?:srcset|data-srcset)=(["'])([^"']+)\1/gi)){
+        for(const item of String(match[2]||'').split(',')){
+          const raw=item.trim().split(/\s+/)[0];
+          if(raw)candidates.add(raw);
+        }
+      }
+      for(const raw of candidates){
+        try{
+          const candidate=new URL(raw,legacyMediaAliasOrigin);
+          if(!/^https?:$/.test(candidate.protocol)||!/(^|\.)ptsc\.com\.vn$/i.test(candidate.hostname))continue;
+          if(assetStem(candidate.href)!==wantedStem)continue;
+          matches.push(candidate.href);
+        }catch{}
+      }
     }
   }
   const unique=[...new Set(matches)];
