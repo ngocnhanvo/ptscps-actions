@@ -55,7 +55,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          changed="$(git show --pretty='' --name-only "$GITHUB_SHA")"
+          changed="$(git -c safe.directory="$GITHUB_WORKSPACE" show --pretty='' --name-only "$GITHUB_SHA")"
           if grep -Fxq 'scripts/ptscps-news-migrate.mjs' <<<"$changed"; then
             echo 'run_migration=1' >> "$GITHUB_OUTPUT"
             echo 'NEWS_SCOPE=MIGRATE_AND_RELEASE'
