@@ -35,6 +35,9 @@ const maxAssetBytes=256*1024*1024;
 const targetCategoryBySourceId=new Map();
 const assetCache=new Map();
 const sourceAssetFallbacks=new Map();
+const targetMediaLookupCache=new Map();
+const legacyMediaAliasOrigin='https://www.ptsc.com.vn';
+const mediaLookupConcurrency=6;
 const created={categories:[],media:[],posts:[],pages:[]};
 const updated={categories:[],posts:[],pages:[]};
 let writes=0;
@@ -265,6 +268,12 @@ function normalizeSourceAsset(value){
   }catch{return null;}
 }
 
+function legacyMediaAlias(value){
+  const normalized=normalizeSourceAsset(value);if(!normalized)return null;
+  const u=new URL(normalized);
+  return `${legacyMediaAliasOrigin}${u.pathname}${u.search}`;
+}
+
 function assetSlug(url){return 'legacy-news-'+createHash('sha256').update(url).digest('hex').slice(0,20);}
 function assetFilename(url,mime=''){
   const u=new URL(url);let ext=extname(u.pathname).toLowerCase();
@@ -278,9 +287,21 @@ function assetPriority(url){
   return ['.mp4','.m4v','.mov','.webm'].includes(ext)?0:1;
 }
 
-async function lookupMedia(n,slug){
+async function lookupMedia(n,slug,{refresh=false}={}){
+  if(!refresh&&targetMediaLookupCache.has(slug))return targetMediaLookupCache.get(slug);
   const {response,body}=await api('GET',`/wp-json/wp/v2/media?context=edit&slug=${encodeURIComponent(slug)}&per_page=20&_fields=id,slug,source_url,alt_text,title,mime_type`,n);
-  assert(response.ok(),`Target media lookup failed ${slug}`);assert((body||[]).length<=1,`Duplicate target media ${slug}`);return body?.[0]||null;
+  assert(response.ok(),`Target media lookup failed ${slug}`);assert((body||[]).length<=1,`Duplicate target media ${slug}`);
+  const media=body?.[0]||null;targetMediaLookupCache.set(slug,media);return media;
+}
+
+async function preloadTargetMedia(n,urls){
+  const slugs=[...new Set(urls.map(assetSlug))];
+  for(let i=0;i<slugs.length;i+=mediaLookupConcurrency){
+    await Promise.all(slugs.slice(i,i+mediaLookupConcurrency).map(slug=>lookupMedia(n,slug)));
+    const done=Math.min(i+mediaLookupConcurrency,slugs.length);
+    if(done%120===0||done===slugs.length)log('MEDIA_LOOKUP_PROGRESS',{done,total:slugs.length,existing:[...targetMediaLookupCache.values()].filter(Boolean).length});
+  }
+  log('MEDIA_LOOKUP_PASS',{total:slugs.length,existing:[...targetMediaLookupCache.values()].filter(Boolean).length});
 }
 
 function mediaPath(value){
@@ -302,7 +323,8 @@ async function ensureAsset(n,url,meta={}){
     let source=await fetch(normalized,{headers:{'User-Agent':'PTSCPS News migration/1.0'},signal:AbortSignal.timeout(60000)});
     let resolvedSource=normalized;
     if(source.status===404){
-      for(const fallback of sourceAssetFallbacks.get(normalized)||[]){
+      const fallbacks=[legacyMediaAlias(normalized),...(sourceAssetFallbacks.get(normalized)||[])].filter(Boolean);
+      for(const fallback of [...new Set(fallbacks)]){
         const candidate=await fetch(fallback,{headers:{'User-Agent':'PTSCPS News migration/1.0'},signal:AbortSignal.timeout(60000)}).catch(()=>null);
         if(candidate?.ok){
           source=candidate;
@@ -331,7 +353,7 @@ async function ensureAsset(n,url,meta={}){
       const body=upload?await upload.json().catch(()=>null):null;
       if(upload?.ok()&&body?.id){createdMedia=body;break;}
       await sleep(700*attempt);
-      const recovered=await lookupMedia(n,slug).catch(()=>null);
+      const recovered=await lookupMedia(n,slug,{refresh:true}).catch(()=>null);
       if(recovered){createdMedia=recovered;break;}
       log('MEDIA_RETRY',{slug,attempt,http:upload?.status?.()||0});
     }
@@ -344,6 +366,7 @@ async function ensureAsset(n,url,meta={}){
     const update=await api('POST',`/wp-json/wp/v2/media/${createdMedia.id}`,n,metadata);
     assert(update.response.ok(),`Target media metadata update failed ${createdMedia.id}`);
     media=update.body||createdMedia;created.media.push(Number(media.id));writes++;
+    targetMediaLookupCache.set(slug,media);
     const mediaUrl=String(media.source_url||createdMedia.source_url||'');
     return {id:Number(media.id),url:mediaUrl,path:mediaPath(mediaUrl),state:'created'};
   })();
@@ -362,8 +385,9 @@ function registerResponsiveFallbacks(html){
       .filter(value=>value&&value!==original)
       .reverse();
     if(!candidates.length)continue;
+    const recoveryCandidates=candidates.flatMap(value=>[value,legacyMediaAlias(value)]).filter(Boolean);
     const existing=sourceAssetFallbacks.get(original)||[];
-    sourceAssetFallbacks.set(original,[...new Set([...candidates,...existing])]);
+    sourceAssetFallbacks.set(original,[...new Set([...recoveryCandidates,...existing])]);
   }
   for(const anchor of String(html||'').match(/<a\b[\s\S]*?<\/a>/gi)||[]){
     const href=anchor.match(/\bhref=(["'])([^"']+)\1/i)?.[2]||'';
@@ -384,7 +408,10 @@ function registerResponsiveFallbacks(html){
       const candidateDir=candidateUrl.pathname.slice(0,candidateUrl.pathname.lastIndexOf('/')+1);
       return candidateDir===originalDir&&candidateStem===originalStem&&candidateExt===originalExt;
     });
-    if(candidates.length){const existing=sourceAssetFallbacks.get(original)||[];sourceAssetFallbacks.set(original,[...new Set([...candidates,...existing])]);}
+    if(candidates.length){
+      const recoveryCandidates=candidates.flatMap(value=>[value,legacyMediaAlias(value)]).filter(Boolean);
+      const existing=sourceAssetFallbacks.get(original)||[];sourceAssetFallbacks.set(original,[...new Set([...recoveryCandidates,...existing])]);
+    }
   }
 }
 
@@ -580,6 +607,7 @@ try{
   registerResponsiveFallbacks(source.gallery.content);
   for(const url of extractAssets(source.gallery.content))assetSet.add(url);
   log('MEDIA_RESPONSIVE_FALLBACKS',{sources:sourceAssetFallbacks.size});
+  await preloadTargetMedia(n,[...assetSet]);
   log('MEDIA_PLAN',{uniqueAssets:assetSet.size,featuredAttachments:featuredIds.length});
   const assets=[...assetSet].sort((a,b)=>assetPriority(a)-assetPriority(b));
   const mediaConcurrency=2;
