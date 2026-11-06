@@ -1,0 +1,56 @@
+name: PTSCPS build optimization contracts and scoped PHP release
+on:
+  push:
+    branches: [main]
+    paths: ['audit/ptscps-build-optimization.ready']
+permissions:
+  contents: read
+concurrency:
+  group: ptscps-wp-php-release
+  cancel-in-progress: false
+jobs:
+  signed-delta-php:
+    if: github.repository == 'ngocnhanvo/ptscps-actions' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate immutable PHP source request
+        id: request
+        run: |
+          python3 - <<'PY'
+          import json, os, re
+          from pathlib import Path
+          data=json.loads(Path('audit/ptscps-build-optimization.ready').read_text())
+          assert data.get('operation') == 'PTSCPS_BUILD_DELTA_PHP_ONLY'
+          assert re.fullmatch(r'[0-9a-f]{40}', data.get('php_sha',''))
+          with open(os.environ['GITHUB_OUTPUT'],'a') as out:
+              out.write('php_sha='+data['php_sha']+'\n')
+          PY
+      - uses: actions/checkout@v4
+        with:
+          repository: ngocnhanvo/ptscps-php
+          ref: master
+          token: ${{ secrets.SOURCE_REPO_PAT }}
+          path: source-php
+          persist-credentials: false
+      - name: Test delta package, staging restore and upload contracts (NO BUILD)
+        env:
+          PTSCPS_PHP_ROOT: ${{ github.workspace }}/source-php
+        run: |
+          set -euo pipefail
+          test "$(git -C source-php rev-parse HEAD)" = '${{ steps.request.outputs.php_sha }}'
+          php -l source-php/ptscps-unzip.php
+          php -l source-php/ptscps-image-delta.php
+          php source-php/tests/ptscps-build-delta.php
+          python3 -m unittest discover -s tests -p 'test_ptscps_*.py' -v
+      - name: Install only signed delta helper and compatible unzip endpoint
+        env:
+          PTSCPS_BUILD_DELTA_ONLY: '1'
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+        run: python3 scripts/ptscps-php-live-release.py

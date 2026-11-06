@@ -35,6 +35,8 @@ set cmd:fail-exit yes
 set net:max-retries 3
 set net:reconnect-interval-base 3
 set net:timeout 25
+# Match the verified PSE FTPS transfer profile for long-haul uploads.
+set net:socket-buffer 4194304
 set ftp:passive-mode yes
 set ftp:ssl-force yes
 set ftp:ssl-protect-data yes
@@ -48,20 +50,20 @@ bye
 LFTP
 status=$?
 set -e
-elaptscpsd=$((SECONDS - started))
+elapsed=$((SECONDS - started))
 if (( status != 0 )); then
-  echo "::error::FTP failed (exit=$status, duration=${elaptscpsd}s); partial SHA-specific archive retained." >&2
+  echo "::error::FTP failed (exit=$status, duration=${elapsed}s); partial SHA-specific archive retained." >&2
   if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
-    printf '%s\n' "- FTP failed after ${elaptscpsd}s; partial archive retained (SHA prefix: ${local_sha:0:12})." >> "$GITHUB_STEP_SUMMARY"
+    printf '%s\n' "- FTP failed after ${elapsed}s; partial archive retained (SHA prefix: ${local_sha:0:12})." >> "$GITHUB_STEP_SUMMARY"
   fi
   exit "$status"
 fi
-if (( elaptscpsd > 0 )); then
-  mib_sec="$(awk -v bytes="$local_size" -v secs="$elaptscpsd" 'BEGIN {printf "%.2f", bytes / 1048576 / secs}')"
+if (( elapsed > 0 )); then
+  mib_sec="$(awk -v bytes="$local_size" -v secs="$elapsed" 'BEGIN {printf "%.2f", bytes / 1048576 / secs}')"
 else
   mib_sec="n/a"
 fi
-echo "Resumable FTP complete in ${elaptscpsd}s; ${local_size} bytes; approx ${mib_sec} MiB/s."
+echo "Resumable FTP complete in ${elapsed}s; ${local_size} bytes; approx ${mib_sec} MiB/s."
 if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
-  printf '%s\n' "- FTP transfer: ${elaptscpsd}s, ${local_size} bytes, approx ${mib_sec} MiB/s, SHA prefix ${local_sha:0:12}." >> "$GITHUB_STEP_SUMMARY"
+  printf '%s\n' "- FTP transfer: ${elapsed}s, ${local_size} bytes, approx ${mib_sec} MiB/s, SHA prefix ${local_sha:0:12}." >> "$GITHUB_STEP_SUMMARY"
 fi

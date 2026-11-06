@@ -30,6 +30,18 @@ class RejectRedirect(HTTPRedirectHandler):
 OPENER = build_opener(RejectRedirect)
 
 
+class DeployHTTPError(RuntimeError):
+    def __init__(self, status, detail):
+        self.status = status
+        try:
+            data = json.loads(detail)
+            self.error = data.get('error') if isinstance(data, dict) else None
+        except (ValueError, TypeError):
+            self.error = None
+        super().__init__('Unpack server returned HTTP %s: %s' %
+                         (status, self.error if isinstance(self.error, str) else 'unexpected response'))
+
+
 def env_value(text, name):
     matches = []
     for line in text.splitlines():
@@ -63,10 +75,13 @@ def request(url, body=None, headers=None, timeout=20):
     req = Request(url, data=body, headers=headers or {}, method=method)
     try:
         with OPENER.open(req, timeout=timeout) as response:
-            return response.read(8192).decode("utf-8")
+            raw = response.read(4194305)
+            if len(raw) > 4194304:
+                raise RuntimeError("Signed deployment response exceeds size limit")
+            return raw.decode("utf-8")
     except HTTPError as exc:
         detail = exc.read(1000).decode("utf-8", "replace")
-        raise RuntimeError("Unpack server returned HTTP %s: %s" % (exc.code, detail)) from exc
+        raise DeployHTTPError(exc.code, detail) from exc
     except URLError as exc:
         raise RuntimeError("Cannot reach unzip endpoint: %s" % exc.reason) from exc
 
@@ -92,8 +107,8 @@ def signed_post(endpoint, token, data, timeout):
 
 
 def main():
-    if len(sys.argv) != 2 or sys.argv[1] not in ("verify", "unpack"):
-        raise ValueError("Usage: esc-remote-unzip.py verify|unpack")
+    if len(sys.argv) != 2 or sys.argv[1] not in ("verify", "manifest", "unpack"):
+        raise ValueError("Usage: ptscps-remote-unzip.py verify|manifest|unpack")
     mode = sys.argv[1]
     config = os.environ["ENV_FILE"]
     client_url = env_value(config, "WC_URL_CLIENT")
@@ -133,6 +148,73 @@ def main():
         print("SIGNED_UNZIP_PREFLIGHT_OK: %s" % ftp_target)
         return
 
+    if mode == "manifest":
+        # Existing v2 PHP may not yet support manifest. Only this one expected
+        # compatibility response causes FULL ZIP fallback (never auth failure).
+        Path("source/.ptscps-remote-image-manifest.json").unlink(missing_ok=True)
+        try:
+            result = signed_post(backend + "/ptscps-unzip.php", token,
+                                 {"action": "image_manifest", **common}, 30)
+        except DeployHTTPError as error:
+            if (error.status == 400 and error.error == 'Invalid archive checksum') or (
+                    error.status == 409 and error.error == 'Image manifest unavailable'):
+                print("PTSCPS_IMAGE_DELTA=FULL_FALLBACK (remote manifest unavailable)")
+                return
+            raise
+        if result.get("host") != client_host or result.get("target") != ftp_target:
+            raise RuntimeError("Signed image inventory came from unexpected frontend")
+        images = result.get("images")
+        if not isinstance(images, dict) or len(images) > 5000:
+            raise RuntimeError("Invalid signed image inventory")
+        total = 0
+        for name, meta in images.items():
+            if not isinstance(name, str) or len(name) > 240:
+                raise RuntimeError("Invalid image name")
+            pieces = name.split("/")
+            if (not all(re.fullmatch(r"[A-Za-z0-9_-][A-Za-z0-9_.-]*", p)
+                        and p not in (".", "..") for p in pieces) or
+                    not isinstance(meta, dict) or type(meta.get("size")) is not int or
+                    meta["size"] < 0 or meta["size"] > 26214400 or
+                    not isinstance(meta.get("sha256"), str) or
+                    not re.fullmatch("[0-9a-f]{64}", meta["sha256"])):
+                raise RuntimeError("Invalid signed image inventory item")
+            total += meta["size"]
+            if total > 524288000:
+                raise RuntimeError("Signed image inventory too large")
+        inventory = {"images": images}
+        # The signed PHP inventory may optionally include client-only HTML,
+        # CSS, JS and public JSON. Older PHP has no 'static' key: full ZIP fallback.
+        static = result.get("static")
+        if static is not None:
+            if not isinstance(static, dict) or len(static) > 5000:
+                raise RuntimeError("Invalid signed static inventory")
+            static_bytes = 0
+            for name, meta in static.items():
+                if (not isinstance(name, str) or len(name) > 240 or name == "index.html" or name.startswith("images/")
+                    or not re.search(r"\.(?:html|css|js|json)$", name)):
+                    raise RuntimeError("Invalid signed static asset name")
+                pieces = name.split("/")
+                if (not all(re.fullmatch(r"[A-Za-z0-9_-][A-Za-z0-9_.-]*", p)
+                            and p not in (".", "..") for p in pieces)
+                    or not isinstance(meta, dict) or type(meta.get("size")) is not int
+                    or meta["size"] < 0 or meta["size"] > 26214400
+                    or not isinstance(meta.get("sha256"), str)
+                    or not re.fullmatch(r"[0-9a-f]{64}", meta["sha256"])):
+                    raise RuntimeError("Invalid signed static asset digest")
+                static_bytes += meta["size"]
+                if static_bytes > 104857600:
+                    raise RuntimeError("Signed static inventory too large")
+            inventory["static"] = static
+            print("PTSCPS_STATIC_DELTA_REMOTE_FILES=%d remote_bytes=%d" %
+                  (len(static), static_bytes))
+        target_file = Path("source/.ptscps-remote-image-manifest.json")
+        if not target_file.parent.is_dir():
+            raise RuntimeError("Expected checked-out production source directory")
+        target_file.write_text(json.dumps(inventory, sort_keys=True),
+                               encoding="utf-8")
+        print("PTSCPS_IMAGE_DELTA_REMOTE_IMAGES=%d remote_bytes=%d" % (len(images), total))
+        return
+
     archive = Path(os.environ.get("ZIP_PATH", "source/upload/ptscps-astro.zip"))
     if not archive.is_file():
         raise ValueError("No Astro deployment ZIP exists")
@@ -166,13 +248,15 @@ def main():
             raise ValueError("Deployment ZIP is missing Astro server entry")
         if "client/index.html" not in zf.namelist():
             raise ValueError("Deployment ZIP missing Astro client index")
+        has_delta = any(name in zf.namelist() for name in
+                        ('ptscps-image-delta.json', 'ptscps-static-delta.json'))
     sha = hashlib.sha256()
     with archive.open("rb") as file:
         for chunk in iter(lambda: file.read(1024 * 1024), b""):
             sha.update(chunk)
     expected = sha.hexdigest()
     result = signed_post(backend + "/ptscps-unzip.php", token, {
-        "action": "unpack", **common, "sha256": expected,
+        "action": "unpack_delta" if has_delta else "unpack", **common, "sha256": expected,
     }, 180)
     if (result.get("host") != client_host or result.get("target") != ftp_target
             or result.get("sha256") != expected or result.get("files_activated", 0) < 2):

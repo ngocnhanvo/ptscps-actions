@@ -53,6 +53,7 @@ AGENT_KNOWLEDGE_FILES = (
     "wp-content/mu-plugins/esc-agent.php",
 )
 DEFAULT_FILES = (
+    "ptscps-image-delta.php",
     "ptscps-unzip.php",
     "ptscps-unzip-v2.ready",
     "wp-content/mu-plugins/esc-github-trigger-config.php",
@@ -166,6 +167,11 @@ if os.environ.get("PTSCPS_PRODUCT_CATEGORY_MEDIA_ONLY") == "1":
 # Product menu ordering REST exposure is a one-file WordPress API release.
 if os.environ.get("PTSCPS_PRODUCT_MENU_ORDER_REST_ONLY") == "1":
     FILES = ("wp-content/plugins/github-trigger/products/endpoint.php",)
+
+# Install the compatible helper before the endpoint that requires it.
+# This scope never uploads unrelated plugins or triggers an Astro build.
+if os.environ.get("PTSCPS_BUILD_DELTA_ONLY") == "1":
+    FILES = ("ptscps-image-delta.php", "ptscps-unzip.php")
 
 raw = os.environ.get("FTP_SERVER", "").strip()
 if "://" not in raw:

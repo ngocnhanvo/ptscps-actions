@@ -6,8 +6,7 @@ Repository: `ngocnhanvo/ptscps-actions` (branch `main`).
 
 ## Source of truth and branches
 
-- Astro development/testing: `ngocnhanvo/ptscps-astro` → `github`.
-- Astro production source: `ngocnhanvo/ptscps-astro` → `master`.
+- Astro source and production: `ngocnhanvo/ptscps-astro` → `master` (sole source branch).
 - WordPress/PHP: `ngocnhanvo/ptscps-php` → `master`.
 - Shared Chromium testing: `ngocnhanvo/knowledge-actions` (reusable workflow, no copying tests).
 - See `ngocnhanvo/knowledge` → `main` for the shared engineering rules.
@@ -25,6 +24,25 @@ WordPress must configure `VCS_GH_OWNER` and `VCS_GH_REPO` in its own
 `wp-config.php`. The MU plugin must not silently override the destination.
 The unzip endpoint retains HMAC authentication, timestamp validation, ZIP SHA-256
 verification and destination path checks.
+
+### Incremental deployment packaging
+
+The existing pnpm store and WordPress `.cache` remain in use. FTPS keeps its
+SHA-specific resume, verified TLS, retry/timeout and uses a 4 MiB TCP buffer;
+the encrypted client is installed concurrently with the existing Astro build.
+
+Signed PHP inventory lets the packagers omit identical image and public static
+bytes. PHP restores and verifies every omitted byte inside staging before live
+activation. Images own the entire `client/images/` subtree; new homepage index,
+SSR and sitemap revision handling retain their established contracts. Missing
+compatible inventory or an oversized marker retains a full ZIP. Authentication
+errors and unsafe compiled symlinks fail closed. Delta activation uses the
+distinct `unpack_delta` action so older PHP cannot publish an incomplete ZIP.
+
+`ptscps-build-optimization-release.yml` runs cross-repository contracts and
+installs only the helper and compatible endpoint via protected FTPS. It does
+not trigger Astro. See `docs/checkpoints/2026-11-06-build-optimization.md` for
+source, release and measured build evidence.
 
 ## Separate operations
 

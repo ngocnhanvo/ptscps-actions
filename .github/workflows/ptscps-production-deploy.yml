@@ -97,13 +97,27 @@ jobs:
           set -euo pipefail
           python3 -m py_compile actions-hub/scripts/ptscps-remote-unzip.py
           python3 actions-hub/scripts/ptscps-remote-unzip.py verify
-      - name: Read deployed sitemap Save token from PTSCPS FTPS (no XML transfer)
+      - name: Read saved sitemap revision and signed image inventory concurrently (READ ONLY)
         shell: bash
         run: |
           set -euo pipefail
           set +x
           python3 -m py_compile actions-hub/scripts/ptscps-published-sitemap-revision.py
-          python3 actions-hub/scripts/ptscps-published-sitemap-revision.py
+          # These two reads are independent. BOTH results must succeed before
+          # dependencies, build or deployment proceed. Signed preflight above
+          # has already validated the PHP server and deploy destination.
+          python3 actions-hub/scripts/ptscps-published-sitemap-revision.py &
+          sitemap_pid=$!
+          python3 actions-hub/scripts/ptscps-remote-unzip.py manifest &
+          image_pid=$!
+          sitemap_status=0
+          image_status=0
+          wait "$sitemap_pid" || sitemap_status=$?
+          wait "$image_pid" || image_status=$?
+          if (( sitemap_status != 0 || image_status != 0 )); then
+            echo "::error::PTSCPS signed read-only preflight failed"
+            exit 1
+          fi
       # GitHub-hosted runners are ephemeral: reuse downloaded packages
       # keyed by the Astro production lockfile. Never cache node_modules or .env.
       - name: Set up pnpm 9 (without installing project dependencies)
@@ -131,6 +145,17 @@ jobs:
         working-directory: source
         run: |
           set -euo pipefail
+          # Fresh GitHub runners install lftp on every run. Start that install
+          # alongside pnpm/Astro rather than serializing it after packaging.
+          # Deployment remains blocked until install succeeds and lftp exists.
+          ftps_install_pid=""
+          if ! command -v lftp >/dev/null 2>&1; then
+            (
+              sudo apt-get update -qq
+              sudo apt-get install -y -qq --no-install-recommends lftp
+            ) > "$RUNNER_TEMP/ptscps-lftp-install.log" 2>&1 &
+            ftps_install_pid=$!
+          fi
           # Restore verified pnpm store where available; recreate dependencies
           # from the exact lockfile on every run. Cache miss is still safe.
           pnpm install --frozen-lockfile --prefer-offline
@@ -143,6 +168,14 @@ jobs:
           test -s dist/server/entry.mjs
           # Generic SSR entrypoint is mandatory.
           test -s dist/server/entry.mjs
+          if [[ -n "$ftps_install_pid" ]]; then
+            if ! wait "$ftps_install_pid"; then
+              cat "$RUNNER_TEMP/ptscps-lftp-install.log"
+              echo "::error::Unable to prepare encrypted FTPS client"
+              exit 1
+            fi
+          fi
+          command -v lftp >/dev/null 2>&1 || { echo "::error::Missing encrypted FTPS client"; exit 1; }
           echo "Build source SHA: $(git rev-parse HEAD) (master)" >> "$GITHUB_STEP_SUMMARY"
       - name: Package only compiled staging output (strictly no .env)
         shell: bash
@@ -253,6 +286,10 @@ jobs:
           test ! -e deploy/.env
           test -s deploy/server/entry.mjs
           test -s deploy/client/index.html
+          # Keep full compiled output; omit only authenticated identical bytes.
+          python3 ../actions-hub/scripts/ptscps-validate-deploy-tree.py
+          python3 ../actions-hub/scripts/ptscps-image-delta-package.py
+          python3 ../actions-hub/scripts/ptscps-static-delta-package.py
           cd deploy
           zip -q -r ../upload/ptscps-astro.zip .
           cd ..
@@ -279,6 +316,23 @@ jobs:
                   raise RuntimeError('Saved sitemap missing or mismatched in archive')
               if not state['changed'] and not absent:
                   raise RuntimeError('Unchanged sitemap XML must be excluded from archive')
+              if 'ptscps-image-delta.json' in names:
+                  image_delta=json.loads(z.read('ptscps-image-delta.json'))
+                  if image_delta.get('format') != 1 or not isinstance(image_delta.get('reuse'),list) or not isinstance(image_delta.get('files'),dict):
+                      raise RuntimeError('Malformed signed image delta ZIP manifest')
+                  for name in image_delta['reuse']:
+                      if not isinstance(name,str) or 'client/images/'+name in names or name not in image_delta['files']:
+                          raise RuntimeError('Reused image was improperly uploaded')
+              if 'ptscps-static-delta.json' in names:
+                  static_delta=json.loads(z.read('ptscps-static-delta.json'))
+                  if (static_delta.get('format')!=1 or
+                      not isinstance(static_delta.get('reuse'),list) or
+                      not isinstance(static_delta.get('files'),dict)):
+                      raise RuntimeError('Malformed static delta ZIP marker')
+                  for name in static_delta['reuse']:
+                      if (not isinstance(name,str) or name=='index.html' or
+                          'client/'+name in names or name not in static_delta['files']):
+                          raise RuntimeError('Reused static file was improperly uploaded')
               meta=json.loads(z.read('ptscps-staging-build.json'))
               if meta.get('branch')!='master' or meta.get('commit')!=os.environ['PTSCPS_DEPLOY_COMMIT'] or meta.get('sitemap_revision')!=state['revision']:
                   raise RuntimeError('Archive revision marker mismatch')
@@ -286,14 +340,6 @@ jobs:
                   if required not in names:raise RuntimeError('Missing staged bundle file: '+required)
           print('PASS: ZIP contains dev server/client and provenance, no private environment file.')
           PY
-      - name: Install encrypted FTP client
-        shell: bash
-        run: |
-          set -euo pipefail
-          if ! command -v lftp >/dev/null 2>&1; then
-            sudo apt-get update -qq
-            sudo apt-get install -y -qq --no-install-recommends lftp
-          fi
       - name: Upload compiled staging archive by FTP-TLS
         shell: bash
         run: bash actions-hub/scripts/ptscps-resumable-ftp.sh
