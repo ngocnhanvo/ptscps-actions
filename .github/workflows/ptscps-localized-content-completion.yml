@@ -1,0 +1,72 @@
+name: PTSCPS localized content completion
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/ptscps-localized-content-completion.mjs'
+      - '.github/workflows/ptscps-localized-content-completion.yml'
+      - 'audit/ptscps-localized-content-completion.ready'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: ptscps-localized-content-completion
+  cancel-in-progress: false
+
+jobs:
+  migrate-build-qa:
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.0-noble
+      options: --ipc=host
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate script syntax
+        run: node --check scripts/ptscps-localized-content-completion.mjs
+      - name: Resolve configured PTSCPS origins
+        shell: bash
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os,re
+          from urllib.parse import urlsplit
+          vals=dict(re.findall(r'^\s*(?:export\s+)?(WC_URL|WC_URL_CLIENT)\s*=\s*(.+)\s*$',os.environ.get('ENV_FILE',''),re.M))
+          def origin(key):
+              u=urlsplit(vals.get(key,'').strip().strip('"\''))
+              if u.scheme!='https' or not u.hostname or u.path not in ('','/') or u.query or u.fragment or u.username or u.password or u.port not in (None,443):
+                  raise SystemExit('INVALID_ORIGIN '+key)
+              return 'https://'+u.hostname
+          wp,front=origin('WC_URL'),origin('WC_URL_CLIENT')
+          if wp==front: raise SystemExit('ORIGIN_COLLISION')
+          with open(os.environ['GITHUB_ENV'],'a') as f:
+              f.write('WP_ORIGIN='+wp+'\nFRONT_ORIGIN='+front+'\n')
+          print('PTSCPS_LOCALIZED_ORIGINS=PASS')
+          PY
+      - name: Install Playwright driver
+        run: npm install --no-save --no-package-lock --ignore-scripts --no-audit --no-fund playwright@1.64.0
+      - name: Verify WordPress build monitor contract
+        run: node scripts/ptscps-wordpress-build-monitor.test.mjs
+      - name: Complete localized content, build through WordPress, and QA
+        env:
+          WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
+          WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/ptscps-localized-content-completion.mjs
+      - name: Upload migration evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ptscps-localized-content-completion-${{ github.run_id }}
+          path: artifacts/ptscps-localized-content-completion/
+          if-no-files-found: warn
+          retention-days: 14
