@@ -414,6 +414,42 @@ async function ensureContactPage(n){
   writes++;
   log('CONTACT_PAGE',{state:'PUBLISHED',id:target.id,tables:desired});
 }
+// A published WordPress Page with an `ssr-` key is an archive registry marker:
+// Astro excludes it from SSG paths while the compiled routing matcher sees
+// the slug as an existing Page. This prevents the one-segment Post detail
+// fallback (^/([^/.]+)$ with page_not_exists) from hijacking /tuyen-dung.
+// The real listing remains request-time SSR in src/pages/tuyen-dung/index.astro.
+async function ensureRecruitmentArchiveMarker(n){
+  const query='/wp-json/wp/v2/pages?context=edit&status=any&slug=tuyen-dung&per_page=20&_fields=id,slug,status,acf,content,title';
+  const found=await api('GET',query,n);
+  assert(found.r.ok()&&Array.isArray(found.body),'Cannot inspect recruitment archive Page registry');
+  const matches=found.body.filter(row=>String(row.slug||'')==='tuyen-dung');
+  assert(matches.length<=1,'Ambiguous WordPress Page slug tuyen-dung');
+  const values={key:'ssr-recruitment',action:'IntroPage',product_lang:'vi'};
+  let record=matches[0];
+  if(record){
+    const storedContent=String(record.content?.raw||record.content?.rendered||'').trim();
+    const key=val(record.acf?.key);
+    assert(key==='ssr-recruitment',`Refusing to modify unrelated existing tuyen-dung Page id=${record.id} key=${key}`);
+    assert(!storedContent,`Refusing to overwrite authored Page content id=${record.id}`);
+  }else{
+    const created=await api('POST','/wp-json/wp/v2/pages',n,{
+      title:'Tuyển dụng',slug:'tuyen-dung',status:'publish',content:'',acf:values,
+    });
+    assert(created.r.ok()&&created.body?.id,`Unable to register SSR recruitment Page HTTP ${created.r.status()}`);
+    record=created.body;writes++;
+  }
+  if(!Object.entries(values).every(([key,value])=>val(record.acf?.[key])===value)){
+    await setAcf(n,'pages',record.id,values);
+  }
+  const checked=await api('GET',`/wp-json/wp/v2/pages/${record.id}?context=edit&_fields=id,slug,status,acf,content`,n);
+  assert(checked.r.ok(),'SSR recruitment Page registry readback failed');
+  assert(checked.body?.status==='publish'&&checked.body?.slug==='tuyen-dung','SSR recruitment Page not published under expected slug');
+  assert(Object.entries(values).every(([key,value])=>val(checked.body.acf?.[key])===value),'SSR recruitment Page ACF readback mismatch');
+  assert(!String(checked.body.content?.raw||checked.body.content?.rendered||'').trim(),'SSR recruitment Page marker must not contain body content');
+  log('RECRUITMENT_SSR_MARKER',{id:record.id,slug:'tuyen-dung',key:'ssr-recruitment',state:matches.length?'EXISTS':'CREATED'});
+}
+
 async function ensureMenu(n){
   const lookup=async()=>{
     const r=await page.request.get(uri(`/wp-json/esc-api/v1/menus?_fresh=${Date.now()}`),{timeout:30000,headers:{'Cache-Control':'no-cache'}});
@@ -544,6 +580,7 @@ try{
   await migrateRecruitment(n,sourcePosts,id);
   for(const table of tables)await ensureTable(table);
   await ensureContactPage(n);
+  await ensureRecruitmentArchiveMarker(n);
   await ensureMenu(n);
   await writeFile(`${artifact}/assets-deferred.json`,JSON.stringify(deferred,null,2));
   log('CMS_READY',{posts:sourcePosts.length,tableCount:tables.length,writes,mediaDeferred:deferred.length});
