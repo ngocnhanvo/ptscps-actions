@@ -530,6 +530,40 @@ async function ensureRecruitmentArchiveMarker(n){
   log('RECRUITMENT_SSR_MARKER',{id:record.id,slug:'tuyen-dung',key:'ssr-recruitment',state:matches.length?'EXISTS':'CREATED'});
 }
 
+async function ensureSearchArchiveMarker(n){
+  const slug='tim-kiem';
+  const query=`/wp-json/wp/v2/pages?context=edit&status=any&slug=${slug}&per_page=20&_fields=id,slug,status,acf,content,title`;
+  const found=await api('GET',query,n);
+  assert(found.r.ok()&&Array.isArray(found.body),'Cannot inspect search SSR Page registry');
+  const matches=found.body.filter(row=>String(row.slug||'')===slug);
+  assert(matches.length<=1,'Ambiguous WordPress Page slug tim-kiem');
+  const values={key:'ssr-search',action:'IntroPage',product_lang:'vi'};
+  let record=matches[0];
+  if(record){
+    const key=val(record.acf?.key);
+    const content=String(record.content?.raw||record.content?.rendered||'').trim();
+    assert(key===values.key&&!content,
+      `Refusing to overwrite unrelated/edited WordPress Search Page id=${record.id} key=${key}`);
+  }else{
+    const created=await api('POST','/wp-json/wp/v2/pages',n,{
+      title:'Tìm kiếm',slug,status:'publish',content:'',acf:values,
+    });
+    assert(created.r.ok()&&created.body?.id,`Unable to register Search SSR Page HTTP ${created.r.status()}`);
+    record=created.body;writes++;
+  }
+  if(!Object.entries(values).every(([key,value])=>val(record.acf?.[key])===value)){
+    await setAcf(n,'pages',record.id,values);
+  }
+  const checked=await api('GET',`/wp-json/wp/v2/pages/${record.id}?context=edit&_fields=id,slug,status,acf,content`,n);
+  assert(checked.r.ok()&&checked.body?.status==='publish'&&checked.body?.slug===slug,
+    'Search SSR Page registry readback failed');
+  assert(Object.entries(values).every(([key,value])=>val(checked.body.acf?.[key])===value),
+    'Search SSR Page ACF mismatch');
+  assert(!String(checked.body.content?.raw||checked.body.content?.rendered||'').trim(),
+    'SSR Search marker must not have editor body content');
+  log('SEARCH_SSR_MARKER',{id:record.id,slug,key:values.key,state:matches.length?'EXISTS':'CREATED'});
+}
+
 async function ensureMenu(n){
   const lookup=async()=>{
     const r=await page.request.get(uri(`/wp-json/esc-api/v1/menus?_fresh=${Date.now()}`),{timeout:30000,headers:{'Cache-Control':'no-cache'}});
@@ -589,7 +623,7 @@ async function readiness(){
   const deadlines=Date.now()+120000;
   for(let attempt=1;Date.now()<deadlines;attempt++){
     const outcomes=[];
-    for(const path of ['/tuyen-dung','/lien-he']){
+    for(const path of ['/tuyen-dung','/lien-he','/tim-kiem']){
       try{const r=await ctx.request.get(`${front}${path}?_publish=${Date.now()}`,{timeout:15000});outcomes.push({path,http:r.status(),ok:r.status()===200});}
       catch(error){outcomes.push({path,error:String(error?.message||error),ok:false});}
     }
@@ -604,7 +638,25 @@ async function QA(){
     const context=await browser.newContext({viewport:{width,height:900}});
     const p=await context.newPage();
     try{
-      let r=await p.goto(`${front}/tuyen-dung?_qa=${Date.now()}`,{waitUntil:'domcontentloaded',timeout:45000});
+      const searchUrl=`${front}/tim-kiem?lang=vi&q=PPS&_search_qa=${Date.now()}`;
+      let r=await p.goto(searchUrl,{waitUntil:'domcontentloaded',timeout:45000});
+      assert(r?.status()===200,`QA_FAILED Search SSR HTTP ${r?.status()} ${searchUrl}`);
+      assert(await p.locator('html').getAttribute('lang')==='vi','QA_FAILED Vietnamese search lang');
+      const searchArticles=await p.locator('[data-news-search] article[data-post-lang="vi"]').count();
+      assert(searchArticles>0,`QA_FAILED Search did not find published Vietnamese news Posts for PPS (width=${width})`);
+      assert(await p.locator('[data-header-tools-scope="desktop"] form[action="/tim-kiem"] input[name="lang"][value="vi"]').count()===1,
+        'QA_FAILED Vietnamese Header search does not preserve locale');
+      const englishUrl=`${front}/tim-kiem?lang=en&q=PPS&_search_qa=${Date.now()}`;
+      r=await p.goto(englishUrl,{waitUntil:'domcontentloaded',timeout:45000});
+      assert(r?.status()===200,`QA_FAILED English search HTTP ${r?.status()}`);
+      assert(await p.locator('html').getAttribute('lang')==='en','QA_FAILED English search page lang');
+      assert(await p.locator('[data-news-search][data-search-lang="en"]').count()===1,'QA_FAILED English search container');
+      assert(await p.locator('[data-news-search] article:not([data-post-lang="en"])').count()===0,
+        'QA_FAILED English search mixed results from other ACF product_lang');
+      assert(await p.locator('form[action="/tim-kiem"] input[name="lang"][value="en"]').count()>0,
+        'QA_FAILED English search form loses language');
+      log('NEWS_SEARCH_QA',{width,viCount:searchArticles,enCount:await p.locator('[data-news-search] article').count(),localeIsolated:true});
+      r=await p.goto(`${front}/tuyen-dung?_qa=${Date.now()}`,{waitUntil:'domcontentloaded',timeout:45000});
       assert(r?.status()===200,`QA_FAILED recruitment HTTP ${r?.status()}`);
       assert(await p.locator('h1').first().innerText()==='Thông tin tuyển dụng','QA_FAILED recruitment H1');
       assert(await p.locator('[data-recruitment-listing] article').count()>0,'QA_FAILED empty recruitment list after source migration');
@@ -682,6 +734,7 @@ try{
   await ensureContactMapEditorFields();
   await ensureContactPage(n);
   await ensureRecruitmentArchiveMarker(n);
+  await ensureSearchArchiveMarker(n);
   await ensureMenu(n);
   await writeFile(`${artifact}/assets-deferred.json`,JSON.stringify(deferred,null,2));
   log('CMS_READY',{posts:sourcePosts.length,tableCount:tables.length,writes,mediaDeferred:deferred.length});
