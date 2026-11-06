@@ -358,8 +358,20 @@ async function ensureVietnameseStaticPages(n, sourcePages, targetPages) {
 const tableIds = html => [...String(html || '').matchAll(/\[(?:table|esc_table)\s+id\s*=\s*["']?([^\s\]"']+)/gi)].map(match => match[1]);
 const englishTableId = id => String(id).endsWith('_vi') ? String(id).replace(/_vi$/, '_en') : `${id}_en`;
 async function tableExists(id) {
-  const response = await page.request.get(uri(`/wp-json/tablepress/v1/table/${encodeURIComponent(id)}`), { timeout: 30000, headers: { 'Cache-Control': 'no-cache' } });
-  return response.ok();
+  let last = '';
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const response = await page.request.get(uri(`/wp-json/tablepress/v1/table/${encodeURIComponent(id)}`), { timeout: 30000, headers: { 'Cache-Control': 'no-cache' } });
+      if (response.ok()) return true;
+      if (response.status() === 404) return false;
+      last = `HTTP ${response.status()}`;
+    } catch (error) {
+      last = String(error?.message || error);
+    }
+    if (attempt < 3) await sleep(900 * attempt);
+  }
+  log('TABLE_CHECK_WARNING', { id, retries: 3, reason: last });
+  return false;
 }
 
 async function contentForEnglishPage(targetVi, sourceEn, n) {
