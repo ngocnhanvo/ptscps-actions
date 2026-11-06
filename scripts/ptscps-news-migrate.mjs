@@ -56,6 +56,36 @@ const verifiedRecovery8661={
   article:'https://www.ptsc.com.vn/doan-thanh-nien-cong-ty-pps-to-chuc-chuong-trinh-sinh-hoat-doan-gioi-thieu-ve-cac-chu-de-lien-quan-den-cac-tau-fpsofso-va-cac-du-an-onshore',
   note:'Exact current PTSC article image at the legacy 2-3 position, before the separator-vessel caption',
 };
+const verifiedRecovery8662={
+  canonicalSource:'https://ptscps.com.vn/wp-content/uploads/2019/10/3-3.jpg',
+  url:'https://www.ptsc.com.vn/Data/Sites/1/media/1-hdsd/ch%E1%BB%89nh-h%C3%ACnh-tin-t%E1%BB%A9c/tg.jpg',
+  article:'https://www.ptsc.com.vn/doan-thanh-nien-cong-ty-pps-to-chuc-chuong-trinh-sinh-hoat-doan-gioi-thieu-ve-cac-chu-de-lien-quan-den-cac-tau-fpsofso-va-cac-du-an-onshore',
+  note:'Verified remaining current PTSC article image for legacy attachment 8662 after attachment 8661 maps to yh.jpg',
+};
+const verifiedRecovery8096={
+  canonicalSource:'https://ptscps.com.vn/wp-content/uploads/2019/06/Anh-1-2.jpg',
+  url:'https://www.ptsc.com.vn/Data/Sites/1/media/content/Moi-truong-1-1024x683.jpg',
+  article:'https://www.ptsc.com.vn/doan-thanh-nien-cong-ty-pps-huong-ung--quotngay-moi-truong-the-gioi-quot',
+  note:'Verified current PTSC image Moi truong 1 from the same 2019 article for legacy attachment 8096',
+};
+const verifiedRecovery8098={
+  canonicalSource:'https://ptscps.com.vn/wp-content/uploads/2019/06/Anh-3-2.jpg',
+  url:'https://www.ptsc.com.vn/Data/Sites/1/media/content/Moi-truong-3-1024x683.jpg',
+  article:'https://www.ptsc.com.vn/doan-thanh-nien-cong-ty-pps-huong-ung--quotngay-moi-truong-the-gioi-quot',
+  note:'Verified current PTSC image Moi truong 3 from the same 2019 article for legacy attachment 8098',
+};
+const verifiedRecovery8418={
+  canonicalSource:'https://ptscps.com.vn/wp-content/uploads/2019/08/1-2.jpg',
+  url:'https://www.ptsc.com.vn/Data/Sites/1/News/1084/1-2.jpg',
+  article:'https://www.ptsc.com.vn/hoi-thao-cong-ty-pps-nam-2019',
+  note:'Exact retained PTSC News asset for the 2019 PPS sports article and legacy attachment 8418',
+};
+const verifiedRecovery8420={
+  canonicalSource:'https://ptscps.com.vn/wp-content/uploads/2019/08/3-1.jpg',
+  url:'https://www.ptsc.com.vn/Data/Sites/1/media/89.jpg',
+  article:'https://www.ptsc.com.vn/hoi-thao-cong-ty-pps-nam-2019',
+  note:'Verified retained sports-article image with the unique legacy 3-1 aspect ratio (1024x622) for attachment 8420',
+};
 const verifiedExternalAssetRecoveries=new Map([
   ['https://ptscps.com.vn/wp-content/uploads/2019/09/124-1024x767.jpg',verifiedRecovery8492],
   ['https://ptscps.com.vn/wp-content/uploads/2019/09/124.jpg',verifiedRecovery8492],
@@ -65,6 +95,16 @@ const verifiedExternalAssetRecoveries=new Map([
   ['https://ptscps.com.vn/wp-content/uploads/2019/10/2-3.jpg',verifiedRecovery8661],
   ['https://ptscps.com.vn/wp-content/uploads/2019/10/2-3-300x169.jpg',verifiedRecovery8661],
   ['https://ptscps.com.vn/wp-content/uploads/2019/10/2-3-768x433.jpg',verifiedRecovery8661],
+  ['https://ptscps.com.vn/wp-content/uploads/2019/10/3-3.jpg',verifiedRecovery8662],
+  ['https://ptscps.com.vn/wp-content/uploads/2019/10/3-3-1024x768.jpg',verifiedRecovery8662],
+  ['https://ptscps.com.vn/wp-content/uploads/2019/06/Anh-1-2.jpg',verifiedRecovery8096],
+  ['https://ptscps.com.vn/wp-content/uploads/2019/06/Anh-1-2-1024x681.jpg',verifiedRecovery8096],
+  ['https://ptscps.com.vn/wp-content/uploads/2019/06/Anh-3-2.jpg',verifiedRecovery8098],
+  ['https://ptscps.com.vn/wp-content/uploads/2019/06/Anh-3-2-1024x684.jpg',verifiedRecovery8098],
+  ['https://ptscps.com.vn/wp-content/uploads/2019/08/1-2.jpg',verifiedRecovery8418],
+  ['https://ptscps.com.vn/wp-content/uploads/2019/08/1-2-1024x543.jpg',verifiedRecovery8418],
+  ['https://ptscps.com.vn/wp-content/uploads/2019/08/3-1.jpg',verifiedRecovery8420],
+  ['https://ptscps.com.vn/wp-content/uploads/2019/08/3-1-1024x622.jpg',verifiedRecovery8420],
 ]);
 const mediaLookupConcurrency=6;
 const created={categories:[],media:[],posts:[],pages:[]};
@@ -407,12 +447,17 @@ async function currentPtscArticleFallbacks(value){
       for(const candidate of [...articleSlugVariants])articleSlugVariants.push(transform(candidate));
     }
     const articleSlugs=[...new Set(articleSlugVariants)];
-    for(const articleSlug of articleSlugs){
-      let html=currentPtscArticleCache.get(articleSlug);
+    const articleTargets=[
+      ...articleSlugs.map(articleSlug=>({slug:articleSlug,path:`/${articleSlug}`})),
+      ...(currentPtscArticlePathOverrides.get(slug)||[]).map(path=>({slug,path})),
+    ];
+    for(const articleTarget of articleTargets){
+      const cacheKey=articleTarget.path;
+      let html=currentPtscArticleCache.get(cacheKey);
       if(html===undefined){
-        const response=await fetch(`${legacyMediaAliasOrigin}/${articleSlug}`,{headers:{'User-Agent':'PTSCPS News migration/1.0'},signal:AbortSignal.timeout(60000)}).catch(()=>null);
+        const response=await fetch(`${legacyMediaAliasOrigin}${articleTarget.path}`,{headers:{'User-Agent':'PTSCPS News migration/1.0'},signal:AbortSignal.timeout(60000)}).catch(()=>null);
         html=response?.ok?await response.text():'';
-        currentPtscArticleCache.set(articleSlug,html);
+        currentPtscArticleCache.set(cacheKey,html);
       }
       if(!html)continue;
       for(const tag of html.match(/<img\b[^>]*>/gi)||[]){
@@ -576,6 +621,14 @@ async function ensureAsset(n,url,meta={}){
       const mediaUrl=String(media.source_url||'');
       if(canonicalNormalized!==normalized)log('MEDIA_CANONICAL_REUSE',{requested:normalized,canonical:canonicalNormalized,mediaId:Number(media.id)});
       return {id:Number(media.id),url:mediaUrl,path:mediaPath(mediaUrl),state:'existing'};
+    }
+    for(const fallback of wordpressDerivativeFallbacks(normalized)){
+      const original=normalizeSourceAsset(fallback);if(!original)continue;
+      const originalMedia=await lookupMedia(n,assetSlug(original));
+      if(!originalMedia)continue;
+      const mediaUrl=String(originalMedia.source_url||'');
+      log('MEDIA_DERIVATIVE_REUSE',{requested:normalized,canonical:original,mediaId:Number(originalMedia.id)});
+      return {id:Number(originalMedia.id),url:mediaUrl,path:mediaPath(mediaUrl),state:'existing-derivative-reuse'};
     }
     let source=await fetch(normalized,{headers:{'User-Agent':'PTSCPS News migration/1.0'},signal:AbortSignal.timeout(60000)});
     let resolvedSource=normalized;
@@ -882,12 +935,21 @@ try{
   for(const post of source.posts){
     registerResponsiveFallbacks(post.content);
     registerResponsiveFallbacks(post.excerpt);
-    for(const url of extractAssets(post.content))assetSet.add(url);
-    for(const url of extractAssets(post.excerpt))assetSet.add(url);
+    for(const url of extractAssets(post.content)){
+      addSourceAssetContext(url,{kind:'post-content-asset',id:post.id,slug:post.slug});
+      assetSet.add(url);
+    }
+    for(const url of extractAssets(post.excerpt)){
+      addSourceAssetContext(url,{kind:'post-excerpt-asset',id:post.id,slug:post.slug});
+      assetSet.add(url);
+    }
   }
   for(const row of featuredMap.values()){const url=normalizeSourceAsset(row.source_url);if(url)assetSet.add(url);}
   registerResponsiveFallbacks(source.gallery.content);
-  for(const url of extractAssets(source.gallery.content))assetSet.add(url);
+  for(const url of extractAssets(source.gallery.content)){
+    addSourceAssetContext(url,{kind:'gallery-content-asset',id:source.gallery.id,slug:source.gallery.slug});
+    assetSet.add(url);
+  }
   log('MEDIA_RESPONSIVE_FALLBACKS',{sources:sourceAssetFallbacks.size});
   await preloadTargetMedia(n,[...assetSet]);
   log('MEDIA_PLAN',{uniqueAssets:assetSet.size,featuredAttachments:featuredIds.length});
