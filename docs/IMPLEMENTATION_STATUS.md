@@ -1,7 +1,16 @@
 # PTSCPS implementation checkpoint
 
-Updated: 2026-11-05
+Updated: 2026-11-06
 Code mode: `auto-build`
+
+## CURRENT CHECKPOINT — Visual Builder completed; native desktop/mobile acceptance PASS (2026-11-06)
+
+- Final sources: PHP `98f91467550a0ec3819b124e5a83536c17c68584`, Astro `9c2d791b2b594b61b495ab280b1ed435602ee88e`. Source-commit gate passed 12 PHP suites and 36 Astro test files / 226 tests.
+- Scoped PHP release verified 21 runtime files, 16 changed; no cleanup pending. Native WordPress Build Website deployment `42169632148` attempt 1 **SUCCESS**, deployed exact final Astro source, public SSG/home smoke **PASS**. Do not repeat PHP upload or completed builds.
+- Live native Header and Footer Info select/cancel/save/REST readback/preview reload/verified restore **PASS** in `42167548844`; original values were restored. Exact text selection, draft cancel and stale-source 409 checks passed. Inline image/Media inspector and desktop/mobile navigation checks **PASS** in `42168288827` without repeating shared CMS writes.
+- Final integration `42169505522` **SUCCESS** on desktop/mobile: background-image foreground selector, exact rendered version/SEO inspector and actual PPS banner previous/next/dot controls. Evidence artifact `13479913871` was visually inspected; Builder shows 0 sources awaiting build. Final tests made no CMS writes.
+- Target-specific adapters preserve the flattened Header array, actual Info language/fallback ownership, protected preview navigation, exact native cells and Media-only writes. Existing public layout/URLs and completed build optimizations remain intact.
+- Full evidence and continuation rules: [2026-11-06-visual-builder-update.md](checkpoints/2026-11-06-visual-builder-update.md). **No Visual Builder work remains. Separate News migration is outside this completion; preserve its own checkpoint and state.**
 
 ## CURRENT CHECKPOINT — News legacy inventory complete; CMS migration blocked by missing source product_lang (2026-11-05)
 
