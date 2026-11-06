@@ -1,0 +1,34 @@
+name: PTSCPS Contact Map iframe smoke
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/ptscps-contact-map-smoke.yml'
+      - 'scripts/ptscps-contact-map-smoke.mjs'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.0-noble
+      options: --ipc=host
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Reuse preinstalled Playwright browser
+        run: npm install --no-save --no-package-lock --ignore-scripts --no-audit --no-fund playwright@1.64.0
+      - name: Test real Google Maps iframe after 9 seconds
+        run: node scripts/ptscps-contact-map-smoke.mjs
+      - name: Upload visual evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ptscps-contact-map-smoke-${{ github.run_id }}
+          path: artifacts/ptscps-contact-map-smoke/
+          if-no-files-found: warn
+          retention-days: 7
