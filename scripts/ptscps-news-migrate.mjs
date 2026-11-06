@@ -38,6 +38,11 @@ const sourceAssetFallbacks=new Map();
 const sourceAssetContexts=new Map();
 const targetMediaLookupCache=new Map();
 const currentPtscArticleCache=new Map();
+const currentPtscArticlePathOverrides=new Map([
+  ['cong-ty-pps-to-chuc-cac-hoat-dong-nhan-ngay-thuong-binh-liet-sy-27-7',[
+    '/tin-tuc/tin-ptsc-1/doan-the-xa-hoi/cong-ty-pps-to-chuc-cac-hoat-dong-nhan-ngay-thuong-binh-liet-sy-277',
+  ]],
+]);
 const legacyMediaAliasOrigin='https://www.ptsc.com.vn';
 const verifiedRecovery8492={
   canonicalSource:'https://ptscps.com.vn/wp-content/uploads/2019/09/124-1024x767.jpg',
@@ -446,17 +451,24 @@ async function currentPtscArticleImageInventory(slug){
   ]){
     for(const candidate of [...articleSlugVariants])articleSlugVariants.push(transform(candidate));
   }
+  const articleTargets=[
+    ...[...new Set(articleSlugVariants)].map(articleSlug=>({slug:articleSlug,path:`/${articleSlug}`})),
+    ...(currentPtscArticlePathOverrides.get(slug)||[]).map(path=>({slug,path})),
+  ];
   const articles=[];
-  for(const articleSlug of [...new Set(articleSlugVariants)]){
-    let html=currentPtscArticleCache.get(articleSlug);
+  for(const target of articleTargets){
+    const cacheKey=target.path;
+    let html=currentPtscArticleCache.get(cacheKey);
     if(html===undefined){
-      const response=await fetch(`${legacyMediaAliasOrigin}/${articleSlug}`,{headers:{'User-Agent':'PTSCPS News migration/1.0'},signal:AbortSignal.timeout(60000)}).catch(()=>null);
+      const response=await fetch(`${legacyMediaAliasOrigin}${target.path}`,{headers:{'User-Agent':'PTSCPS News migration/1.0'},signal:AbortSignal.timeout(60000)}).catch(()=>null);
       html=response?.ok?await response.text():'';
-      currentPtscArticleCache.set(articleSlug,html);
+      currentPtscArticleCache.set(cacheKey,html);
     }
     if(!html)continue;
     const images=[];
-    for(const tag of html.match(/<img\b[^>]*>/gi)||[]){
+    const tags=html.match(/<img\b[^>]*>/gi)||[];
+    for(let index=0;index<tags.length;index++){
+      const tag=tags[index];
       const alt=decodeEntities(tag.match(/\balt=(["'])([^"']*)\1/i)?.[2]||'');
       const candidates=[];
       for(const attribute of ['data-original','data-lazy-src','data-src','src']){
@@ -473,14 +485,14 @@ async function currentPtscArticleImageInventory(slug){
         try{
           const candidate=new URL(raw,legacyMediaAliasOrigin);
           if(!/^https?:$/.test(candidate.protocol)||!/(^|\.)ptsc\.com\.vn$/i.test(candidate.hostname))continue;
-          if(!candidate.pathname.includes('/Data/Sites/1/media/'))continue;
-          images.push({url:candidate.href,alt});
+          if(!/\/Data\/Sites\/1\/(?:media|News)\//i.test(candidate.pathname))continue;
+          images.push({index,url:candidate.href,alt});
           break;
         }catch{}
       }
     }
     const uniqueImages=[...new Map(images.map(item=>[item.url,item])).values()];
-    articles.push({slug:articleSlug,images:uniqueImages});
+    articles.push({slug:target.slug,path:target.path,images:uniqueImages});
   }
   return articles;
 }
@@ -915,7 +927,24 @@ try{
         currentArticles:await currentPtscArticleImageInventory(post.slug),
       });
     }
-    const summary={count:missingSourceAssets.length,items:missingSourceAssets,diagnostics};
+    const missingAttachmentIds=[...new Set(missingSourceAssets.flatMap(item=>item.references.map(ref=>Number(ref?.attachmentId||0))).filter(Boolean))];
+    const legacyMediaEvidence=[];
+    for(let i=0;i<missingAttachmentIds.length;i+=100){
+      const chunk=missingAttachmentIds.slice(i,i+100);
+      const response=await context.request.get(legacy+`/wp-json/wp/v2/media?include=${chunk.join(',')}&per_page=100&_fields=id,slug,source_url,alt_text,title,caption,mime_type,media_details`,{timeout:50000,headers:{'Cache-Control':'no-cache'}});
+      assert(response.ok(),`Legacy missing-media evidence batch HTTP ${response.status()}`);
+      for(const row of await response.json())legacyMediaEvidence.push(row);
+    }
+    const featuredBySourceUrl=new Map();
+    for(const row of featuredMap.values()){
+      const sourceUrl=normalizeSourceAsset(row?.source_url);
+      if(sourceUrl)featuredBySourceUrl.set(sourceUrl,row);
+    }
+    const unreferencedEvidence=missingSourceAssets.filter(item=>!item.references.length).map(item=>({
+      url:item.url,
+      featuredMedia:featuredBySourceUrl.get(item.url)||null,
+    }));
+    const summary={count:missingSourceAssets.length,items:missingSourceAssets,diagnostics,legacyMediaEvidence,unreferencedEvidence};
     await writeFile(`${artifactDir}/missing-source-assets.json`,JSON.stringify(summary,null,2));
     log('MEDIA_SOURCE_MISSING_SUMMARY',summary);
     throw Error(`Legacy source assets still missing: ${missingSourceAssets.length}`);
