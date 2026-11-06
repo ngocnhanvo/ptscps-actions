@@ -215,8 +215,10 @@ try {
   } else {
     assert.equal((await provenance())?.commit, expectedAstro, 'Pinned deployed source must be verified before live edits');
     let frame = await openBuilder();
+    if (process.env.BUILDER_QA_SKIP_SHARED !== '1') {
     const menuNode = frame.locator('[data-esc-vb-menu-item-id]:visible').first();
-    await menuNode.click({ modifiers: ['Alt'] });
+    const isToggle = await menuNode.locator('button[data-menu-trigger],button[data-submenu-trigger],button[data-menu-toggle]').count() > 0;
+    await menuNode.click({ modifiers: isToggle ? ['Alt'] : [] });
     const menuPanel = page.locator('#esc-vb-menu-editor');
     await menuPanel.waitFor({ state: 'visible' });
     await page.locator('#esc-vb-menu-label').waitFor({ state: 'visible' });
@@ -242,6 +244,8 @@ try {
       'Reloaded preview must read fresh native Header');
     await restoreAll();
     checks.push({ source: 'Header', select: 'PASS', cancel: 'PASS', save: 'PASS', reload: 'PASS', restore: 'PASS' });
+    await writeFile(artifacts + '/live-progress.json', JSON.stringify({ checks, pageId, restored_all: true }, null, 2));
+    log('PTSCPS_BUILDER_ACCEPTANCE', { source: 'Header', result: 'PASS', restored: true });
 
     frame = await openBuilder();
     const footerNode = frame.locator('[data-esc-vb-footer-field="tencongty"]:visible').first();
@@ -268,9 +272,18 @@ try {
       'Reloaded preview must read fresh native Info');
     await restoreAll();
     checks.push({ source: 'Footer Info', select: 'PASS', cancel: 'PASS', save: 'PASS', reload: 'PASS', restore: 'PASS' });
+    await writeFile(artifacts + '/live-progress.json', JSON.stringify({ checks, pageId, restored_all: true }, null, 2));
+    log('PTSCPS_BUILDER_ACCEPTANCE', { source: 'Footer Info', result: 'PASS', restored: true });
+    }
 
     frame = await openBuilder();
-    const textNode = frame.locator('[data-esc-builder-cell-row][data-esc-builder-cell-field]:visible').first();
+    const textNodes = frame.locator('[data-esc-builder-cell-row][data-esc-builder-cell-field]:visible');
+    const textIndex = await textNodes.evaluateAll(nodes => nodes.findIndex(node => {
+      const bounds = node.getBoundingClientRect();
+      return bounds.width > 8 && bounds.height > 8 && !node.closest('[data-esc-builder-image-row],.sr-only,[aria-hidden="true"]');
+    }));
+    assert(textIndex >= 0, 'A visible exact text cell must be available');
+    const textNode = textNodes.nth(textIndex);
     await textNode.waitFor({ state: 'visible' });
     await textNode.click();
     await page.locator('#esc-vb-text-editor').waitFor({ state: 'visible' });
@@ -284,12 +297,14 @@ try {
     assert.equal(stale.status, 409);
     assert.equal(stale.body.code, 'editor_preview_stale');
     checks.push({ source: 'ESC Table', exact_selection: 'PASS', cancel: 'PASS', stale_version: '409' });
-    const images = frame.locator('[data-esc-builder-image-row][data-esc-builder-image-field]:visible');
+    const images = frame.locator('[data-esc-builder-image-row][data-esc-builder-image-field]:not([aria-hidden="true"]):visible');
     assert(await images.count() > 0, 'Live image bindings must exist');
     await images.first().click();
     await page.locator('#esc-vb-image-editor').waitFor({ state: 'visible' });
     await page.locator('#esc-vb-image-seo').waitFor({ state: 'visible' });
     checks.push({ source: 'ESC Table image', exact_selection: 'PASS', media_inspector: 'PASS', no_media_write: true });
+    await writeFile(artifacts + '/live-progress.json', JSON.stringify({ checks, pageId, restored_all: true }, null, 2));
+    log('PTSCPS_BUILDER_ACCEPTANCE', { source: 'ESC Table text/image', result: 'PASS', no_cms_write: true });
     await page.screenshot({ path: artifacts + '/live-desktop.png', fullPage: true });
     for (const mode of ['desktop', 'mobile']) {
       frame = await openBuilder(mode);

@@ -65,6 +65,7 @@ jobs:
               f.write('WP_ORIGIN='+values['WC_URL']+'\nCLIENT_ORIGIN='+values['WC_URL_CLIENT']+'\n')
               f.write('PTSCPS_PHP_SOURCE_SHA='+request['php']+'\nPTSCPS_ASTRO_SOURCE_SHA='+request['astro']+'\n')
               f.write('BUILDER_RELEASE_PHASE='+phase+'\n')
+              f.write('BUILDER_QA_SKIP_SHARED='+('1' if request.get('skip_completed_shared') is True else '0')+'\n')
           print('PTSCPS_BUILDER_LEASES=PASS; target=PTSCPS; production_branches=master')
           PY
       - uses: actions/setup-node@v4

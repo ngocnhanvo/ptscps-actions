@@ -2,7 +2,7 @@
   "php": "98f91467550a0ec3819b124e5a83536c17c68584",
   "astro": "638b51e38c3e6fca6bd2451d50357f2e7b483653",
   "scope": "PTSCPS native Visual Builder only; backed-up reversible CMS acceptance; auto-build",
-  "phase": "build",
-  "completed_build_run": 42147882129,
-  "acceptance_attempt": 3
+  "phase": "verify",
+  "completed_build_run": 42167054532,
+  "acceptance_attempt": 4
 }
