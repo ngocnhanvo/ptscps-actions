@@ -274,6 +274,18 @@ function legacyMediaAlias(value){
   return `${legacyMediaAliasOrigin}${u.pathname}${u.search}`;
 }
 
+function wordpressDerivativeFallbacks(value){
+  const normalized=normalizeSourceAsset(value);if(!normalized)return [];
+  const u=new URL(normalized);
+  const originalPath=u.pathname
+    .replace(/-\d+x\d+(?=\.[^./]+$)/,'')
+    .replace(/-scaled(?=\.[^./]+$)/,'');
+  if(originalPath===u.pathname)return [];
+  u.pathname=originalPath;
+  const original=u.href;
+  return [original,legacyMediaAlias(original)].filter(Boolean);
+}
+
 function assetSlug(url){return 'legacy-news-'+createHash('sha256').update(url).digest('hex').slice(0,20);}
 function assetFilename(url,mime=''){
   const u=new URL(url);let ext=extname(u.pathname).toLowerCase();
@@ -323,7 +335,13 @@ async function ensureAsset(n,url,meta={}){
     let source=await fetch(normalized,{headers:{'User-Agent':'PTSCPS News migration/1.0'},signal:AbortSignal.timeout(60000)});
     let resolvedSource=normalized;
     if(source.status===404){
-      const fallbacks=[legacyMediaAlias(normalized),...(sourceAssetFallbacks.get(normalized)||[])].filter(Boolean);
+      const responsiveFallbacks=sourceAssetFallbacks.get(normalized)||[];
+      const fallbacks=[
+        legacyMediaAlias(normalized),
+        ...wordpressDerivativeFallbacks(normalized),
+        ...responsiveFallbacks,
+        ...responsiveFallbacks.flatMap(wordpressDerivativeFallbacks),
+      ].filter(Boolean);
       for(const fallback of [...new Set(fallbacks)]){
         const candidate=await fetch(fallback,{headers:{'User-Agent':'PTSCPS News migration/1.0'},signal:AbortSignal.timeout(60000)}).catch(()=>null);
         if(candidate?.ok){
