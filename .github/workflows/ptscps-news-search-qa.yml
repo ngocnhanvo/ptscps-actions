@@ -1,0 +1,28 @@
+name: PTSCPS localized news search production QA
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/ptscps-news-search-qa.yml'
+      - 'scripts/ptscps-news-search-qa.mjs'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  localized-news-search:
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.0-noble
+      options: --ipc=host
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Reuse preinstalled Playwright browser
+        run: npm install --no-save --no-package-lock --ignore-scripts --no-audit --no-fund playwright@1.64.0
+      - name: Validate VI /tim-kiem and EN /search live SSR routes
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: node scripts/ptscps-news-search-qa.mjs
