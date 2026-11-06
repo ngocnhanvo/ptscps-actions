@@ -425,6 +425,43 @@ async function ensurePostDetailRoute(n){
   log('POST_ROUTE',{status:existing?'UPDATED':'CREATED',id:savedId,from,to,priority:900,condition:'page_not_exists'});
 }
 
+// Apply the mandatory Post ACF contract without importing or duplicating content.
+// WordPress REST returns the native ACF fields; a successful POST alone is never proof.
+const postAcfValue=(row,name)=>String(row?.acf?.[name]?.value??row?.acf?.[name]??'').trim();
+async function ensurePostAcf(n){
+  const posts=[];
+  let pageCount=0;
+  for(let index=1;index<=100;index++){
+    const {response,body}=await api('GET',`/wp-json/wp/v2/posts?context=edit&status=publish&per_page=100&page=${index}&_fields=id,slug,status,acf`,n);
+    assert(response.ok()&&Array.isArray(body),`Cannot audit WordPress Posts page ${index}: HTTP ${response.status()}`);
+    const totalPages=Number(response.headers()['x-wp-totalpages']||0);
+    assert(Number.isSafeInteger(totalPages)&&totalPages>0&&totalPages<=100,'Invalid WordPress Posts pagination');
+    for(const post of body){
+      assert(Number.isSafeInteger(Number(post.id))&&Number(post.id)>0&&post.status==='publish',`Invalid published Post in page ${index}`);
+      posts.push(post);
+    }
+    pageCount=index;
+    if(index>=totalPages)break;
+    assert(index<100,'WordPress Posts pagination exceeded audit limit');
+  }
+  assert(posts.length>0,'No published WordPress Posts to audit');
+  assert(new Set(posts.map(row=>Number(row.id))).size===posts.length,'Duplicate WordPress Post IDs during ACF audit');
+  const missing=posts.filter(row=>postAcfValue(row,'action')!=='PostDetails'||postAcfValue(row,'key')!=='ssr-post');
+  log('POST_ACF_AUDIT',{total:posts.length,pages:pageCount,needsUpdate:missing.length,correct:posts.length-missing.length});
+  let updated=0;
+  for(const post of missing){
+    const id=Number(post.id);
+    const write=await api('POST',`/wp-json/wp/v2/posts/${id}`,n,{acf:{action:'PostDetails',key:'ssr-post'}});
+    assert(write.response.ok(),`Post ACF save failed: id=${id} HTTP ${write.response.status()} code=${String(write.body?.code||'')}`);
+    const readback=await api('GET',`/wp-json/wp/v2/posts/${id}?context=edit&_fields=id,slug,status,acf`,n);
+    assert(readback.response.ok()&&Number(readback.body?.id)===id&&readback.body?.status==='publish',`Post ACF readback unavailable: ${id}`);
+    assert(postAcfValue(readback.body,'action')==='PostDetails'&&postAcfValue(readback.body,'key')==='ssr-post',`Post ACF readback mismatch: ${id}`);
+    updated++;cmsWrites++;
+    if(updated%25===0||updated===missing.length)log('POST_ACF_PROGRESS',{updated,total:missing.length,lastId:id});
+  }
+  log('POST_ACF_PASS',{total:posts.length,updated,unchanged:posts.length-updated,action:'PostDetails',key:'ssr-post'});
+}
+
 async function postDetailProbe(view){
   try{
     const listing=await view.goto(front+'/c/tin-tuc/hoat-dong-cua-cong-ty?_news_post_detail='+Date.now(),{waitUntil:'domcontentloaded',timeout:45000});
@@ -571,6 +608,7 @@ try{
     const n=await nonce();
     await ensureMenu(n);
     await ensurePostDetailRoute(n);
+    await ensurePostAcf(n);
     log('CMS',{status:'PASS',writes:cmsWrites});
     await buildThroughWordPress();
     await qa();
