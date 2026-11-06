@@ -1,6 +1,7 @@
 /** Authenticated native Builder acceptance. Private tickets/backups never enter artifacts. */
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
+import { execFileSync } from 'node:child_process';
 import { mkdir, writeFile, rm, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { waitForWordPressBuild } from './ptscps-wordpress-build-monitor.mjs';
@@ -41,6 +42,15 @@ async function openBuilder(mode = 'desktop') {
   url.search = new URLSearchParams({ post_type: 'page', page: 'esc-visual-builder',
     ...(pageId ? { esc_vb_page: String(pageId) } : {}), esc_vb_view: mode }).toString();
   await page.goto(url.href, { waitUntil: 'domcontentloaded', timeout: 45000 });
+  if (!pageId && stage !== 'preflight') {
+    const preferred = await page.locator('#esc-vb-page option').evaluateAll(options =>
+      options.find(option => /^Trang chủ(?:\s|$)/i.test(option.textContent.trim()))?.value);
+    if (preferred && preferred !== await page.locator('#esc-vb-page').inputValue()) {
+      await page.locator('#esc-vb-page').selectOption(preferred);
+      await page.locator('.esc-vb-page-form').getByRole('button', { name: 'Mở trang', exact: true }).click();
+      await page.waitForURL(current => current.searchParams.get('esc_vb_page') === preferred);
+    }
+  }
   const iframe = page.locator('#esc-vb-frame');
   await iframe.waitFor({ state: 'attached' });
   const preview = new URL(await iframe.getAttribute('src'));
@@ -133,13 +143,33 @@ async function nativeBuild() {
   }
   await page.goto(origin + '/wp-admin/admin.php?page=vcs-build-trigger', { waitUntil: 'domcontentloaded', timeout: 45000 });
   await page.locator('#vcs-build-btn-main').waitFor();
+  const reconcile = async () => page.evaluate(async () => {
+    const cfg = window.vcsBuild;
+    if (!cfg?.ajax_url || !cfg?.nonce) throw Error('Native build status configuration missing');
+    const response = await fetch(cfg.ajax_url, { method: 'POST', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
+      body: new URLSearchParams({ action: 'vcs_check_build_status', nonce: String(cfg.nonce) }),
+      signal: AbortSignal.timeout(25000) });
+    const body = await response.json();
+    if (!response.ok || !body?.success) throw Error('Native build status reconciliation failed');
+    return { status: body.data?.status, active: body.data?.build_active };
+  });
+  await reconcile(); // WordPress releases its own completed-run lock; no direct lock writes.
+  await page.reload({ waitUntil: 'domcontentloaded', timeout: 45000 });
   let state = await page.evaluate(() => ({ configured: window.vcsBuild?.build_configured, active: window.vcsBuild?.initial_active }));
   assert([true, 1, '1'].includes(state.configured), 'Native Build Website is not configured');
   if (state.active) {
     const result = await waitForWordPressBuild({ page, log, expectTriggered: true, buildTimeoutMs: 900000 });
-    await writeFile(artifacts + '/native-build.json', JSON.stringify({ ...result, reused_existing: true }, null, 2));
-    log('PTSCPS_BUILDER_BUILD', { ...result, reused_existing: true });
-    return; // The following FTPS gate checks its source; never trigger a duplicate.
+    await reconcile();
+    execFileSync('python3', ['scripts/ptscps-visual-builder-provenance.py', 'inspect'], { stdio: 'inherit' });
+    if ((await provenance())?.commit === expectedAstro) {
+      await writeFile(artifacts + '/native-build.json', JSON.stringify({ ...result, reused_existing: true }, null, 2));
+      log('PTSCPS_BUILDER_BUILD', { ...result, reused_existing: true });
+      return;
+    }
+    await page.reload({ waitUntil: 'domcontentloaded', timeout: 45000 });
+    state = await page.evaluate(() => ({ active: window.vcsBuild?.initial_active }));
+    assert(!state.active, 'WordPress has not released its completed native build lock');
   }
   await page.locator('#vcs-force-build').check();
   const responsePromise = page.waitForResponse(response =>

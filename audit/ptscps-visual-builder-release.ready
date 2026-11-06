@@ -1,8 +1,8 @@
 {
   "php": "98f91467550a0ec3819b124e5a83536c17c68584",
-  "astro": "3c519e22c834ee91eeed0419a9ff870631f20abf",
+  "astro": "638b51e38c3e6fca6bd2451d50357f2e7b483653",
   "scope": "PTSCPS native Visual Builder only; backed-up reversible CMS acceptance; auto-build",
-  "phase": "diagnose",
+  "phase": "build",
   "completed_build_run": 42147882129,
-  "diagnostic_attempt": 2
+  "acceptance_attempt": 3
 }
