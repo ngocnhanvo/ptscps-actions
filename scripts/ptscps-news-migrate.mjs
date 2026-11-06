@@ -827,9 +827,28 @@ try{
   log('MEDIA_PLAN',{uniqueAssets:assetSet.size,featuredAttachments:featuredIds.length});
   const assets=[...assetSet].sort((a,b)=>assetPriority(a)-assetPriority(b));
   const mediaConcurrency=2;
+  const missingSourceAssets=[];
   for(let i=0;i<assets.length;i+=mediaConcurrency){
-    await Promise.all(assets.slice(i,i+mediaConcurrency).map(url=>ensureAsset(n,url)));
-    const done=Math.min(i+mediaConcurrency,assets.length);if(done%40===0||done===assets.length)log('MEDIA_PROGRESS',{done,total:assets.length,created:created.media.length});
+    const batch=assets.slice(i,i+mediaConcurrency);
+    const results=await Promise.allSettled(batch.map(url=>ensureAsset(n,url)));
+    for(let index=0;index<results.length;index++){
+      const result=results[index];
+      if(result.status==='fulfilled')continue;
+      const message=String(result.reason?.message||result.reason||'');
+      if(message.startsWith('Legacy asset HTTP 404:')){
+        const url=batch[index];
+        missingSourceAssets.push({url,references:sourceAssetContexts.get(url)||[]});
+        continue;
+      }
+      throw result.reason;
+    }
+    const done=Math.min(i+mediaConcurrency,assets.length);if(done%40===0||done===assets.length)log('MEDIA_PROGRESS',{done,total:assets.length,created:created.media.length,missing:missingSourceAssets.length});
+  }
+  if(missingSourceAssets.length){
+    const summary={count:missingSourceAssets.length,items:missingSourceAssets};
+    await writeFile(`${artifactDir}/missing-source-assets.json`,JSON.stringify(summary,null,2));
+    log('MEDIA_SOURCE_MISSING_SUMMARY',summary);
+    throw Error(`Legacy source assets still missing: ${missingSourceAssets.length}`);
   }
 
   await migratePosts(source,n,featuredMap);
