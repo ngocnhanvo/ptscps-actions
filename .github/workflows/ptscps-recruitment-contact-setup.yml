@@ -1,0 +1,68 @@
+name: PTSCPS Recruitment and Contact CMS setup
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/ptscps-recruitment-contact-setup.mjs'
+      - '.github/workflows/ptscps-recruitment-contact-setup.yml'
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: ptscps-recruitment-contact-cms-setup
+  cancel-in-progress: false
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.0-noble
+      options: --ipc=host
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate project endpoints from environment
+        shell: bash
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PYTHON'
+          import os,re
+          from urllib.parse import urlsplit
+          items=dict(re.findall(r'^\s*(?:export\s+)?(WC_URL|WC_URL_CLIENT|CONTACT_FORM_7_ID|PUBLIC_CLOUDFLARE_TURNSTILE_SITE_KEY|TURNSTILE_SECRET_KEY)\s*=\s*(.+)\s*$',os.environ.get('ENV_FILE',''),re.M))
+          def origin(key):
+              p=urlsplit(items.get(key,'').strip().strip('"\''))
+              if p.scheme!='https' or not p.hostname or p.path not in ('','/') or p.username or p.password or p.query or p.fragment:
+                  raise SystemExit('INVALID_ORIGIN '+key)
+              return 'https://'+p.hostname
+          wp,front=origin('WC_URL'),origin('WC_URL_CLIENT')
+          if wp==front:raise SystemExit('ORIGIN_COLLISION')
+          with open(os.environ['GITHUB_ENV'],'a') as f:
+              f.write('WP_ORIGIN='+wp+'\nFRONT_ORIGIN='+front+'\n')
+          configured=bool(re.fullmatch(r'\d+',items.get('CONTACT_FORM_7_ID','').strip().strip('"\'')))
+          print('CONTACT_FORM_7_ID_CONFIGURED='+str(configured).upper())
+          print('TURNSTILE_SITE_KEY_CONFIGURED='+str(bool(items.get('PUBLIC_CLOUDFLARE_TURNSTILE_SITE_KEY'))).upper())
+          print('TURNSTILE_SECRET_KEY_CONFIGURED='+str(bool(items.get('TURNSTILE_SECRET_KEY'))).upper())
+          print('PTSCPS_RECRUIT_CONTACT_ORIGINS=PASS')
+          PYTHON
+      - name: Install Playwright driver using preinstalled Chromium
+        run: npm install --no-save --no-package-lock --ignore-scripts --no-audit --no-fund playwright@1.64.0
+      - name: Check WordPress-controlled build-monitor contract
+        run: node scripts/ptscps-wordpress-build-monitor.test.mjs
+      - name: Configure CMS recruitment posts, contact sections and header; WordPress build and QA
+        env:
+          WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
+          WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/ptscps-recruitment-contact-setup.mjs
+      - name: Upload QA screenshots and deferred media list
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ptscps-recruitment-contact-${{ github.run_id }}
+          path: artifacts/ptscps-recruitment-contact/
+          if-no-files-found: warn
+          retention-days: 14
