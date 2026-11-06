@@ -40,6 +40,13 @@ const targetMediaLookupCache=new Map();
 const currentPtscArticleCache=new Map();
 const waybackAssetCache=new Map();
 const skippedSourceAssets=new Set();
+const exhaustedSourceAssets=new Set([
+  'https://ptscps.com.vn/wp-content/uploads/2019/06/Anh-2-2.jpg',
+  'https://ptscps.com.vn/wp-content/uploads/2019/06/Anh-2-2-1024x680.jpg',
+  'https://ptscps.com.vn/wp-content/uploads/2019/08/2-2-1024x394.jpg',
+  'https://ptscps.com.vn/wp-content/uploads/2019/08/4-1.jpg',
+  'https://ptscps.com.vn/wp-content/uploads/2019/08/4-1-1024x768.jpg',
+]);
 const maxWaybackArchiveCandidates=2;
 const maxWaybackSnapshotsPerCandidate=1;
 const currentPtscNewsAssetFolders=new Map([
@@ -779,6 +786,10 @@ async function ensureAsset(n,url,meta={}){
       const mediaUrl=String(siblingMedia.source_url||'');
       log('MEDIA_SIBLING_REUSE',{requested:normalized,canonical:sibling,mediaId:Number(siblingMedia.id)});
       return {id:Number(siblingMedia.id),url:mediaUrl,path:mediaPath(mediaUrl),state:'existing-sibling-reuse'};
+    }
+    if(exhaustedSourceAssets.has(normalized)){
+      log('MEDIA_SOURCE_SKIP_EXHAUSTED',{requested:normalized,references:sourceAssetContexts.get(normalized)||[]});
+      throw Error(`Legacy asset HTTP 410: ${normalized}`);
     }
     let source=await fetch(normalized,{headers:{'User-Agent':'PTSCPS News migration/1.0'},signal:AbortSignal.timeout(60000)})
       .catch(()=>new Response(null,{status:599,statusText:'FETCH_ERROR'}));
