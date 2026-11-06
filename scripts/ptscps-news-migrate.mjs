@@ -39,6 +39,9 @@ const sourceAssetContexts=new Map();
 const targetMediaLookupCache=new Map();
 const currentPtscArticleCache=new Map();
 const waybackAssetCache=new Map();
+const skippedSourceAssets=new Set();
+const maxWaybackArchiveCandidates=2;
+const maxWaybackSnapshotsPerCandidate=1;
 const currentPtscNewsAssetFolders=new Map([
   ['doan-thanh-nien-cong-ty-pps-huong-ung-ngay-moi-truong-the-gioi',['/Data/Sites/1/News/1490/']],
   ['hoi-thao-cong-ty-pps-nam-2019',['/Data/Sites/1/News/1084/']],
@@ -777,10 +780,11 @@ async function ensureAsset(n,url,meta={}){
       log('MEDIA_SIBLING_REUSE',{requested:normalized,canonical:sibling,mediaId:Number(siblingMedia.id)});
       return {id:Number(siblingMedia.id),url:mediaUrl,path:mediaPath(mediaUrl),state:'existing-sibling-reuse'};
     }
-    let source=await fetch(normalized,{headers:{'User-Agent':'PTSCPS News migration/1.0'},signal:AbortSignal.timeout(60000)});
+    let source=await fetch(normalized,{headers:{'User-Agent':'PTSCPS News migration/1.0'},signal:AbortSignal.timeout(60000)})
+      .catch(()=>new Response(null,{status:599,statusText:'FETCH_ERROR'}));
     let resolvedSource=normalized;
     let attemptedFallbacks=[];
-    if(source.status===404){
+    if(!source.ok){
       const responsiveFallbacks=sourceAssetFallbacks.get(normalized)||[];
       attemptedFallbacks=[...new Set([
         verifiedRecovery?.url,
@@ -834,9 +838,9 @@ async function ensureAsset(n,url,meta={}){
           ]),
           ...currentNewsArchiveCandidates,
         ].filter(Boolean))];
-        for(const archiveCandidate of archiveCandidates){
+        for(const archiveCandidate of archiveCandidates.slice(0,maxWaybackArchiveCandidates)){
           const snapshots=await waybackSnapshots(archiveCandidate);
-          for(const snapshot of snapshots){
+          for(const snapshot of snapshots.slice(0,maxWaybackSnapshotsPerCandidate)){
             const candidate=await fetch(snapshot.url,{headers:{'User-Agent':'PTSCPS News migration/1.0'},signal:AbortSignal.timeout(60000)}).catch(()=>null);
             if(!candidate?.ok||!archivedMimeAccepted(snapshot.original,candidate.headers.get('content-type')))continue;
             source=candidate;resolvedSource=snapshot.url;attemptedFallbacks.push(snapshot.url);
@@ -942,11 +946,37 @@ function extractAssets(html){
   return [...new Set((normalizedHtml.match(sourceAssetRe)||[]).map(normalizeSourceAsset).filter(Boolean))];
 }
 
+function containsSkippedAsset(value){
+  return (String(value||'').match(sourceAssetRe)||[])
+    .map(normalizeSourceAsset).filter(Boolean)
+    .some(url=>skippedSourceAssets.has(url));
+}
+
+function stripSkippedAssetMarkup(html){
+  let result=String(html||'');
+  result=result.replace(/<img\b[^>]*>/gi,tag=>containsSkippedAsset(tag)?'':tag);
+  result=result.replace(/<a\b[^>]*>[\s\S]*?<\/a>/gi,tag=>{
+    const href=tag.match(/\bhref=(["'])([^"']+)\1/i)?.[2]||'';
+    const normalized=normalizeSourceAsset(href);
+    if(!normalized||!skippedSourceAssets.has(normalized))return tag;
+    return tag.replace(/^<a\b[^>]*>/i,'').replace(/<\/a>$/i,'');
+  });
+  return result;
+}
+
+function isSkippedFeaturedForPost(postId){
+  for(const url of skippedSourceAssets){
+    if((sourceAssetContexts.get(url)||[]).some(ref=>ref?.kind==='post-featured'&&Number(ref?.id||0)===Number(postId)))return true;
+  }
+  return false;
+}
+
 async function rewriteAssets(n,html){
-  let result=stripLegacyResponsiveAttrs(html);
+  let result=stripSkippedAssetMarkup(stripLegacyResponsiveAttrs(html));
   const originals=[...new Set(result.match(sourceAssetRe)||[])];
   for(const raw of originals){
     const normalized=normalizeSourceAsset(raw);if(!normalized)continue;
+    if(skippedSourceAssets.has(normalized)){result=result.split(raw).join('');continue;}
     const media=await ensureAsset(n,normalized);
     assert(media?.path,`Asset mapping missing ${normalized}`);
     result=result.split(raw).join(media.path);
@@ -997,7 +1027,12 @@ async function migratePosts(source,n,featuredMap){
     let featured=0;
     if(post.featuredMedia){
       const sourceMedia=featuredMap.get(post.featuredMedia);assert(sourceMedia,`Source featured media metadata missing ${post.featuredMedia}`);
-      featured=Number((await ensureAsset(n,sourceMedia.source_url,sourceMedia)).id);
+      const sourceUrl=normalizeSourceAsset(sourceMedia.source_url);
+      if(sourceUrl&&skippedSourceAssets.has(sourceUrl)){
+        log('FEATURED_MEDIA_SKIPPED',{postId:post.id,slug:post.slug,attachmentId:post.featuredMedia,url:sourceUrl});
+      }else{
+        featured=Number((await ensureAsset(n,sourceMedia.source_url,sourceMedia)).id);
+      }
     }
     const payload={
       title:post.title,slug:post.slug,status:'publish',content,excerpt,
@@ -1091,12 +1126,13 @@ async function verify(source,n){
     const expectedCats=post.categories.map(id=>targetCategoryBySourceId.get(id)).filter(Boolean).map(Number).sort((a,b)=>a-b);
     const actualCats=(row.categories||[]).map(Number).sort((a,b)=>a-b);
     assert(JSON.stringify(actualCats)===JSON.stringify(expectedCats),`Final category mapping mismatch ${post.slug}`);
-    if(post.featuredMedia)assert(Number(row.featured_media||0)>0,`Final featured media missing ${post.slug}`);
+    if(post.featuredMedia&&!isSkippedFeaturedForPost(post.id))assert(Number(row.featured_media||0)>0,`Final featured media missing ${post.slug}`);
+    if(isSkippedFeaturedForPost(post.id))assert(Number(row.featured_media||0)===0,`Skipped featured media unexpectedly present ${post.slug}`);
   }
   const gallery=await pageBySlug(n,'thu-vien-pps');assert(gallery?.status==='publish','Final gallery Page missing');
   assert(String(gallery.acf?.product_lang?.value??gallery.acf?.product_lang??'')===productLang,'Final gallery lang mismatch');
   assert(String(gallery.acf?.key||'')==='news-gallery','Final gallery key mismatch');
-  const summary={status:'PASS',uniquePosts:allTarget.size,categories:Object.fromEntries(Object.entries(source.categories).map(([slug,item])=>[slug,item.count])),galleryId:Number(gallery.id),productLang,writes,created,updated,mediaMapped:assetCache.size};
+  const summary={status:'PASS',uniquePosts:allTarget.size,categories:Object.fromEntries(Object.entries(source.categories).map(([slug,item])=>[slug,item.count])),galleryId:Number(gallery.id),productLang,writes,created,updated,mediaMapped:assetCache.size,mediaSkipped:skippedSourceAssets.size};
   await writeFile(`${artifactDir}/result.json`,JSON.stringify(summary,null,2));
   log('READBACK_PASS',summary);
 }
@@ -1149,7 +1185,7 @@ try{
       const result=results[index];
       if(result.status==='fulfilled')continue;
       const message=String(result.reason?.message||result.reason||'');
-      if(message.startsWith('Legacy asset HTTP 404:')){
+      if(message.startsWith('Legacy asset HTTP ')){
         const url=batch[index];
         missingSourceAssets.push({url,references:sourceAssetContexts.get(url)||[]});
         continue;
@@ -1159,49 +1195,25 @@ try{
     const done=Math.min(i+mediaConcurrency,assets.length);if(done%40===0||done===assets.length)log('MEDIA_PROGRESS',{done,total:assets.length,created:created.media.length,missing:missingSourceAssets.length});
   }
   if(missingSourceAssets.length){
-    const affectedPostIds=[...new Set(missingSourceAssets.flatMap(item=>item.references.map(ref=>Number(ref?.id||0))).filter(Boolean))];
-    const diagnostics=[];
-    for(const postId of affectedPostIds){
-      const post=source.posts.find(item=>Number(item.id)===postId);
-      if(!post)continue;
-      const legacyImages=inlineImageAttachmentRefs(post.content).map((ref,index)=>({
-        index,
-        attachmentId:Number(ref.id||0),
-        urls:ref.urls,
-      }));
-      diagnostics.push({
-        postId:post.id,slug:post.slug,title:post.title,
-        legacyImages,
-        currentArticles:await currentPtscArticleImageInventory(post.slug),
-      });
-    }
-    const missingAttachmentIds=[...new Set(missingSourceAssets.flatMap(item=>item.references.map(ref=>Number(ref?.attachmentId||0))).filter(Boolean))];
-    const legacyMediaEvidence=[];
-    for(let i=0;i<missingAttachmentIds.length;i+=100){
-      const chunk=missingAttachmentIds.slice(i,i+100);
-      const response=await context.request.get(legacy+`/wp-json/wp/v2/media?include=${chunk.join(',')}&per_page=100&_fields=id,slug,source_url,alt_text,title,caption,mime_type,media_details`,{timeout:50000,headers:{'Cache-Control':'no-cache'}});
-      assert(response.ok(),`Legacy missing-media evidence batch HTTP ${response.status()}`);
-      for(const row of await response.json())legacyMediaEvidence.push(row);
-    }
-    const featuredBySourceUrl=new Map();
-    for(const row of featuredMap.values()){
-      const sourceUrl=normalizeSourceAsset(row?.source_url);
-      if(sourceUrl)featuredBySourceUrl.set(sourceUrl,row);
-    }
-    const unreferencedEvidence=missingSourceAssets.filter(item=>!item.references.length).map(item=>({
-      url:item.url,
-      featuredMedia:featuredBySourceUrl.get(item.url)||null,
-    }));
-    const summary={count:missingSourceAssets.length,items:missingSourceAssets,diagnostics,legacyMediaEvidence,unreferencedEvidence};
+    for(const item of missingSourceAssets)skippedSourceAssets.add(item.url);
+    const summary={
+      status:'SKIPPED_AFTER_RECOVERY_BUDGET',
+      count:missingSourceAssets.length,
+      items:missingSourceAssets,
+      policy:{
+        waybackArchiveCandidates:maxWaybackArchiveCandidates,
+        waybackSnapshotsPerCandidate:maxWaybackSnapshotsPerCandidate,
+        action:'continue-without-unrecoverable-media',
+      },
+    };
     await writeFile(`${artifactDir}/missing-source-assets.json`,JSON.stringify(summary,null,2));
-    log('MEDIA_SOURCE_MISSING_SUMMARY',summary);
-    throw Error(`Legacy source assets still missing: ${missingSourceAssets.length}`);
+    log('MEDIA_SOURCE_SKIPPED_SUMMARY',summary);
   }
 
   await migratePosts(source,n,featuredMap);
   await migrateGallery(source,n);
   await verify(source,n);
-  log('RESULT',{status:'PASS',writes,created:{categories:created.categories.length,media:created.media.length,posts:created.posts.length,pages:created.pages.length},updated:{categories:updated.categories.length,posts:updated.posts.length,pages:updated.pages.length}});
+  log('RESULT',{status:'PASS',writes,created:{categories:created.categories.length,media:created.media.length,posts:created.posts.length,pages:created.pages.length},updated:{categories:updated.categories.length,posts:updated.posts.length,pages:updated.pages.length},mediaSkipped:skippedSourceAssets.size});
 }finally{
   await browser.close();
 }

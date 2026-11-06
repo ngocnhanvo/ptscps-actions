@@ -10,7 +10,7 @@ permissions:
   actions: read
 concurrency:
   group: ptscps-news-cms-setup
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   migrate:
     runs-on: ubuntu-latest
