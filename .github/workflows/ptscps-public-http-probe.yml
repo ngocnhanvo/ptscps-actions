@@ -95,6 +95,13 @@ jobs:
                       if str(e).startswith('550'): results[name]='absent'
                       else:raise
               print('PTSCPS_FTPS_DOCROOT_FILES='+str(results))
+              try:
+                  gallery_size=ftp.size('client/data/page-thu-vien-pps.json')
+                  print('PTSCPS_GALLERY_PAGE_CACHE='+str({'present':gallery_size is not None,'bytes':gallery_size}))
+              except ftplib.error_perm as exc:
+                  if str(exc).startswith('550'):
+                      print('PTSCPS_GALLERY_PAGE_CACHE='+str({'present':False,'bytes':None}))
+                  else:raise
               # Read only the small signed deployment provenance manifest to
               # distinguish an activation timeout from a completed activation.
               import json
