@@ -374,10 +374,150 @@ async function tableExists(id) {
   return false;
 }
 
+async function readTable(id) {
+  const response = await page.request.get(uri(`/wp-json/tablepress/v1/table/${encodeURIComponent(id)}?_localized_table=${Date.now()}`), {
+    timeout: 30000, headers: { 'Cache-Control': 'no-cache' },
+  });
+  if (response.status() === 404) return null;
+  assert(response.ok(), `ESC Table read failed ${id}: HTTP ${response.status()}`);
+  return response.json();
+}
+
+const escTextTranslations = new Map([
+  ['Sức khỏe · An toàn · Môi trường · Chất lượng', 'Health · Safety · Environment · Quality'],
+  ['Chính sách HSEQ', 'HSEQ Policy'],
+  ['Mục tiêu HSEQ', 'HSEQ Target'],
+  ['Hệ thống quản lý HSEQ', 'HSEQ Management System'],
+  ['Giấy chứng nhận HSEQ', 'HSEQ Certification'],
+  ['Cam kết về an toàn, sức khỏe và chất lượng dịch vụ', 'Commitment to safety, health and service quality'],
+  ['Liên tục cải tiến, đảm bảo an toàn và bảo vệ môi trường', 'Continuous improvement, safety assurance and environmental protection'],
+  ['Hệ thống quản lý tích hợp theo các tiêu chuẩn quốc tế', 'Integrated management system aligned with international standards'],
+  ['Các chứng nhận hệ thống quản lý chất lượng, môi trường và an toàn', 'Quality, environmental and occupational health & safety management certifications'],
+  ['Xem chi tiết', 'View details'],
+  ['Phóng to tài liệu', 'Enlarge document'],
+  ['Mở tài liệu PDF', 'Open PDF'],
+  ['Phóng to sơ đồ', 'Enlarge diagram'],
+  ['Phóng to chứng nhận', 'Enlarge certificate'],
+  ['Công ty cung cấp dịch vụ với chất lượng quốc tế, đảm bảo an toàn cho tất cả các khách hàng với cam kết:', 'The Company provides professional quality services with international standards and safety standards for all customers with the following commitments:'],
+  ['Mục tiêu liên tục nâng cao chất lượng dịch vụ phục vụ khách hàng, đảm bảo yếu tố an toàn, không gây tác động xấu tới môi trường, cộng đồng và các bên liên quan.', 'Our objective is to continuously improve the quality of customer services, ensure the highest safety standards, and minimize impacts on the environment, the community and all related parties.'],
+  ['Hệ thống quản lý của Công ty được xây dựng trên nguyên tắc áp dụng hài hòa và đồng bộ các tiêu chuẩn quốc tế về hệ thống quản lý: Chất lượng (ISO 9001:2015), Sức khỏe nghề nghiệp và an toàn (ISO 45001:2018) và Môi trường (ISO 14001:2015) để cung cấp các dịch vụ đảm bảo chất lượng, an toàn, không gây tác động xấu tới môi trường, cộng đồng và các bên quan tâm.', 'The Company’s Management System is developed on the principle of harmoniously and synchronously applying international standards on management systems: Quality (ISO 9001:2015), Occupational Health and Safety (ISO 45001:2018) and Environmental Management (ISO 14001:2015), ensuring quality and safe services with minimal adverse impact on the environment, community and interested parties.'],
+  ['Hệ thống quản lý của Công ty được xây dựng trên nguyên tắc tiếp cận theo quá trình với 3 hoạt động cơ bản là Điều hành, Hỗ trợ và Kiểm soát.', 'The Company’s Management System is built on a process-based approach with three core activities: Administration, Support and Control.'],
+  ['Các hệ thống quản lý của công ty đáp ứng những tiêu chuẩn ISO về chất lượng, môi trường và sức khỏe nghề nghiệp, an toàn.', 'PTSC Production Services JSC has been certified by BSI (British Standards Institution) for ISO 9001:2015, ISO 14001:2015 and ISO 45001:2018 management systems covering quality, environment, occupational health and safety.'],
+  ['Liên hệ', 'Contact'],
+  ['Kết nối với PTSC Production Services để được tư vấn và hỗ trợ.', 'Connect with PTSC Production Services for consultation and support.'],
+  ['Địa chỉ', 'Address'],
+  ['Điện thoại', 'Phone'],
+  ['Gửi yêu cầu liên hệ', 'Contact Request'],
+  ['Vui lòng để lại thông tin, chúng tôi sẽ liên hệ với bạn trong thời gian sớm nhất.', 'Please leave your information. We will contact you as soon as possible.'],
+  ['Họ và tên', 'Full name'],
+  ['Số điện thoại', 'Phone number'],
+  ['Tiêu đề', 'Subject'],
+  ['Nội dung', 'Message'],
+  ['Gửi tin', 'Send'],
+  ['Google Maps - mã nhúng (Share > Embed a map)', 'Google Maps - embed code (Share > Embed a map)'],
+  ['Google Maps - đường dẫn mở', 'Google Maps - external link'],
+  ['Tầng 16, Khách sạn Dầu khí, số 9-11 Hoàng Diệu, Phường Vũng Tàu, Thành phố Hồ Chí Minh.', '16th Floor, Petroleum Hotel, 9-11 Hoang Dieu, Vung Tau Ward, Ho Chi Minh City.'],
+]);
+
+const escLinkTranslations = new Map([
+  ['/hseq/chinh-sach-skatmtcl', '/hseq/hseq-policy'],
+  ['/hseq/muc-tieu-skatmtcl', '/hseq/hseq-target'],
+  ['/hseq/he-thong-quan-ly-skatmtcl', '/hseq/hseq-management-system'],
+  ['/hseq/giay-chung-nhan-skatmtcl', '/hseq/hseq-certification'],
+]);
+
+const englishTableSpecs = [
+  { sourceId: 'hseq_00_vi', targetId: 'hseq_00_en', title: 'HSEQ', description: 'Health · Safety · Environment · Quality' },
+  { sourceId: 'hseq_01_vi', targetId: 'hseq_01_en', title: 'HSEQ Policy', description: 'Commitment to safety, health and service quality' },
+  { sourceId: 'hseq_02_vi', targetId: 'hseq_02_en', title: 'HSEQ Target', description: 'Continuous improvement, safety assurance and environmental protection' },
+  { sourceId: 'hseq_03_vi', targetId: 'hseq_03_en', title: 'HSEQ Management System', description: 'Integrated management system aligned with international standards' },
+  { sourceId: 'hseq_04_vi', targetId: 'hseq_04_en', title: 'HSEQ Certification', description: 'Quality, environmental and occupational health & safety management certifications' },
+  { sourceId: 'contact_01_vi', targetId: 'contact_01_en', title: 'Contact', description: 'Connect with PTSC Production Services for consultation and support.' },
+  { sourceId: 'contact_00_vi', targetId: 'contact_00_en', title: 'Contact Request', description: 'Please leave your information. We will contact you as soon as possible.' },
+];
+
+function translateEscCell(value) {
+  let output = String(value ?? '');
+  for (const [from, to] of escLinkTranslations) output = output.split(from).join(to);
+  for (const [from, to] of escTextTranslations) output = output.split(from).join(to);
+  output = output.replace(/Tài liệu Mục tiêu HSEQ\s+(\d+)/g, 'HSEQ Target Document $1');
+  output = output.replace(/Mô hình quản lý HSEQ/g, 'HSEQ Management System');
+  return output;
+}
+
+async function ensureEnglishTable(spec) {
+  const existing = await readTable(spec.targetId);
+  if (existing?.items?.length) {
+    log('EN_TABLE', { id: spec.targetId, state: 'PRESERVE_EXISTING', items: existing.items.length });
+    return false;
+  }
+  const sourceTable = await readTable(spec.sourceId);
+  assert(sourceTable?.items?.length, `Source ESC Table missing ${spec.sourceId}`);
+  const fields = (sourceTable.fields || []).map(field => String(field?.key || '')).filter(Boolean);
+  assert(fields.length > 0, `Source ESC Table fields missing ${spec.sourceId}`);
+  const rows = sourceTable.items.map(item => fields.map(key => translateEscCell(item?.[key])));
+  let current = existing;
+  if (!current) {
+    await page.goto(uri('/wp-admin/admin.php?page=tablepress&action=add'), { waitUntil: 'domcontentloaded', timeout: 50000 });
+    await page.locator('input[name="table[name]"]').fill(spec.title);
+    await page.locator('textarea[name="table[description]"]').fill(spec.description);
+    await page.locator('input[name="table[rows]"]').fill('2');
+    await page.locator('input[name="table[columns]"]').fill(String(fields.length));
+    await page.getByRole('button', { name: /^(Add Table|Thêm bảng)$/i }).click();
+    await page.waitForURL(/page=tablepress.*action=edit|action=edit.*page=tablepress/, { timeout: 50000 });
+    let confirmed = false;
+    page.once('dialog', async dialog => { confirmed = true; await dialog.accept(); });
+    await page.locator('#table-id').fill(spec.targetId);
+    await page.locator('#table-name').click();
+    for (let attempt = 0; attempt < 12 && !confirmed; attempt++) await sleep(100);
+    assert(confirmed, `ESC Table ID confirmation missing ${spec.targetId}`);
+    await page.getByRole('button', { name: /^(Save Changes|Lưu thay đổi)$/i }).last().click();
+    for (let attempt = 0; attempt < 12; attempt++) {
+      await sleep(700); current = await readTable(spec.targetId).catch(() => null); if (current) break;
+    }
+    assert(current, `ESC Table renaming failed ${spec.targetId}`);
+  }
+  await page.goto(uri(`/wp-admin/admin.php?page=tablepress&action=edit&table_id=${encodeURIComponent(spec.targetId)}`), { waitUntil: 'domcontentloaded', timeout: 50000 });
+  await page.waitForFunction(() => Boolean(globalThis.tp?.editor?.options?.data && globalThis.tp?.callbacks?.append), null, { timeout: 30000 });
+  await page.locator('#table-name').fill(spec.title);
+  await page.locator('#table-description').fill(spec.description);
+  await page.evaluate(({ fields, rows }) => {
+    const editor = globalThis.tp.editor;
+    if (editor.options.columns.length !== fields.length) throw Error('Unexpected translated ESC Table column count');
+    const required = rows.length + 2;
+    if (editor.options.data.length < required) globalThis.tp.callbacks.append('rows', required - editor.options.data.length);
+    if (editor.options.data.length > required) throw Error('Unexpected translated ESC Table row count');
+    fields.forEach((key, column) => { editor.setValueFromCoords(column, 0, key); editor.setValueFromCoords(column, 1, key); });
+    rows.forEach((row, index) => fields.forEach((_, column) => editor.setValueFromCoords(column, index + 2, String(row[column] ?? ''))));
+    globalThis.tp.helpers.unsaved_changes.set();
+  }, { fields, rows });
+  await page.getByRole('button', { name: /^(Save Changes|Lưu thay đổi)$/i }).last().click();
+  for (let attempt = 0; attempt < 12; attempt++) {
+    await sleep(700); current = await readTable(spec.targetId).catch(() => null); if (current?.items?.length === rows.length) break;
+  }
+  assert(current?.items?.length === rows.length, `Translated ESC Table readback failed ${spec.targetId}`);
+  writes++;
+  log('EN_TABLE', { id: spec.targetId, state: 'CREATED', items: rows.length, source: spec.sourceId });
+  return true;
+}
+
+async function ensureEnglishSupportTables() {
+  let changed = 0;
+  for (const spec of englishTableSpecs) if (await ensureEnglishTable(spec)) changed++;
+  log('EN_TABLES', { status: 'PASS', changed, total: englishTableSpecs.length });
+}
+
+
 async function contentForEnglishPage(targetVi, sourceEn, n) {
   const viContent = String(targetVi.content?.raw ?? targetVi.content?.rendered ?? '');
   const ids = tableIds(viContent);
-  if (!ids.length) return { content: await localizeHtml(sourceEn.content?.rendered || '', n, `page-en:${sourceEn.slug}`), mode: 'editor' };
+  if (!ids.length) {
+    const localized = await localizeHtml(sourceEn.content?.rendered || '', n, `page-en:${sourceEn.slug}`);
+    if (sourceEn.slug === 'library' && plain(localized).length < 10 && plain(viContent).length > 10) {
+      return { content: viContent, mode: 'media-layout-reuse' };
+    }
+    return { content: localized, mode: 'editor' };
+  }
   const pairs = [];
   for (const id of ids) {
     const candidate = englishTableId(id);
@@ -763,6 +903,7 @@ try {
   });
 
   const viStatic = await ensureVietnameseStaticPages(n, sourcePages, targetPages);
+  await ensureEnglishSupportTables();
   targetPages = await collectTarget('pages', n, 'id,slug,status,title,content,acf,parent,date,date_gmt');
   const enPages = await ensureEnglishPages(n, sourcePages, targetPages);
   targetPages = await collectTarget('pages', n, 'id,slug,status,title,content,acf,parent,date,date_gmt');
