@@ -331,6 +331,57 @@ async function ensureTable(def){
   assert(current?.items?.length===def.rows.length,`Contact ESC Table readback failed ${def.id}`);
   writes++;log('TABLE',{id:def.id,state:'CREATED',items:def.rows.length});
 }
+/**
+ * Keep the map's two URLs in the existing Contact ESC Table (WordPress editor),
+ * not in Astro. Never replace a value an editor has already entered.
+ * The embed cell accepts either the URL or the iframe HTML copied from
+ * Google Maps > Share > Embed a map; normal share/search links do not embed.
+ */
+async function ensureContactMapEditorFields(){
+  const id='contact_01_vi';
+  let current=await readTable(id);
+  assert(current?.items?.length,'Contact ESC Table missing before map configuration');
+  assert(['type','label','content'].every((name,i)=>current.fields?.[i]?.key===name),
+    'Contact ESC Table has unexpected map field schema');
+  const currentTypes=new Set(current.items.map(row=>String(row.type||'').trim().toLowerCase()));
+  const address=String(current.items.find(row=>String(row.type||'').toLowerCase()==='address')?.content||'').trim();
+  assert(address,'Contact address missing; cannot generate the initial external map link');
+  const defaults=[
+    ['map_embed','Google Maps - mã nhúng (Share > Embed a map)',''],
+    ['map_link','Google Maps - đường dẫn mở',`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`],
+  ];
+  const missing=defaults.filter(([type])=>!currentTypes.has(type));
+  if(missing.length){
+    const before=JSON.stringify(current.items);
+    const oldCount=current.items.length;
+    await page.goto(uri(`/wp-admin/admin.php?page=tablepress&action=edit&table_id=${id}`),{waitUntil:'domcontentloaded',timeout:45000});
+    await page.waitForFunction(()=>Boolean(window.tp?.editor?.options?.data && window.tp?.callbacks?.append),null,{timeout:30000});
+    await page.evaluate(({missing})=>{
+      const editor=window.tp.editor;
+      const oldCount=editor.options.data.length;
+      window.tp.callbacks.append('rows',missing.length);
+      assertEditorRows(editor.options.data.length===oldCount+missing.length);
+      missing.forEach((row,i)=>row.forEach((cell,c)=>editor.setValueFromCoords(c,oldCount+i,cell)));
+      window.tp.helpers.unsaved_changes.set();
+      function assertEditorRows(ok){if(!ok)throw Error('Cannot append Contact ESC Table map rows')}
+    },{missing});
+    await page.getByRole('button',{name:/^(Save Changes|Lưu thay đổi)$/i}).last().click();
+    for(let attempt=0;attempt<12;attempt++){
+      await sleep(700);current=await readTable(id);
+      if(current?.items?.length===oldCount+missing.length)break;
+    }
+    assert(current?.items?.length===oldCount+missing.length,'Contact map rows not persisted');
+    assert(JSON.stringify(current.items.slice(0,oldCount))===before,'Existing Contact ESC Table items changed while appending map URLs');
+    writes++;
+    log('MAP_EDITOR',{state:'ADDED_FIELDS',fields:missing.map(([type])=>type),items:current.items.length});
+  }else{
+    log('MAP_EDITOR',{state:'PRESERVE_EXISTING',fields:['map_embed','map_link']});
+  }
+  assert(['map_embed','map_link'].every(type=>current.items.some(row=>String(row.type||'').toLowerCase()===type)),
+    'Contact map URL fields absent after editor save');
+  // Never fill an iframe cell with a standard maps/search link: Google blocks it.
+}
+
 async function ensureContactPage(n){
   const path='/wp-json/wp/v2/pages?context=edit&status=any&slug=lien-he&per_page=20&_fields=id,slug,status,title,content,acf';
   const found=await api('GET',path,n);
@@ -533,6 +584,12 @@ async function QA(){
       assert(await p.locator('[data-contact-info] h1').count()===1,'QA_FAILED Contact heading');
       assert(await p.locator('#contact-form').count()===1,'QA_FAILED Contact Form 7 frontend component missing');
       assert(await p.locator('#contact-form [name="email"]').count()===1,'QA_FAILED Contact email field');
+      assert(await p.locator('[data-contact-map]').count()===1,'QA_FAILED Contact map card missing');
+      const iframeSrc=await p.locator('[data-contact-map] iframe').getAttribute('src').catch(()=>null);
+      assert(!iframeSrc || /^https:\/\/(?:www\.)?google\.com\/maps\/embed(?:\/|\?)/.test(iframeSrc),
+        `QA_FAILED Contact map iframe source is not an official Google Maps embed URL: ${iframeSrc}`);
+      assert(await p.locator('[data-contact-map] a[href^="https://"]').count()===1,
+        'QA_FAILED Contact map link missing');
       const allLinks=await p.locator('header a').evaluateAll(els=>els.map(x=>({text:x.textContent?.trim(),href:x.getAttribute('href'),target:x.getAttribute('target')})));
       for(const [label,href] of [['Tuyển dụng','/tuyen-dung'],['Liên hệ','/lien-he']]){
         const match=allLinks.find(x=>x.text===label&&x.href===href);
@@ -579,6 +636,7 @@ try{
   const id=await ensureCategory(n);
   await migrateRecruitment(n,sourcePosts,id);
   for(const table of tables)await ensureTable(table);
+  await ensureContactMapEditorFields();
   await ensureContactPage(n);
   await ensureRecruitmentArchiveMarker(n);
   await ensureMenu(n);
