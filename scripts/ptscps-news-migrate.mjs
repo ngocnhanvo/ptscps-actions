@@ -38,6 +38,13 @@ const sourceAssetFallbacks=new Map();
 const sourceAssetContexts=new Map();
 const targetMediaLookupCache=new Map();
 const legacyMediaAliasOrigin='https://www.ptsc.com.vn';
+const verifiedExternalAssetRecoveries=new Map([
+  ['https://ptscps.com.vn/wp-content/uploads/2019/09/124-1024x767.jpg',{
+    url:'https://media.vietq.vn/files/kimlien/2019/09/15/PVN%20Le%20chao%20co%20gian%20HaiThach%20MocTinh.jpg',
+    article:'https://vietq.vn/fitch-ratings-xep-hang-tap-doan-dau-khi-viet-nam-pvn-o-muc-trien-vong-tich-cuc-bb-d163534.html',
+    note:'Exact syndicated 2019 article image: Le chao co tren gian mo dau khi Hai Thach - Moc Tinh',
+  }],
+]);
 const mediaLookupConcurrency=6;
 const created={categories:[],media:[],posts:[],pages:[]};
 const updated={categories:[],posts:[],pages:[]};
@@ -436,7 +443,9 @@ async function ensureAsset(n,url,meta={}){
     let attemptedFallbacks=[];
     if(source.status===404){
       const responsiveFallbacks=sourceAssetFallbacks.get(normalized)||[];
+      const verifiedRecovery=verifiedExternalAssetRecoveries.get(normalized);
       attemptedFallbacks=[...new Set([
+        verifiedRecovery?.url,
         legacyMediaAlias(normalized),
         ...wordpressDerivativeFallbacks(normalized),
         ...responsiveFallbacks,
@@ -447,7 +456,8 @@ async function ensureAsset(n,url,meta={}){
         if(candidate?.ok){
           source=candidate;
           resolvedSource=fallback;
-          log('MEDIA_SOURCE_RECOVERED',{requested:normalized,resolved:fallback});
+          if(verifiedRecovery?.url===fallback)log('MEDIA_SOURCE_RECOVERED_VERIFIED',{requested:normalized,resolved:fallback,article:verifiedRecovery.article,note:verifiedRecovery.note});
+          else log('MEDIA_SOURCE_RECOVERED',{requested:normalized,resolved:fallback});
           break;
         }
       }
