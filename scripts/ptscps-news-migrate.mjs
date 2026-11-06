@@ -320,7 +320,7 @@ async function ensureAsset(n,url,meta={}){
       log('MEDIA_LARGE',{url:normalized,bytes:bytes.length,mib:Number((bytes.length/1024/1024).toFixed(1))});
     }
     const contentType=String(source.headers.get('content-type')||meta.mime_type||'application/octet-stream').split(';')[0];
-    const file=assetFilename(resolvedSource,contentType);
+    const file=assetFilename(normalized,contentType);
     const uploadTimeout=bytes.length>largeAssetThreshold?240000:90000;
     let createdMedia=null;
     for(let attempt=1;attempt<=3&&!createdMedia;attempt++){
@@ -364,6 +364,27 @@ function registerResponsiveFallbacks(html){
     if(!candidates.length)continue;
     const existing=sourceAssetFallbacks.get(original)||[];
     sourceAssetFallbacks.set(original,[...new Set([...candidates,...existing])]);
+  }
+  for(const anchor of String(html||'').match(/<a\b[\s\S]*?<\/a>/gi)||[]){
+    const href=anchor.match(/\bhref=(["'])([^"']+)\1/i)?.[2]||'';
+    const original=normalizeSourceAsset(href);
+    if(!original)continue;
+    const img=anchor.match(/<img\b[^>]*>/i)?.[0]||'';
+    if(!img)continue;
+    const src=img.match(/\bsrc=(["'])([^"']+)\1/i)?.[2]||'';
+    const srcset=img.match(/\bsrcset=(["'])([\s\S]*?)\1/i)?.[2]||'';
+    const originalUrl=new URL(original);
+    const originalExt=extname(originalUrl.pathname).toLowerCase();
+    const originalStem=basename(originalUrl.pathname,originalExt).replace(/-\d+x\d+$/,'');
+    const originalDir=originalUrl.pathname.slice(0,originalUrl.pathname.lastIndexOf('/')+1);
+    const candidates=[src,...(srcset.match(sourceAssetRe)||[])].map(normalizeSourceAsset).filter(value=>{
+      if(!value||value===original)return false;
+      const candidateUrl=new URL(value);const candidateExt=extname(candidateUrl.pathname).toLowerCase();
+      const candidateStem=basename(candidateUrl.pathname,candidateExt).replace(/-\d+x\d+$/,'');
+      const candidateDir=candidateUrl.pathname.slice(0,candidateUrl.pathname.lastIndexOf('/')+1);
+      return candidateDir===originalDir&&candidateStem===originalStem&&candidateExt===originalExt;
+    });
+    if(candidates.length){const existing=sourceAssetFallbacks.get(original)||[];sourceAssetFallbacks.set(original,[...new Set([...candidates,...existing])]);}
   }
 }
 
