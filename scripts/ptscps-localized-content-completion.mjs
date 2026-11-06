@@ -95,7 +95,10 @@ async function sourceGet(path, expectJson = true) {
         timeout: 40000,
         headers: { 'Cache-Control': 'no-cache', 'User-Agent': 'PTSCPS localized migration' },
       });
-      if (response.ok()) return { response, body: expectJson ? await response.json() : await response.text() };
+      if (response.ok()) {
+        const text = await response.text();
+        return { response, body: expectJson ? parseLegacyJson(text, path) : text };
+      }
       last = `HTTP ${response.status()}`;
       if (![429, 500, 502, 503, 504].includes(response.status())) break;
     } catch (error) {
@@ -109,12 +112,37 @@ async function sourceGet(path, expectJson = true) {
 function parseLegacyJson(text, label) {
   const raw = String(text || '').replace(/^\uFEFF/, '').trim();
   try { return JSON.parse(raw); } catch {}
-  const arrayStart = raw.indexOf('[');
-  const arrayEnd = raw.lastIndexOf(']');
-  if (arrayStart >= 0 && arrayEnd > arrayStart) {
-    try { return JSON.parse(raw.slice(arrayStart, arrayEnd + 1)); } catch {}
+
+  // Some legacy WordPress responses append PHP/plugin output after a valid
+  // JSON payload. Locate the first complete top-level JSON value instead of
+  // assuming the final ]/} in the response belongs to WordPress REST.
+  const starts = [raw.indexOf('['), raw.indexOf('{')].filter(index => index >= 0).sort((a, b) => a - b);
+  for (const start of starts) {
+    const open = raw[start];
+    const close = open === '[' ? ']' : '}';
+    let depth = 0;
+    let quoted = false;
+    let escaped = false;
+    for (let index = start; index < raw.length; index++) {
+      const char = raw[index];
+      if (quoted) {
+        if (escaped) escaped = false;
+        else if (char === '\\') escaped = true;
+        else if (char === '"') quoted = false;
+        continue;
+      }
+      if (char === '"') { quoted = true; continue; }
+      if (char === open) depth++;
+      else if (char === close) {
+        depth--;
+        if (depth === 0) {
+          try { return JSON.parse(raw.slice(start, index + 1)); } catch { break; }
+        }
+      }
+    }
   }
-  throw Error(`Legacy ${label} returned malformed JSON`);
+  const diagnostic = raw.slice(0, 120).replace(/\s+/g, ' ');
+  throw Error(`Legacy ${label} returned malformed JSON prefix=${JSON.stringify(diagnostic)}`);
 }
 
 async function collectSource(collection, fields) {
