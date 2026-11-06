@@ -45,12 +45,21 @@ const verifiedRecovery8492={
   article:'https://vietq.vn/fitch-ratings-xep-hang-tap-doan-dau-khi-viet-nam-pvn-o-muc-trien-vong-tich-cuc-bb-d163534.html',
   note:'Exact syndicated 2019 article image: Le chao co tren gian mo dau khi Hai Thach - Moc Tinh',
 };
+const verifiedRecovery8661={
+  canonicalSource:'https://ptscps.com.vn/wp-content/uploads/2019/10/2-3.jpg',
+  url:'https://www.ptsc.com.vn/Data/Sites/1/media/1-hdsd/ch%E1%BB%89nh-h%C3%ACnh-tin-t%E1%BB%A9c/yh.jpg',
+  article:'https://www.ptsc.com.vn/doan-thanh-nien-cong-ty-pps-to-chuc-chuong-trinh-sinh-hoat-doan-gioi-thieu-ve-cac-chu-de-lien-quan-den-cac-tau-fpsofso-va-cac-du-an-onshore',
+  note:'Exact current PTSC article image at the legacy 2-3 position, before the separator-vessel caption',
+};
 const verifiedExternalAssetRecoveries=new Map([
   ['https://ptscps.com.vn/wp-content/uploads/2019/09/124-1024x767.jpg',verifiedRecovery8492],
   ['https://ptscps.com.vn/wp-content/uploads/2019/09/124.jpg',verifiedRecovery8492],
   ['https://ptscps.com.vn/wp-content/uploads/2019/09/124-300x225.jpg',verifiedRecovery8492],
   ['https://ptscps.com.vn/wp-content/uploads/2019/09/124-768x575.jpg',verifiedRecovery8492],
   ['https://ptscps.com.vn/wp-content/uploads/2019/09/124-400x300.jpg',verifiedRecovery8492],
+  ['https://ptscps.com.vn/wp-content/uploads/2019/10/2-3.jpg',verifiedRecovery8661],
+  ['https://ptscps.com.vn/wp-content/uploads/2019/10/2-3-300x169.jpg',verifiedRecovery8661],
+  ['https://ptscps.com.vn/wp-content/uploads/2019/10/2-3-768x433.jpg',verifiedRecovery8661],
 ]);
 const mediaLookupConcurrency=6;
 const created={categories:[],media:[],posts:[],pages:[]};
