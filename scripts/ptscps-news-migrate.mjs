@@ -1067,16 +1067,34 @@ async function migratePosts(source,n,featuredMap){
       title:post.title,slug:post.slug,status:'publish',content,excerpt,
       date:post.date,date_gmt:post.dateGmt,categories:targetCategories,featured_media:featured,
     };
+    const numericSlug=/^\d+$/.test(post.slug);
     let target=await postBySlug(n,post.slug);
-    if(!target)target=await postByIdentity(n,post);let state='UPDATED';
+    if(!target&&numericSlug)target=await postByIdentity(n,post);let state='UPDATED';
+    if(target&&String(target.slug||'')!==String(post.slug||'')){
+      assert(numericSlug,`Unexpected target slug adjustment source=${post.id} sourceSlug=${post.slug} targetSlug=${target.slug}`);
+      const draftResponse=await api('POST',`/wp-json/wp/v2/posts/${target.id}`,n,{status:'draft',slug:post.slug},90000);
+      assert(draftResponse.response.ok()&&String(draftResponse.body?.slug||'')===String(post.slug),`Numeric slug draft restore failed source=${post.id}`);
+      log('POST_NUMERIC_SLUG_RESTORED',{sourceId:post.id,targetId:Number(target.id),from:String(target.slug||''),to:post.slug});
+      target=draftResponse.body;state='RESTORED_NUMERIC_SLUG';
+    }
     if(!target){
-      const createdResponse=await api('POST','/wp-json/wp/v2/posts',n,payload,90000);
-      assert(createdResponse.response.ok()&&createdResponse.body?.id,`Post create failed source=${post.id} HTTP ${createdResponse.response.status()}`);
-      target=createdResponse.body;created.posts.push(Number(target.id));state='CREATED';writes++;
+      if(numericSlug){
+        const draftResponse=await api('POST','/wp-json/wp/v2/posts',n,{...payload,status:'draft'},90000);
+        assert(draftResponse.response.ok()&&draftResponse.body?.id&&String(draftResponse.body?.slug||'')===String(post.slug),`Numeric slug draft create failed source=${post.id}`);
+        const publishResponse=await api('POST',`/wp-json/wp/v2/posts/${draftResponse.body.id}`,n,payload,90000);
+        assert(publishResponse.response.ok()&&String(publishResponse.body?.slug||'')===String(post.slug),`Numeric slug publish failed source=${post.id}`);
+        target=publishResponse.body;created.posts.push(Number(target.id));state='CREATED_NUMERIC_SLUG';writes++;
+        log('POST_NUMERIC_SLUG_CREATED',{sourceId:post.id,targetId:Number(target.id),slug:post.slug});
+      }else{
+        const createdResponse=await api('POST','/wp-json/wp/v2/posts',n,payload,90000);
+        assert(createdResponse.response.ok()&&createdResponse.body?.id,`Post create failed source=${post.id} HTTP ${createdResponse.response.status()}`);
+        target=createdResponse.body;created.posts.push(Number(target.id));state='CREATED';writes++;
+      }
     }else{
       const currentLang=String(target.acf?.product_lang?.value??target.acf?.product_lang??'');
       const currentCats=(target.categories||[]).map(Number).sort((a,b)=>a-b);
-      const exact=clean(decodeEntities(target.title?.raw??target.title?.rendered))===clean(post.title)
+      const exact=target.status==='publish'
+        &&clean(decodeEntities(target.title?.raw??target.title?.rendered))===clean(post.title)
         &&String(target.date_gmt||'').slice(0,19)===post.dateGmt.slice(0,19)
         &&Number(target.featured_media||0)===featured
         &&JSON.stringify(currentCats)===JSON.stringify([...targetCategories].sort((a,b)=>a-b))
@@ -1085,12 +1103,12 @@ async function migratePosts(source,n,featuredMap){
         &&String(target.excerpt?.raw??'')===excerpt;
       if(exact){index++;if(index%25===0||index===source.posts.length)log('POST_PROGRESS',{done:index,total:source.posts.length,writes});continue;}
       const updateResponse=await api('POST',`/wp-json/wp/v2/posts/${target.id}`,n,payload,90000);
-      assert(updateResponse.response.ok(),`Post update failed source=${post.id} HTTP ${updateResponse.response.status()}`);
-      updated.posts.push(Number(target.id));writes++;
+      assert(updateResponse.response.ok()&&String(updateResponse.body?.slug||'')===String(post.slug),`Post update failed source=${post.id} HTTP ${updateResponse.response.status()}`);
+      target=updateResponse.body;updated.posts.push(Number(target.id));writes++;
     }
     await setAcf(n,'posts',Number(target.id),{product_lang:productLang});
     const readback=await postById(n,target.id);assert(readback?.status==='publish',`Post readback missing ${post.slug}`);
-    if(String(readback.slug||'')!==String(post.slug||''))log('POST_SLUG_ADJUSTED',{sourceId:post.id,sourceSlug:post.slug,targetId:Number(readback.id),targetSlug:String(readback.slug||'')});
+    assert(String(readback.slug||'')===String(post.slug||''),`Post slug mismatch source=${post.id} sourceSlug=${post.slug} targetSlug=${readback.slug}`);
     assert(String(readback.acf?.product_lang?.value??readback.acf?.product_lang??'')===productLang,`Post language mismatch ${post.slug}`);
     const rbCats=(readback.categories||[]).map(Number).sort((a,b)=>a-b);
     assert(JSON.stringify(rbCats)===JSON.stringify([...targetCategories].sort((a,b)=>a-b)),`Post category mismatch ${post.slug}`);
@@ -1151,14 +1169,7 @@ async function verify(source,n){
   }
   assert(allTarget.size===source.posts.length,`Final unique Post count mismatch target=${allTarget.size} source=${source.posts.length}`);
   for(const post of source.posts){
-    let row=allTarget.get(post.slug);
-    if(!row){
-      const matches=[...allTarget.values()].filter(candidate=>clean(decodeEntities(candidate.title?.raw??candidate.title?.rendered))===clean(post.title)
-        &&String(candidate.date_gmt||'').slice(0,19)===String(post.dateGmt||'').slice(0,19));
-      assert(matches.length===1,`Final target Post identity mismatch ${post.slug}: matches=${matches.length}`);
-      row=matches[0];
-      log('POST_FINAL_IDENTITY_FALLBACK',{sourceId:post.id,sourceSlug:post.slug,targetId:Number(row.id),targetSlug:String(row.slug||'')});
-    }
+    const row=allTarget.get(post.slug);assert(row,`Final target Post missing ${post.slug}`);
     assert(clean(decodeEntities(row.title?.raw??row.title?.rendered))===clean(post.title),`Final title mismatch ${post.slug}`);
     assert(String(row.acf?.product_lang?.value??row.acf?.product_lang??'')===productLang,`Final language mismatch ${post.slug}`);
     const expectedCats=post.categories.map(id=>targetCategoryBySourceId.get(id)).filter(Boolean).map(Number).sort((a,b)=>a-b);
