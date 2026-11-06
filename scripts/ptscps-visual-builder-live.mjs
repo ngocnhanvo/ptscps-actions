@@ -1,7 +1,7 @@
 /** Authenticated native Builder acceptance. Private tickets/backups never enter artifacts. */
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { mkdir, writeFile, rm } from 'node:fs/promises';
+import { mkdir, writeFile, rm, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { waitForWordPressBuild } from './ptscps-wordpress-build-monitor.mjs';
 
@@ -103,22 +103,31 @@ async function restoreAll() {
     assert.equal(restored[item.key], item.before[item.key]);
     const readback = await okApi(item.read, item.identity);
     assert.equal(readback[item.key], item.before[item.key]);
-    assert.equal(readback.version, item.before.version, 'Restore must recover the exact original source');
+    if (item.read === 'footer-info') {
+      assert.equal(readback.version, item.before.version, 'Restore must recover the original Info field');
+    } else {
+      // Native Menu versions include post_modified_gmt, which correctly changes
+      // on each save. Compare every editable field rather than undoing WP history.
+      for (const key of ['item_id', 'menu_id', 'lang', 'label', 'description', 'link_mode',
+        'menu_type', 'mega_position', 'mega_header_texts', 'parent_id', 'order_position',
+        'order_total', 'custom_url', 'reference_id', 'target']) {
+        assert.deepEqual(readback[key], item.before[key], 'Restored Menu field differs: ' + key);
+      }
+    }
     item.restored = true;
     log('PTSCPS_BUILDER_CMS_RESTORE', { source: item.read, verified: true });
   }
   await rm('.qa/builder-rollback.json', { force: true });
 }
 async function provenance() {
-  const response = await context.request.get(client + '/ptscps-staging-build.json?qa=' + Date.now(), { timeout: 30000 });
-  if (response.status() !== 200) return null;
-  return response.json().catch(() => null);
+  const evidence = JSON.parse(await readFile(artifacts + '/build.json', 'utf8'));
+  return evidence.provenance;
 }
 async function nativeBuild() {
   const deployed = await provenance();
   if (deployed?.commit === expectedAstro && deployed?.branch === 'master') {
     log('PTSCPS_BUILDER_BUILD', { reused: true, commit: expectedAstro, run: deployed.run_id || null });
-    await writeFile(artifacts + '/build.json', JSON.stringify({ reused: true, provenance: deployed }, null, 2));
+    await writeFile(artifacts + '/native-build.json', JSON.stringify({ reused: true, provenance: deployed }, null, 2));
     return;
   }
   await page.goto(origin + '/wp-admin/admin.php?page=vcs-build-trigger', { waitUntil: 'domcontentloaded', timeout: 45000 });
@@ -126,16 +135,10 @@ async function nativeBuild() {
   let state = await page.evaluate(() => ({ configured: window.vcsBuild?.build_configured, active: window.vcsBuild?.initial_active }));
   assert([true, 1, '1'].includes(state.configured), 'Native Build Website is not configured');
   if (state.active) {
-    await waitForWordPressBuild({ page, log, expectTriggered: true, buildTimeoutMs: 900000 });
-    await page.reload({ waitUntil: 'domcontentloaded', timeout: 45000 });
-    state = await page.evaluate(() => ({ active: window.vcsBuild?.initial_active }));
-    assert(!state.active, 'Native build lock was not reconciled');
-    const after = await provenance();
-    if (after?.commit === expectedAstro && after?.branch === 'master') {
-      log('PTSCPS_BUILDER_BUILD', { reused: true, commit: expectedAstro });
-      await writeFile(artifacts + '/build.json', JSON.stringify({ reused: true, provenance: after }, null, 2));
-      return;
-    }
+    const result = await waitForWordPressBuild({ page, log, expectTriggered: true, buildTimeoutMs: 900000 });
+    await writeFile(artifacts + '/native-build.json', JSON.stringify({ ...result, reused_existing: true }, null, 2));
+    log('PTSCPS_BUILDER_BUILD', { ...result, reused_existing: true });
+    return; // The following FTPS gate checks its source; never trigger a duplicate.
   }
   await page.locator('#vcs-force-build').check();
   const responsePromise = page.waitForResponse(response =>
@@ -148,11 +151,9 @@ async function nativeBuild() {
   log('PTSCPS_BUILDER_BUILD', { triggered_via_native_wordpress: true });
   const result = await waitForWordPressBuild({ page, log, expectTriggered: true,
     discoveryTimeoutMs: 180000, buildTimeoutMs: 900000 });
-  const stamp = await provenance();
-  assert.equal(stamp?.commit, expectedAstro, 'Deployed Astro source SHA differs');
-  assert.equal(stamp?.branch, 'master');
-  await writeFile(artifacts + '/build.json', JSON.stringify({ ...result, provenance: stamp }, null, 2));
-  log('PTSCPS_BUILDER_BUILD', { ...result, source_verified: true });
+  // The next read-only FTPS step verifies the private deployment marker.
+  await writeFile(artifacts + '/native-build.json', JSON.stringify(result, null, 2));
+  log('PTSCPS_BUILDER_BUILD', result);
 }
 
 try {
@@ -163,6 +164,7 @@ try {
   } else if (stage === 'build') {
     await nativeBuild();
   } else {
+    assert.equal((await provenance())?.commit, expectedAstro, 'Pinned deployed source must be verified before live edits');
     let frame = await openBuilder();
     const menuNode = frame.locator('[data-esc-vb-menu-item-id]:visible').first();
     await menuNode.click({ modifiers: ['Alt'] });
@@ -245,7 +247,7 @@ try {
       const beforeUrl = frame.url();
       const anchor = frame.locator('a[href]:visible').first();
       await anchor.click({ button: 'middle' });
-      assert.equal(frame.url(), beforeUrl);
+      assert(frame.url() === beforeUrl, 'Preview must not navigate');
       assert.equal(context.pages().length, 1);
       assert(await frame.locator('[data-esc-vb-region-state="editable"]').count() > 0);
       await page.screenshot({ path: artifacts + '/live-' + mode + '-restored.png', fullPage: true });
@@ -261,6 +263,19 @@ try {
       restored_all: pending.every(item => item.restored), scope: 'Native WordPress Admin + REST + private Astro preview' }, null, 2));
     log('PTSCPS_VISUAL_BUILDER_LIVE', { result: 'PASS', checks: checks.length, restored_all: true });
   }
+} catch (error) {
+  // Capture visible UI only: never dump iframe URLs, tickets, nonces or backup values.
+  if (stage === 'verify') {
+    await page.screenshot({ path: artifacts + '/live-failure.png', fullPage: true }).catch(() => {});
+    const state = await page.evaluate(() => ({
+      menu: document.querySelector('#esc-vb-menu-editor')?.hidden,
+      footer: document.querySelector('#esc-vb-footer-editor')?.hidden,
+      text: document.querySelector('#esc-vb-text-editor')?.style.display,
+      source: document.querySelector('#esc-vb-source-state')?.textContent?.slice(0, 250),
+    })).catch(() => ({}));
+    log('PTSCPS_BUILDER_FAILURE_STATE', state);
+  }
+  throw error;
 } finally {
   try { if (pending.some(item => !item.restored)) await restoreAll(); }
   finally { await browser.close(); }
