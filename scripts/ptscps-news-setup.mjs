@@ -309,6 +309,113 @@ async function ensureMenu(n){
   throw Error('Tin tức menu readback mismatch');
 }
 
+// One shared SSR fallback handles every single-level WordPress Post; never seed per Post.
+async function ensurePostDetailRoute(){
+  const from='^/([^/.]+)$', to='/ssr/posts/$1/detail';
+  const title='[Hệ thống] Chi tiết bài viết - URL một cấp không phải Page/file';
+  const matches=[];
+  for(let index=1;index<=20;index++){
+    const listing=await page.goto(uri(`/wp-admin/edit.php?post_type=chuyen-huong-link&paged=${index}`),{waitUntil:'domcontentloaded',timeout:45000});
+    assert(listing?.status()===200,'WordPress routing CPT admin unavailable');
+    const rows=page.locator('tr[id^="post-"]');
+    for(let i=0;i<await rows.count();i++){
+      const row=rows.nth(i);
+      const source=clean(await row.locator('.column-esc_from_link code').textContent().catch(()=>''));
+      const label=clean(await row.locator('a.row-title').textContent().catch(()=>''));
+      if(source===from||label.includes('Chi tiết bài viết - URL một cấp')){
+        const id=Number((await row.getAttribute('id')||'').replace(/^post-/,''));
+        assert(id>0,'Invalid URL routing CPT ID');
+        matches.push({id,source,label});
+      }
+    }
+    const total=Number(await page.locator('.tablenav.top .total-pages').first().textContent().catch(()=>'1'))||1;
+    if(index>=total)break;
+    assert(index<20,'Too many WordPress routing CPT pages for safe audit');
+  }
+  assert(matches.length<=1,`Duplicate/conflicting post fallback rules: ${JSON.stringify(matches)}`);
+  const existing=matches[0];
+  const editor=existing?`/wp-admin/post.php?post=${existing.id}&action=edit`:'/wp-admin/post-new.php?post_type=chuyen-huong-link';
+  const res=await page.goto(uri(editor),{waitUntil:'domcontentloaded',timeout:45000});
+  assert(res?.status()===200,'Cannot open WordPress routing CPT editor');
+  const titleInput=page.locator('#title').first();
+  assert(await titleInput.count()===1,'Expected classic WordPress routing editor');
+  const field=name=>page.locator(`.acf-field[data-name="${name}"]`).first();
+  const input=name=>field(name).locator('input:not([type="hidden"]):not([type="checkbox"]),textarea,select').first();
+  const value=async name=>{
+    const el=input(name);assert(await el.count()===1,`Missing ACF routing field: ${name}`);
+    return String(await el.inputValue());
+  };
+  const wanted={from_link:from,to_link:to,type:'Rewrite',match_type:'Regex'};
+  const priority=page.locator('#esc-route-priority');
+  assert(await priority.count()===1,'Missing WordPress routing priority control');
+  const conditions=page.locator('#esc-route-condition-rows tr');
+  assert(await conditions.count()<=1,'Cannot overwrite custom routing conditions');
+  const enabled=field('enable').locator('input[type="checkbox"]').first();
+  assert(await enabled.count()===1,'Missing ACF routing enabled checkbox');
+  const conditionCount=await conditions.count();
+  const condition=conditions.first();
+  let change=!existing||(await titleInput.inputValue())!==title;
+  const postStatus=page.locator('#post_status');
+  if(await postStatus.count())change=change||(await postStatus.inputValue())!=='publish';
+  for(const [name,want] of Object.entries(wanted))change=change||(await value(name))!==want;
+  change=change||(await priority.inputValue())!=='900'||!(await enabled.isChecked());
+  change=change||conditionCount!==1;
+  if(conditionCount===1){
+    change=change||(await condition.locator('select[name="esc_route_condition_type[]"]').inputValue())!=='page_not_exists';
+    change=change||(await condition.locator('input[name="esc_route_condition_capture[]"]').inputValue())!=='1';
+    change=change||(await condition.locator('input[name="esc_route_condition_value[]"]').inputValue())!=='';
+  }
+  if(!change){log('POST_ROUTE',{status:'ALREADY_PRESENT',id:existing.id,rule:from});return;}
+  await titleInput.fill(title);
+  for(const [name,want] of Object.entries(wanted)){
+    const el=input(name);
+    if(await el.evaluate(node=>node.tagName)==='SELECT')await el.selectOption(want);
+    else await el.fill(want);
+  }
+  if(!(await enabled.isChecked()))await enabled.evaluate(node=>node.click());
+  assert(await enabled.isChecked(),'Cannot enable fallback route');
+  await priority.fill('900');
+  if(conditionCount===0)await page.locator('#esc-route-add-condition').click();
+  const row=page.locator('#esc-route-condition-rows tr').first();
+  assert(await row.count()===1,'Missing fallback route condition');
+  await row.locator('select[name="esc_route_condition_type[]"]').selectOption('page_not_exists');
+  await row.locator('input[name="esc_route_condition_capture[]"]').fill('1');
+  await row.locator('input[name="esc_route_condition_value[]"]').fill('');
+  const save=page.locator('#publish');
+  assert(await save.count()===1,'Publish routing CPT button missing');
+  await Promise.all([page.waitForNavigation({waitUntil:'domcontentloaded',timeout:50000}),save.click()]);
+  const savedId=Number(new URL(page.url()).searchParams.get('post'));
+  assert(savedId>0,'Routing CPT save did not return an edit ID');
+  for(const [name,want] of Object.entries(wanted))assert.equal(await value(name),want,`Routing field readback mismatch: ${name}`);
+  assert.equal(await priority.inputValue(),'900','Routing priority readback mismatch');
+  assert.equal(await row.locator('select[name="esc_route_condition_type[]"]').inputValue(),'page_not_exists','Routing condition readback mismatch');
+  assert(await field('enable').locator('input[type="checkbox"]').first().isChecked(),'Fallback route disabled after save');
+  cmsWrites++;
+  log('POST_ROUTE',{status:existing?'UPDATED':'CREATED',id:savedId,from,to,priority:900,condition:'page_not_exists'});
+}
+
+async function postDetailProbe(view){
+  try{
+    const listing=await view.goto(front+'/c/tin-tuc/hoat-dong-cua-cong-ty?_news_post_detail='+Date.now(),{waitUntil:'domcontentloaded',timeout:45000});
+    if(listing?.status()!==200)return false;
+    const card=view.locator('#posts-grid a:has(h2)').first();
+    if(await card.count()!==1)return false;
+    const expected=clean(await card.locator('h2').textContent());
+    const raw=await card.getAttribute('href');
+    if(!raw)return false;
+    const target=new URL(raw,front);
+    if(target.origin!==front||!/^\/[a-z0-9-]+\/?$/.test(target.pathname))return false;
+    const http=await view.request.get(target.href,{timeout:45000,maxRedirects:0,headers:{'Cache-Control':'no-cache'}}).catch(()=>null);
+    if(http?.status()!==200)return false;
+    await Promise.all([
+      view.waitForURL(url=>url.pathname.replace(/\/$/,'')===target.pathname.replace(/\/$/,''),{timeout:45000}),
+      card.click(),
+    ]);
+    const title=clean(await view.locator('h1').first().textContent().catch(()=>''));
+    return Boolean(title)&&title===expected;
+  }catch(e){log('POST_DETAIL_PROBE_ERROR',String(e.message||e).slice(0,200));return false;}
+}
+
 async function publishedProbe(){
   const probe=await context.newPage();
   try{
@@ -336,7 +443,8 @@ async function publishedProbe(){
     const links=probe.locator(`#${panelId} a`);
     if(await links.count()!==desiredMenu.length)return false;
     const labels=(await links.allTextContents()).map(clean);
-    return JSON.stringify(labels)===JSON.stringify(desiredMenu.map(x=>x.title));
+    if(JSON.stringify(labels)!==JSON.stringify(desiredMenu.map(x=>x.title)))return false;
+    return await postDetailProbe(probe);
   }finally{await probe.close();}
 }
 
@@ -413,6 +521,8 @@ async function qa(){
       await p.screenshot({path:`${artifactDir}/desktop-news-menu.png`,fullPage:false});
       log('NAV_PARITY_PASS',{children:desiredMenu.map(x=>x.title)});
     }
+    assert(await postDetailProbe(p),`WordPress Post listing → detail SSR 200/H1 mismatch ${viewport.name}`);
+    log('POST_DETAIL_QA_PASS',{viewport:viewport.name});
     await view.close();
   }
   log('DATA_PARITY_PASS',{company:Math.min(3,sourceInventory.company.titles.length),regional:Math.min(3,sourceInventory.regional.titles.length),tender:Math.min(3,sourceInventory.tender.titles.length),gallery:'route-title'});
@@ -429,6 +539,7 @@ try{
     await inventoryTargetData();
     const n=await nonce();
     await ensureMenu(n);
+    await ensurePostDetailRoute();
     log('CMS',{status:'PASS',writes:cmsWrites});
     await buildThroughWordPress();
     await qa();
