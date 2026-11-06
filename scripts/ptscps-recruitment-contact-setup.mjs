@@ -339,10 +339,39 @@ async function ensureContactPage(n){
   }
   const button=page.locator('#publish').first();
   assert(await button.count(),'Contact Page publish control missing');
-  await button.click();
-  await sleep(1300);
-  const verify=await api('GET',`/wp-json/wp/v2/pages/${target.id}?context=edit&_fields=id,slug,status,acf,content`,n);
-  assert(verify.r.ok()&&verify.body?.status==='publish'&&verify.body.slug==='lien-he','Contact Page was not published');
+  // ACF/Classic Editor publication can navigate asynchronously. Do not
+  // misclassify an in-flight save as a persisted WordPress Page failure.
+  await Promise.all([
+    page.waitForNavigation({waitUntil:'domcontentloaded',timeout:45000}).catch(()=>null),
+    button.click(),
+  ]);
+  const route=`/wp-json/wp/v2/pages/${target.id}?context=edit&_fields=id,slug,status,acf,content`;
+  let verify;
+  for(let attempt=1;attempt<=8;attempt++){
+    verify=await api('GET',route,n);
+    assert(verify.r.ok(),`Contact Page readback unavailable HTTP ${verify.r.status()}`);
+    const html=String(verify.body?.content?.raw||verify.body?.content?.rendered||'');
+    if(verify.body?.status==='publish'&&verify.body.slug==='lien-he'&&desired.every(id=>html.includes(id)))break;
+    if(attempt<8)await sleep(850);
+  }
+  const savedHtml=String(verify.body?.content?.raw||verify.body?.content?.rendered||'');
+  log('CONTACT_PAGE_READBACK',{
+    id:target.id,slug:verify.body?.slug,status:verify.body?.status,
+    tables:desired.map(id=>({id,saved:savedHtml.includes(id)})),
+    key:val(verify.body?.acf?.key),action:val(verify.body?.acf?.action),
+  });
+  // Only adjust the publication status when the native Insert Code operation
+  // has already persisted both shortcode blocks under the exact public slug.
+  if(verify.body?.status!=='publish'&&verify.body?.slug==='lien-he'
+    &&desired.every(id=>savedHtml.includes(id))){
+    const published=await api('POST',`/wp-json/wp/v2/pages/${target.id}`,n,{status:'publish'});
+    assert(published.r.ok(),`WordPress rejected Contact Page publication HTTP ${published.r.status()}`);
+    verify=await api('GET',route,n);
+    assert(verify.r.ok(),'Contact Page publication readback unavailable');
+    log('CONTACT_PAGE_PUBLISH_RECOVERY',{status:verify.body?.status,slug:verify.body?.slug});
+  }
+  assert(verify.body?.status==='publish'&&verify.body.slug==='lien-he',
+    `Contact Page not published: id=${target.id} status=${verify.body?.status} slug=${verify.body?.slug}`);
   for(const id of desired)assert(String(verify.body.content?.raw||verify.body.content?.rendered||'').includes(id),`Contact Page missing native ESC Table ${id}`);
   assert(val(verify.body.acf?.key)==='contact'&&val(verify.body.acf?.action)==='HomePage','Contact Page ACF mismatch');
   writes++;
