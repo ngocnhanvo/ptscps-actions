@@ -384,7 +384,15 @@ async function currentPtscArticleFallbacks(value){
   const slugs=[...new Set(contexts.map(item=>String(item?.slug||'').trim()).filter(Boolean))];
   const matches=[];
   for(const slug of slugs){
-    const articleSlugs=[...new Set([slug,slug.replace(/(\d{4})-(\d{4})(?=$|-)/g,'$1--$2')])];
+    const articleSlugVariants=[slug];
+    for(const transform of [
+      candidate=>candidate.replace(/(\d{4})-(\d{4})(?=$|-)/g,'$1--$2'),
+      candidate=>candidate.replace(/-cong-ty-ptsc-/g,'-cong-ty-pps-'),
+      candidate=>candidate.replace(/-fpso-fso-/g,'-fpsofso-'),
+    ]){
+      for(const candidate of [...articleSlugVariants])articleSlugVariants.push(transform(candidate));
+    }
+    const articleSlugs=[...new Set(articleSlugVariants)];
     for(const articleSlug of articleSlugs){
       let html=currentPtscArticleCache.get(articleSlug);
       if(html===undefined){
