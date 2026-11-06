@@ -30,10 +30,34 @@ async function login(){
   log('AUTH','PASS');
 }
 async function nonce(){
-  const r=await page.request.post(uri('/wp-admin/admin-ajax.php'),{form:{action:'rest-nonce'},timeout:30000});
-  const n=(await r.text()).trim();
-  assert(r.ok()&&/^[a-f\d]{8,20}$/i.test(n),'Unable to retrieve authenticated WordPress REST nonce');
-  return n;
+  // The native WP admin exposes the authenticated REST nonce. The old
+  // admin-ajax fallback is not guaranteed by every installation.
+  let menuId=0;
+  try{
+    const r=await page.request.get(uri(`/wp-json/esc-api/v1/menus?_rc_nonce=${Date.now()}`),{
+      timeout:30000,headers:{'Cache-Control':'no-cache'},
+    });
+    if(r.ok())menuId=Number((await r.json())?.menus?.Header?.vi?.id||0);
+  }catch{}
+  const adminPages=[
+    ...(menuId?[`/wp-admin/nav-menus.php?action=edit&menu=${menuId}&esc_full_admin=1`]:[]),
+    '/wp-admin/edit-tags.php?taxonomy=product_cat&post_type=product&esc_full_admin=1',
+  ];
+  for(const path of adminPages){
+    await page.goto(uri(path),{waitUntil:'domcontentloaded',timeout:50000});
+    const value=await page.evaluate(()=>String(globalThis.wpApiSettings?.nonce||'').trim());
+    if(/^[A-Za-z0-9_-]{8,32}$/.test(value)){
+      log('NONCE_SOURCE',path.split('?')[0]);
+      return value;
+    }
+  }
+  const r=await page.request.post(uri('/wp-admin/admin-ajax.php'),{
+    form:{action:'rest-nonce'},timeout:30000,
+  }).catch(()=>null);
+  const value=r?.ok()?(await r.text()).trim():'';
+  assert(/^[A-Za-z0-9_-]{8,32}$/.test(value),'Unable to retrieve authenticated WordPress REST nonce');
+  log('NONCE_SOURCE','admin-ajax');
+  return value;
 }
 async function api(method,path,n,data,timeout=45000){
   const r=await page.request.fetch(uri(path),{method,timeout,headers:{'X-WP-Nonce':n,'Cache-Control':'no-cache'},...(data===undefined?{}:{data})});
