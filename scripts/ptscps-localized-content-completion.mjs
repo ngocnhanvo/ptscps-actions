@@ -106,6 +106,17 @@ async function sourceGet(path, expectJson = true) {
   throw Error(`Legacy source failed after 3 attempts: ${path} ${last}`);
 }
 
+function parseLegacyJson(text, label) {
+  const raw = String(text || '').replace(/^\uFEFF/, '').trim();
+  try { return JSON.parse(raw); } catch {}
+  const arrayStart = raw.indexOf('[');
+  const arrayEnd = raw.lastIndexOf(']');
+  if (arrayStart >= 0 && arrayEnd > arrayStart) {
+    try { return JSON.parse(raw.slice(arrayStart, arrayEnd + 1)); } catch {}
+  }
+  throw Error(`Legacy ${label} returned malformed JSON`);
+}
+
 async function collectSource(collection, fields) {
   const out = [];
   for (let p = 1; p <= 40; p++) {
@@ -113,7 +124,7 @@ async function collectSource(collection, fields) {
     const response = await context.request.get(source + path, { timeout: 40000, headers: { 'Cache-Control': 'no-cache' } });
     if (response.status() === 400 && p > 1) break;
     assert(response.ok(), `Legacy ${collection} HTTP ${response.status()} page=${p}`);
-    const rows = await response.json();
+    const rows = parseLegacyJson(await response.text(), `${collection} page=${p}`);
     assert(Array.isArray(rows), `Legacy ${collection} invalid payload`);
     out.push(...rows);
     const max = Number(response.headers()['x-wp-totalpages'] || 1);
