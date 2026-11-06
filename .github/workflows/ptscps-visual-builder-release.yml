@@ -132,7 +132,7 @@ jobs:
           BUILDER_STAGE: diagnose
         run: node scripts/ptscps-visual-builder-live.mjs
       - name: Read scoped runtime error logs without any deployment
-        if: env.BUILDER_RELEASE_PHASE == 'diagnose'
+        if: always() && env.BUILDER_RELEASE_PHASE == 'diagnose'
         env:
           ENV_FILE: ${{ secrets.ENV_FILE }}
           FTP_SERVER: ${{ secrets.FTP_SERVER }}

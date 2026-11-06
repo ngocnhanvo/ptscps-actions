@@ -171,10 +171,15 @@ try {
       lang: verification.body?.shared_regions?.snapshot?.lang,
       bootstrap: Object.keys(verification.body?.bootstrap || {}) });
     const previewUrl = await page.locator('#esc-vb-frame').getAttribute('src');
-    const response = await context.request.get(previewUrl, { timeout: 45000 });
-    log('PTSCPS_BUILDER_SSR_DIAGNOSTIC', { status: response.status(),
-      contentType: response.headers()['content-type'], timing: response.headers()['server-timing'],
-      plainError: (await response.text()).trim() === 'Internal server error' ? 'Internal server error' : 'REDACTED' });
+    try {
+      const response = await context.request.get(previewUrl, { timeout: 45000 });
+      log('PTSCPS_BUILDER_SSR_DIAGNOSTIC', { status: response.status(),
+        contentType: response.headers()['content-type'], timing: response.headers()['server-timing'],
+        plainError: (await response.text()).trim() === 'Internal server error' ? 'Internal server error' : 'REDACTED' });
+    } catch (error) {
+      // Playwright errors contain the full bearer-ticket URL: never rethrow them.
+      log('PTSCPS_BUILDER_SSR_DIAGNOSTIC', { transportError: /ECONNRESET/.test(String(error?.message)) ? 'ECONNRESET' : String(error?.name || 'request_failure') });
+    }
   } else if (stage === 'build') {
     await nativeBuild();
   } else {

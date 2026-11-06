@@ -3,5 +3,6 @@
   "astro": "3c519e22c834ee91eeed0419a9ff870631f20abf",
   "scope": "PTSCPS native Visual Builder only; backed-up reversible CMS acceptance; auto-build",
   "phase": "diagnose",
-  "completed_build_run": 42147882129
+  "completed_build_run": 42147882129,
+  "diagnostic_attempt": 2
 }
