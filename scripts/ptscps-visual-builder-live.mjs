@@ -277,6 +277,7 @@ try {
     }
 
     frame = await openBuilder();
+    if (process.env.BUILDER_QA_SKIP_TEXT !== '1') {
     const textNodes = frame.locator('[data-esc-builder-cell-row][data-esc-builder-cell-field]:visible');
     const textIndex = await textNodes.evaluateAll(nodes => nodes.findIndex(node => {
       const bounds = node.getBoundingClientRect();
@@ -297,9 +298,22 @@ try {
     assert.equal(stale.status, 409);
     assert.equal(stale.body.code, 'editor_preview_stale');
     checks.push({ source: 'ESC Table', exact_selection: 'PASS', cancel: 'PASS', stale_version: '409' });
+    }
+    const heroButtons = await frame.locator('[data-tablepress-preview="home_00"] button').evaluateAll(nodes =>
+      nodes.map(node => Object.fromEntries(Array.from(node.attributes)
+        .filter(attr => attr.name.startsWith('data-') || ['type','aria-label','aria-controls','role'].includes(attr.name))
+        .map(attr => [attr.name, attr.value]))));
+    log('PTSCPS_BUILDER_NATIVE_CONTROLS', { heroButtons });
     const images = frame.locator('[data-esc-builder-image-row][data-esc-builder-image-field]:not([aria-hidden="true"]):visible');
     assert(await images.count() > 0, 'Live image bindings must exist');
-    await images.first().click();
+    let clickableImage;
+    for (let index = 0; index < Math.min(await images.count(), 20); index++) {
+      const candidate = images.nth(index);
+      try { await candidate.click({ trial: true, timeout: 1500 }); clickableImage = candidate; break; }
+      catch { /* Covered background images are inspected through their own affordance. */ }
+    }
+    assert(clickableImage, 'A native image must be reachable by an actual pointer click');
+    await clickableImage.click();
     await page.locator('#esc-vb-image-editor').waitFor({ state: 'visible' });
     await page.locator('#esc-vb-image-seo').waitFor({ state: 'visible' });
     checks.push({ source: 'ESC Table image', exact_selection: 'PASS', media_inspector: 'PASS', no_media_write: true });
@@ -308,6 +322,7 @@ try {
     await page.screenshot({ path: artifacts + '/live-desktop.png', fullPage: true });
     for (const mode of ['desktop', 'mobile']) {
       frame = await openBuilder(mode);
+      await frame.locator('[data-esc-vb-region-state="editable"]').first().waitFor({ state: 'attached' });
       const beforeUrl = frame.url();
       const anchor = frame.locator('a[href]:visible').first();
       await anchor.click({ button: 'middle' });

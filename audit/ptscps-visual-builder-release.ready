@@ -4,5 +4,8 @@
   "scope": "PTSCPS native Visual Builder only; backed-up reversible CMS acceptance; auto-build",
   "phase": "verify",
   "completed_build_run": 42167054532,
-  "acceptance_attempt": 4
+  "acceptance_attempt": 5,
+  "skip_completed_shared": true,
+  "skip_completed_text": true,
+  "shared_acceptance_run": 42167548844
 }
