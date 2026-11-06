@@ -47,7 +47,9 @@ jobs:
               title=re.search(rb'<title[^>]*>([^<]{0,140})</title>',body,re.I)
               sample=(title.group(1).decode('utf-8','replace') if title else '')[:140]
               print('PUBLIC_PROBE='+str({'site':'front' if origin==front else 'cms','path':path,'http':code,'content_type':headers.get('Content-Type','')[:75],'location':headers.get('Location','')[:200],'title':sample}))
-          for path in ('/','/trang-chu/','/index.html','/robots.txt','/sitemap.xml','/ptscps-staging-build.json','/client/index.html'):
+          for path in ('/','/trang-chu/','/index.html','/robots.txt','/sitemap.xml','/ptscps-staging-build.json','/client/index.html',
+                       '/tin-tuc','/c/tin-tuc/hoat-dong-cua-cong-ty','/c/tin-tuc/hoat-dong-cua-cong-ty/2',
+                       '/c/tin-tuc/dau-khi-trong-nuoc-va-khu-vuc','/thu-vien-pps','/thu-moi-chao-gia'):
               check(front,path)
           check(cms,'/wp-json/')
           time.sleep(2)
