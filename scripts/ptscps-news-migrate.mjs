@@ -526,29 +526,47 @@ function archivedMimeAccepted(value,contentType){
   return true;
 }
 
+function normalizeArchivedAsset(value){
+  try{
+    const u=new URL(String(value||'').trim());
+    if(!/^https?:$/.test(u.protocol))return null;
+    const host=u.hostname.toLowerCase();
+    if(host!=='ptscps.com.vn'&&host!=='www.ptsc.com.vn')return null;
+    if(!u.pathname.startsWith('/wp-content/uploads/'))return null;
+    u.hash='';
+    return u.href;
+  }catch{return null;}
+}
+
 async function waybackSnapshots(value){
-  const normalized=normalizeSourceAsset(value);if(!normalized)return [];
-  if(waybackAssetCache.has(normalized))return waybackAssetCache.get(normalized);
+  const archived=normalizeArchivedAsset(value);if(!archived)return [];
+  if(waybackAssetCache.has(archived))return waybackAssetCache.get(archived);
   const promise=(async()=>{
-    const cdx=`https://web.archive.org/cdx/search/cdx?url=${encodeURIComponent(normalized)}&output=json&filter=statuscode:200&fl=timestamp,original,mimetype,digest&collapse=digest&limit=10`;
-    const response=await fetch(cdx,{headers:{'User-Agent':'PTSCPS News migration/1.0'},signal:AbortSignal.timeout(12000)}).catch(()=>null);
-    if(!response?.ok)return [];
-    const rows=await response.json().catch(()=>null);
-    if(!Array.isArray(rows)||rows.length<2)return [];
+    const queryUrls=[];
+    for(const protocol of ['https:','http:']){
+      const candidate=new URL(archived);candidate.protocol=protocol;queryUrls.push(candidate.href);
+    }
     const snapshots=[];
-    for(const row of rows.slice(1).reverse()){
-      if(!Array.isArray(row)||row.length<3)continue;
-      const timestamp=String(row[0]||'').trim();
-      const original=String(row[1]||'').trim();
-      const mimetype=String(row[2]||'').trim();
-      if(!/^\d{14}$/.test(timestamp)||!/^https?:\/\//i.test(original)||!archivedMimeAccepted(normalized,mimetype))continue;
-      snapshots.push({timestamp,original,mimetype,url:`https://web.archive.org/web/${timestamp}id_/${original}`});
+    for(const queryUrl of [...new Set(queryUrls)]){
+      const cdx=`https://web.archive.org/cdx/search/cdx?url=${encodeURIComponent(queryUrl)}&output=json&filter=statuscode:200&fl=timestamp,original,mimetype,digest&collapse=digest&limit=10`;
+      const response=await fetch(cdx,{headers:{'User-Agent':'PTSCPS News migration/1.0'},signal:AbortSignal.timeout(12000)}).catch(()=>null);
+      if(!response?.ok)continue;
+      const rows=await response.json().catch(()=>null);
+      if(!Array.isArray(rows)||rows.length<2)continue;
+      for(const row of rows.slice(1).reverse()){
+        if(!Array.isArray(row)||row.length<3)continue;
+        const timestamp=String(row[0]||'').trim();
+        const original=String(row[1]||'').trim();
+        const mimetype=String(row[2]||'').trim();
+        if(!/^\d{14}$/.test(timestamp)||!/^https?:\/\//i.test(original)||!archivedMimeAccepted(queryUrl,mimetype))continue;
+        snapshots.push({timestamp,original,mimetype,url:`https://web.archive.org/web/${timestamp}id_/${original}`});
+      }
     }
     const unique=[...new Map(snapshots.map(item=>[item.url,item])).values()].slice(0,10);
-    if(unique.length)log('WAYBACK_MATCH',{requested:normalized,count:unique.length,first:{timestamp:unique[0].timestamp,original:unique[0].original,mimetype:unique[0].mimetype}});
+    if(unique.length)log('WAYBACK_MATCH',{requested:archived,count:unique.length,first:{timestamp:unique[0].timestamp,original:unique[0].original,mimetype:unique[0].mimetype}});
     return unique;
   })();
-  waybackAssetCache.set(normalized,promise);
+  waybackAssetCache.set(archived,promise);
   return promise;
 }
 
