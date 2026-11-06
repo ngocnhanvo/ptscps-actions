@@ -214,6 +214,58 @@ async function sourceMediaByIds(ids,posts=[]){
   return result;
 }
 
+function addSourceFallbacks(original,candidates){
+  const normalized=normalizeSourceAsset(original);if(!normalized)return;
+  const expanded=[];
+  for(const candidate of candidates||[]){
+    const value=normalizeSourceAsset(candidate);if(!value||value===normalized)continue;
+    expanded.push(value,legacyMediaAlias(value),...wordpressDerivativeFallbacks(value));
+  }
+  const existing=sourceAssetFallbacks.get(normalized)||[];
+  sourceAssetFallbacks.set(normalized,[...new Set([...expanded.filter(Boolean),...existing])]);
+}
+
+function inlineImageAttachmentRefs(html){
+  const refs=[];
+  for(const tag of String(html||'').match(/<img\b[^>]*>/gi)||[]){
+    const className=tag.match(/\bclass=["']([^"']*)["']/i)?.[1]||'';
+    const classId=className.match(/(?:^|\s)wp-image-(\d+)(?:\s|$)/)?.[1]||'';
+    const dataId=tag.match(/\bdata-attachment-id=["'](\d+)["']/i)?.[1]||'';
+    const id=Number(dataId||classId||0);
+    const urls=[...new Set((tag.match(sourceAssetRe)||[]).map(normalizeSourceAsset).filter(Boolean))];
+    if(!id||!urls.length)continue;
+    refs.push({id,urls});
+    for(const original of urls)addSourceFallbacks(original,urls.filter(value=>value!==original));
+  }
+  return refs;
+}
+
+async function registerInlineAttachmentFallbacks(source){
+  const byId=new Map();
+  const htmlBlocks=[...source.posts.flatMap(post=>[post.content,post.excerpt]),source.gallery.content];
+  for(const html of htmlBlocks){
+    for(const ref of inlineImageAttachmentRefs(html)){
+      if(!byId.has(ref.id))byId.set(ref.id,new Set());
+      for(const url of ref.urls)byId.get(ref.id).add(url);
+    }
+  }
+  const ids=[...byId.keys()];
+  const found=new Map();
+  for(let i=0;i<ids.length;i+=100){
+    const chunk=ids.slice(i,i+100);
+    const response=await context.request.get(legacy+`/wp-json/wp/v2/media?include=${chunk.join(',')}&per_page=100&_fields=id,source_url,media_details`,{timeout:50000,headers:{'Cache-Control':'no-cache'}});
+    assert(response.ok(),`Legacy inline media batch HTTP ${response.status()}`);
+    for(const row of await response.json())found.set(Number(row.id),row);
+  }
+  for(const [id,originals] of byId){
+    const row=found.get(id);if(!row)continue;
+    const mediaUrls=[row.source_url,...Object.values(row.media_details?.sizes||{}).map(item=>item?.source_url)]
+      .map(normalizeSourceAsset).filter(Boolean);
+    for(const original of originals)addSourceFallbacks(original,mediaUrls);
+  }
+  log('INLINE_MEDIA_FALLBACKS',{attachmentIds:ids.length,found:found.size,sources:sourceAssetFallbacks.size});
+}
+
 async function targetSnapshot(n){
   const categories=[];
   for(const slug of categorySlugs){
@@ -612,6 +664,7 @@ try{
   await targetSnapshot(n);
   await ensureCategories(source,n);
 
+  await registerInlineAttachmentFallbacks(source);
   const featuredIds=[...new Set(source.posts.map(post=>post.featuredMedia).filter(Boolean))];
   const featuredMap=await sourceMediaByIds(featuredIds,source.posts);
   const assetSet=new Set();
