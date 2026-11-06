@@ -38,6 +38,7 @@ const sourceAssetFallbacks=new Map();
 const sourceAssetContexts=new Map();
 const targetMediaLookupCache=new Map();
 const currentPtscArticleCache=new Map();
+const waybackAssetCache=new Map();
 const currentPtscArticlePathOverrides=new Map([
   ['cong-ty-pps-to-chuc-cac-hoat-dong-nhan-ngay-thuong-binh-liet-sy-27-7',[
     '/tin-tuc/tin-ptsc-1/doan-the-xa-hoi/cong-ty-pps-to-chuc-cac-hoat-dong-nhan-ngay-thuong-binh-liet-sy-277',
@@ -487,6 +488,42 @@ async function currentPtscArticleFallbacks(value){
   return unique;
 }
 
+function archivedMimeAccepted(value,contentType){
+  const type=String(contentType||'').split(';')[0].trim().toLowerCase();
+  if(!type||/^(?:text\/|application\/(?:json|xml|xhtml\+xml))/.test(type))return false;
+  const ext=extname(new URL(value).pathname).toLowerCase();
+  if(['.jpg','.jpeg','.png','.gif','.webp','.bmp','.tif','.tiff','.svg'].includes(ext))return type.startsWith('image/')||type==='application/octet-stream';
+  if(['.mp4','.m4v','.mov','.webm','.avi'].includes(ext))return type.startsWith('video/')||type==='application/octet-stream';
+  if(ext==='.pdf')return type==='application/pdf'||type==='application/octet-stream';
+  return true;
+}
+
+async function waybackSnapshots(value){
+  const normalized=normalizeSourceAsset(value);if(!normalized)return [];
+  if(waybackAssetCache.has(normalized))return waybackAssetCache.get(normalized);
+  const promise=(async()=>{
+    const cdx=`https://web.archive.org/cdx/search/cdx?url=${encodeURIComponent(normalized)}&output=json&filter=statuscode:200&fl=timestamp,original,mimetype,digest&collapse=digest&limit=10`;
+    const response=await fetch(cdx,{headers:{'User-Agent':'PTSCPS News migration/1.0'},signal:AbortSignal.timeout(12000)}).catch(()=>null);
+    if(!response?.ok)return [];
+    const rows=await response.json().catch(()=>null);
+    if(!Array.isArray(rows)||rows.length<2)return [];
+    const snapshots=[];
+    for(const row of rows.slice(1).reverse()){
+      if(!Array.isArray(row)||row.length<3)continue;
+      const timestamp=String(row[0]||'').trim();
+      const original=String(row[1]||'').trim();
+      const mimetype=String(row[2]||'').trim();
+      if(!/^\d{14}$/.test(timestamp)||!/^https?:\/\//i.test(original)||!archivedMimeAccepted(normalized,mimetype))continue;
+      snapshots.push({timestamp,original,mimetype,url:`https://web.archive.org/web/${timestamp}id_/${original}`});
+    }
+    const unique=[...new Map(snapshots.map(item=>[item.url,item])).values()].slice(0,10);
+    if(unique.length)log('WAYBACK_MATCH',{requested:normalized,count:unique.length,first:{timestamp:unique[0].timestamp,original:unique[0].original,mimetype:unique[0].mimetype}});
+    return unique;
+  })();
+  waybackAssetCache.set(normalized,promise);
+  return promise;
+}
+
 async function currentPtscArticleImageInventory(slug){
   const articleSlugVariants=[slug];
   for(const transform of [
@@ -666,6 +703,25 @@ async function ensureAsset(n,url,meta={}){
         for(const fallback of currentPtscFallbacks){
           const candidate=await fetch(fallback,{headers:{'User-Agent':'PTSCPS News migration/1.0'},signal:AbortSignal.timeout(60000)}).catch(()=>null);
           if(candidate?.ok){source=candidate;resolvedSource=fallback;log('MEDIA_SOURCE_RECOVERED_CURRENT_PTSC',{requested:normalized,resolved:fallback});break;}
+        }
+      }
+      if(!source.ok){
+        const archiveCandidates=[...new Set([
+          normalized,
+          ...wordpressDerivativeFallbacks(normalized),
+          ...responsiveFallbacks,
+          ...responsiveFallbacks.flatMap(wordpressDerivativeFallbacks),
+        ].map(normalizeSourceAsset).filter(Boolean))];
+        for(const archiveCandidate of archiveCandidates){
+          const snapshots=await waybackSnapshots(archiveCandidate);
+          for(const snapshot of snapshots){
+            const candidate=await fetch(snapshot.url,{headers:{'User-Agent':'PTSCPS News migration/1.0'},signal:AbortSignal.timeout(60000)}).catch(()=>null);
+            if(!candidate?.ok||!archivedMimeAccepted(archiveCandidate,candidate.headers.get('content-type')))continue;
+            source=candidate;resolvedSource=snapshot.url;attemptedFallbacks.push(snapshot.url);
+            log('MEDIA_SOURCE_RECOVERED_WAYBACK',{requested:normalized,archivedOriginal:snapshot.original,timestamp:snapshot.timestamp,resolved:snapshot.url});
+            break;
+          }
+          if(source.ok)break;
         }
       }
     }
