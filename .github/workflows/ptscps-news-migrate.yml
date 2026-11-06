@@ -4,6 +4,7 @@ on:
     branches: [main]
     paths:
       - 'scripts/ptscps-news-migrate.mjs'
+      - 'scripts/ptscps-news-setup.mjs'
       - '.github/workflows/ptscps-news-migrate.yml'
 permissions:
   contents: read
@@ -49,7 +50,21 @@ jobs:
         run: npm install --no-save --no-package-lock --ignore-scripts --no-audit --no-fund playwright@1.64.0
       - name: Verify WordPress build monitor contract
         run: node scripts/ptscps-wordpress-build-monitor.test.mjs
+      - name: Determine News execution scope
+        id: scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          changed="$(git show --pretty='' --name-only "$GITHUB_SHA")"
+          if grep -Fxq 'scripts/ptscps-news-migrate.mjs' <<<"$changed"; then
+            echo 'run_migration=1' >> "$GITHUB_OUTPUT"
+            echo 'NEWS_SCOPE=MIGRATE_AND_RELEASE'
+          else
+            echo 'run_migration=0' >> "$GITHUB_OUTPUT"
+            echo 'NEWS_SCOPE=RELEASE_ONLY_DATA_ALREADY_VERIFIED'
+          fi
       - name: Migrate verified legacy News content and media
+        if: steps.scope.outputs.run_migration == '1'
         env:
           WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
           WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}

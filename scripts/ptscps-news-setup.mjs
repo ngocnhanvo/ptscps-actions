@@ -218,6 +218,11 @@ async function inventoryTargetData(){
     assert(rows.length===1,`Target category ${slug} missing or ambiguous (${rows.length})`);
     categories[slug]={id:rows[0].id,name:clean(rows[0].name),count:Number(rows[0].count||0)};
   }
+  for(const slug of targetCategories){
+    const expected=Number(sourceRestInventory?.categories?.[slug]?.count??-1);
+    assert(expected>=0,`Source count unavailable for ${slug}`);
+    assert(categories[slug].count===expected,`Target category count mismatch ${slug}: target=${categories[slug].count} source=${expected}`);
+  }
   assert(categories['hoat-dong-cua-cong-ty'].count>0,'Target company-news category is empty');
   assert(categories['dau-khi-trong-nuoc-va-khu-vuc'].count>0,'Target regional-news category is empty');
   assert(categories['thu-moi-chao-gia'].count>0,'Target tender category is empty');
@@ -237,10 +242,9 @@ async function ensureMenu(n){
   const top=(header.items||[]).filter(x=>String(x.label||'')==='Tin tức');
   assert(top.length<=1,'Duplicated Tin tức top menu');
   const labels=(header.items||[]).map(x=>String(x.label||''));
-  const stockAt=labels.indexOf('Cổ đông');
+  const hseqAt=labels.indexOf('HSEQ');
   const newsAt=labels.indexOf('Tin tức');
-  const careerAt=labels.indexOf('Tuyển dụng');
-  const exact=top.length===1&&stockAt>=0&&newsAt===stockAt+1&&(careerAt<0||careerAt===newsAt+1)
+  const exact=top.length===1&&hseqAt>=0&&newsAt===hseqAt+1
     &&top[0].children?.length===desiredMenu.length
     &&desiredMenu.every((item,index)=>top[0].children?.[index]?.label===item.title
       &&String(top[0].children?.[index]?.href||'').replace(/^\/+|\/+$/g,'')===item.url.replace(/^\/+|\/+$/g,''));
@@ -262,11 +266,11 @@ async function ensureMenu(n){
   }
 
   const topItems=items.filter(x=>Number(x.parent||0)===0).sort((a,b)=>Number(a.menu_order||0)-Number(b.menu_order||0)||Number(a.id)-Number(b.id));
-  const stock=topItems.find(x=>titleOf(x)==='Cổ đông');
+  const hseq=topItems.find(x=>titleOf(x)==='HSEQ');
   const news=topItems.find(x=>Number(x.id)===Number(parentId));
-  assert(stock&&news,'Cannot position Tin tức after Cổ đông');
+  assert(hseq&&news,'Cannot position Tin tức after HSEQ');
   const ordered=topItems.filter(x=>Number(x.id)!==Number(parentId));
-  ordered.splice(ordered.findIndex(x=>Number(x.id)===Number(stock.id))+1,0,news);
+  ordered.splice(ordered.findIndex(x=>Number(x.id)===Number(hseq.id))+1,0,news);
   for(const [index,item] of ordered.entries()){
     const menuOrder=(index+1)*10;
     if(Number(item.menu_order||0)===menuOrder)continue;
@@ -297,8 +301,8 @@ async function ensureMenu(n){
     const current=menuItems.find(x=>String(x.label||'')==='Tin tức');
     const children=current?.children||[];
     const currentLabels=menuItems.map(x=>String(x.label||''));
-    const a=currentLabels.indexOf('Cổ đông'),b=currentLabels.indexOf('Tin tức'),c=currentLabels.indexOf('Tuyển dụng');
-    if(a>=0&&b===a+1&&(c<0||c===b+1)&&children.length===desiredMenu.length&&desiredMenu.every((item,index)=>children[index]?.label===item.title&&String(children[index]?.href||'').replace(/^\/+|\/+$/g,'')===item.url.replace(/^\/+|\/+$/g,''))){
+    const a=currentLabels.indexOf('HSEQ'),b=currentLabels.indexOf('Tin tức');
+    if(a>=0&&b===a+1&&children.length===desiredMenu.length&&desiredMenu.every((item,index)=>children[index]?.label===item.title&&String(children[index]?.href||'').replace(/^\/+|\/+$/g,'')===item.url.replace(/^\/+|\/+$/g,''))){
       log('MENU',{status:'PASS',topLevel:currentLabels,children:desiredMenu.map(x=>x.title)});return;
     }
   }
