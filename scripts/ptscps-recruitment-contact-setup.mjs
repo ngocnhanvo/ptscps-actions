@@ -459,7 +459,7 @@ async function ensureMenu(n){
     const current=await lookup();const list=current.items||[];
     const a=list.findIndex(x=>x.label==='Tin tức');
     if(a>=0&&list[a+1]?.label==='Tuyển dụng'&&list[a+2]?.label==='Liên hệ'
-      &&['/tuyen-dung','/lien-he'].every((url,i)=>String(list[a+i+1].href||'').replace(/\/$/,'')===url)){
+      &&['/tuyen-dung','/lien-he'].every((url,i)=>String(list[a+i+1].href||'').replace(/^\/+|\/+$/g,'')===url.replace(/^\/+|\/+$/g,''))){
       log('MENU',{state:'PASS',top:list.map(x=>x.label)});return;
     }
   }
