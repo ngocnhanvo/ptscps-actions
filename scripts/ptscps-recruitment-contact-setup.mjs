@@ -608,6 +608,16 @@ async function QA(){
       assert(r?.status()===200,`QA_FAILED recruitment HTTP ${r?.status()}`);
       assert(await p.locator('h1').first().innerText()==='Thông tin tuyển dụng','QA_FAILED recruitment H1');
       assert(await p.locator('[data-recruitment-listing] article').count()>0,'QA_FAILED empty recruitment list after source migration');
+      const recruitCards=await p.locator('[data-recruitment-listing] article').evaluateAll(els=>els.slice(0,4).map(el=>{
+        const box=el.getBoundingClientRect();
+        return {left:box.left,right:box.right,top:box.top,bottom:box.bottom};
+      }));
+      for(let i=1;i<recruitCards.length;i++){
+        const previous=recruitCards[i-1];const current=recruitCards[i];
+        assert(Math.abs(current.left-previous.left)<=2 && current.top>=previous.bottom+8,
+          `QA_FAILED recruitment must show one post per row at ${width}px: index=${i} previous=${JSON.stringify(previous)} current=${JSON.stringify(current)}`);
+      }
+      log('RECRUITMENT_ROW_QA',{width,checked:recruitCards.length,onePostPerRow:true});
       r=await p.goto(`${front}/lien-he?_qa=${Date.now()}`,{waitUntil:'domcontentloaded',timeout:45000});
       assert(r?.status()===200,`QA_FAILED Contact HTTP ${r?.status()}`);
       assert(await p.locator('[data-contact-info] h1').count()===1,'QA_FAILED Contact heading');
