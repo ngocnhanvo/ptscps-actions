@@ -1028,6 +1028,24 @@ async function postBySlug(n,slug){
   assert(response.ok(),`Target post lookup failed ${slug}`);assert((body||[]).length<=1,`Duplicate target post ${slug}`);return body?.[0]||null;
 }
 
+async function postByIdentity(n,post){
+  const title=clean(post.title);if(!title)return null;
+  const query=title.slice(0,120);
+  const {response,body}=await api('GET',`/wp-json/wp/v2/posts?context=edit&status=any&search=${encodeURIComponent(query)}&per_page=100&_fields=id,slug,status,title,content,excerpt,date,date_gmt,featured_media,categories,acf`,n);
+  assert(response.ok(),`Target post identity lookup failed source=${post.id}`);
+  const matches=(body||[]).filter(row=>clean(decodeEntities(row.title?.raw??row.title?.rendered))===title
+    &&String(row.date_gmt||'').slice(0,19)===String(post.dateGmt||'').slice(0,19));
+  assert(matches.length<=1,`Ambiguous target post identity source=${post.id} matches=${matches.length}`);
+  const match=matches[0]||null;
+  if(match&&String(match.slug||'')!==String(post.slug||''))log('POST_IDENTITY_REUSE',{sourceId:post.id,sourceSlug:post.slug,targetId:Number(match.id),targetSlug:String(match.slug||'')});
+  return match;
+}
+
+async function postById(n,id){
+  const {response,body}=await api('GET',`/wp-json/wp/v2/posts/${Number(id)}?context=edit&_fields=id,slug,status,title,content,excerpt,date,date_gmt,featured_media,categories,acf`,n);
+  assert(response.ok(),`Target post readback failed id=${id}`);return body||null;
+}
+
 async function migratePosts(source,n,featuredMap){
   let index=0;
   for(const post of source.posts){
@@ -1049,7 +1067,8 @@ async function migratePosts(source,n,featuredMap){
       title:post.title,slug:post.slug,status:'publish',content,excerpt,
       date:post.date,date_gmt:post.dateGmt,categories:targetCategories,featured_media:featured,
     };
-    let target=await postBySlug(n,post.slug);let state='UPDATED';
+    let target=await postBySlug(n,post.slug);
+    if(!target)target=await postByIdentity(n,post);let state='UPDATED';
     if(!target){
       const createdResponse=await api('POST','/wp-json/wp/v2/posts',n,payload,90000);
       assert(createdResponse.response.ok()&&createdResponse.body?.id,`Post create failed source=${post.id} HTTP ${createdResponse.response.status()}`);
@@ -1070,7 +1089,8 @@ async function migratePosts(source,n,featuredMap){
       updated.posts.push(Number(target.id));writes++;
     }
     await setAcf(n,'posts',Number(target.id),{product_lang:productLang});
-    const readback=await postBySlug(n,post.slug);assert(readback?.status==='publish',`Post readback missing ${post.slug}`);
+    const readback=await postById(n,target.id);assert(readback?.status==='publish',`Post readback missing ${post.slug}`);
+    if(String(readback.slug||'')!==String(post.slug||''))log('POST_SLUG_ADJUSTED',{sourceId:post.id,sourceSlug:post.slug,targetId:Number(readback.id),targetSlug:String(readback.slug||'')});
     assert(String(readback.acf?.product_lang?.value??readback.acf?.product_lang??'')===productLang,`Post language mismatch ${post.slug}`);
     const rbCats=(readback.categories||[]).map(Number).sort((a,b)=>a-b);
     assert(JSON.stringify(rbCats)===JSON.stringify([...targetCategories].sort((a,b)=>a-b)),`Post category mismatch ${post.slug}`);
@@ -1131,7 +1151,14 @@ async function verify(source,n){
   }
   assert(allTarget.size===source.posts.length,`Final unique Post count mismatch target=${allTarget.size} source=${source.posts.length}`);
   for(const post of source.posts){
-    const row=allTarget.get(post.slug);assert(row,`Final target Post missing ${post.slug}`);
+    let row=allTarget.get(post.slug);
+    if(!row){
+      const matches=[...allTarget.values()].filter(candidate=>clean(decodeEntities(candidate.title?.raw??candidate.title?.rendered))===clean(post.title)
+        &&String(candidate.date_gmt||'').slice(0,19)===String(post.dateGmt||'').slice(0,19));
+      assert(matches.length===1,`Final target Post identity mismatch ${post.slug}: matches=${matches.length}`);
+      row=matches[0];
+      log('POST_FINAL_IDENTITY_FALLBACK',{sourceId:post.id,sourceSlug:post.slug,targetId:Number(row.id),targetSlug:String(row.slug||'')});
+    }
     assert(clean(decodeEntities(row.title?.raw??row.title?.rendered))===clean(post.title),`Final title mismatch ${post.slug}`);
     assert(String(row.acf?.product_lang?.value??row.acf?.product_lang??'')===productLang,`Final language mismatch ${post.slug}`);
     const expectedCats=post.categories.map(id=>targetCategoryBySourceId.get(id)).filter(Boolean).map(Number).sort((a,b)=>a-b);
