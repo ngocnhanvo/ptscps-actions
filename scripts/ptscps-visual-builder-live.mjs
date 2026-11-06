@@ -51,6 +51,7 @@ async function openBuilder(mode = 'desktop') {
   assert(pageId > 0);
   if (stage === 'preflight') return null;
   const frame = await iframe.elementHandle().then(handle => handle.contentFrame());
+  if (stage === 'diagnose') return frame;
   await frame.locator('html.esc-builder-preview').waitFor({ state: 'attached', timeout: 60000 });
   await frame.locator('[data-tablepress-preview]').first().waitFor({ state: 'attached', timeout: 60000 });
   await page.waitForFunction(() => typeof window.escVBGetTicket === 'function');
@@ -161,6 +162,19 @@ try {
   if (stage === 'preflight') {
     await openBuilder();
     log('PTSCPS_BUILDER_PREFLIGHT', { authenticated: true, native_builder: true, origin_verified: true, pageId });
+  } else if (stage === 'diagnose') {
+    const frame = await openBuilder();
+    const verification = await api('verify', { bootstrap: true });
+    log('PTSCPS_BUILDER_WP_DIAGNOSTIC', { status: verification.status,
+      pageId: verification.body?.page_id, shared: Object.keys(verification.body?.shared_regions || {}),
+      snapshot: Object.keys(verification.body?.shared_regions?.snapshot || {}),
+      lang: verification.body?.shared_regions?.snapshot?.lang,
+      bootstrap: Object.keys(verification.body?.bootstrap || {}) });
+    const previewUrl = await page.locator('#esc-vb-frame').getAttribute('src');
+    const response = await context.request.get(previewUrl, { timeout: 45000 });
+    log('PTSCPS_BUILDER_SSR_DIAGNOSTIC', { status: response.status(),
+      contentType: response.headers()['content-type'], timing: response.headers()['server-timing'],
+      plainError: (await response.text()).trim() === 'Internal server error' ? 'Internal server error' : 'REDACTED' });
   } else if (stage === 'build') {
     await nativeBuild();
   } else {
