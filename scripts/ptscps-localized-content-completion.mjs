@@ -56,12 +56,23 @@ async function nonce() {
   if (menus?.ok()) menuId = Number((await menus.json())?.menus?.Header?.vi?.id || 0);
   const paths = [
     ...(menuId ? [`/wp-admin/nav-menus.php?action=edit&menu=${menuId}&esc_full_admin=1`] : []),
-    '/wp-admin/edit.php?post_type=page&esc_full_admin=1',
+    '/wp-admin/edit-tags.php?taxonomy=product_cat&post_type=product&esc_full_admin=1',
   ];
   for (const path of paths) {
     await page.goto(uri(path), { waitUntil: 'domcontentloaded', timeout: 50000 });
     const value = await page.evaluate(() => String(globalThis.wpApiSettings?.nonce || '').trim());
-    if (/^[A-Za-z0-9_-]{8,32}$/.test(value)) return value;
+    if (/^[A-Za-z0-9_-]{8,32}$/.test(value)) {
+      log('NONCE_SOURCE', path.split('?')[0]);
+      return value;
+    }
+  }
+  const fallback = await page.request.post(uri('/wp-admin/admin-ajax.php'), {
+    form: { action: 'rest-nonce' }, timeout: 30000,
+  }).catch(() => null);
+  const value = fallback?.ok() ? (await fallback.text()).trim() : '';
+  if (/^[A-Za-z0-9_-]{8,32}$/.test(value)) {
+    log('NONCE_SOURCE', 'admin-ajax');
+    return value;
   }
   throw Error('Authenticated REST nonce unavailable');
 }
