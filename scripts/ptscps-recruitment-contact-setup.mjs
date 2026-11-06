@@ -379,7 +379,36 @@ async function ensureContactMapEditorFields(){
   }
   assert(['map_embed','map_link'].every(type=>current.items.some(row=>String(row.type||'').toLowerCase()===type)),
     'Contact map URL fields absent after editor save');
-  // Never fill an iframe cell with a standard maps/search link: Google blocks it.
+  // Provide a visible map immediately; keep its URL as an editable ESC Table value.
+  // Never overwrite a custom URL (including a valid iframe pasted by an editor).
+  const embedRow=current.items.find(row=>String(row.type||'').toLowerCase()==='map_embed');
+  if(embedRow && !String(embedRow.content||'').trim()){
+    const initialEmbed=`https://maps.google.com/maps?q=${encodeURIComponent(address)}&output=embed`;
+    const previous=JSON.stringify(current.items.filter(row=>String(row.type||'').toLowerCase()!=='map_embed'));
+    await page.goto(uri(`/wp-admin/admin.php?page=tablepress&action=edit&table_id=${id}`),{waitUntil:'domcontentloaded',timeout:45000});
+    await page.waitForFunction(()=>Boolean(window.tp?.editor?.options?.data),null,{timeout:30000});
+    await page.evaluate(({initialEmbed})=>{
+      const editor=window.tp.editor;
+      const index=editor.options.data.findIndex((row,i)=>i>=2 && String(row?.[0]||'').trim().toLowerCase()==='map_embed');
+      if(index<0)throw Error('Cannot locate editable map_embed row');
+      if(String(editor.options.data[index]?.[2]||'').trim())throw Error('map_embed changed since initial read; preserve editor value');
+      editor.setValueFromCoords(2,index,initialEmbed);
+      window.tp.helpers.unsaved_changes.set();
+    },{initialEmbed});
+    await page.getByRole('button',{name:/^(Save Changes|Lưu thay đổi)$/i}).last().click();
+    for(let attempt=0;attempt<12;attempt++){
+      await sleep(700);current=await readTable(id);
+      if(current?.items?.find(row=>String(row.type||'').toLowerCase()==='map_embed')?.content===initialEmbed)break;
+    }
+    assert(current?.items?.find(row=>String(row.type||'').toLowerCase()==='map_embed')?.content===initialEmbed,
+      'Contact Google Maps embed URL was not saved');
+    assert(JSON.stringify(current.items.filter(row=>String(row.type||'').toLowerCase()!=='map_embed'))===previous,
+      'Unrelated Contact ESC Table fields were changed');
+    writes++;
+    log('MAP_EMBED',{state:'INITIALIZED_IN_EDITOR',type:'map_embed',urlHost:'maps.google.com'});
+  }else{
+    log('MAP_EMBED',{state:'PRESERVE_EXISTING',type:'map_embed'});
+  }
 }
 
 async function ensureContactPage(n){
@@ -586,8 +615,12 @@ async function QA(){
       assert(await p.locator('#contact-form [name="email"]').count()===1,'QA_FAILED Contact email field');
       assert(await p.locator('[data-contact-map]').count()===1,'QA_FAILED Contact map card missing');
       const iframeSrc=await p.locator('[data-contact-map] iframe').getAttribute('src').catch(()=>null);
-      assert(!iframeSrc || /^https:\/\/(?:www\.)?google\.com\/maps\/embed(?:\/|\?)/.test(iframeSrc),
-        `QA_FAILED Contact map iframe source is not an official Google Maps embed URL: ${iframeSrc}`);
+      assert(iframeSrc && /^https:\/\/(?:www\.)?google\.com\/maps\/embed(?:\/|\?)|^https:\/\/maps\.google\.com\/maps\?/.test(iframeSrc),
+        `QA_FAILED Contact map iframe is not rendered automatically: ${iframeSrc}`);
+      assert(await p.locator('[data-contact-map] iframe[credentialless]').count()===1,
+        'QA_FAILED Contact iframe missing credentialless');
+      assert(await p.locator('[data-contact-map] iframe').getAttribute('loading')==='eager',
+        'QA_FAILED Contact iframe should load on entry without click');
       assert(await p.locator('[data-contact-map] a[href^="https://"]').count()===1,
         'QA_FAILED Contact map link missing');
       const allLinks=await p.locator('header a').evaluateAll(els=>els.map(x=>({text:x.textContent?.trim(),href:x.getAttribute('href'),target:x.getAttribute('target')})));
