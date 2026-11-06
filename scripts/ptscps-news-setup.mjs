@@ -310,7 +310,7 @@ async function ensureMenu(n){
 }
 
 // One shared SSR fallback handles every single-level WordPress Post; never seed per Post.
-async function ensurePostDetailRoute(){
+async function ensurePostDetailRoute(n){
   const from='^/([^/.]+)$', to='/ssr/posts/$1/detail';
   const title='[Hệ thống] Chi tiết bài viết - URL một cấp không phải Page/file';
   const matches=[];
@@ -334,7 +334,18 @@ async function ensurePostDetailRoute(){
   }
   assert(matches.length<=1,`Duplicate/conflicting post fallback rules: ${JSON.stringify(matches)}`);
   const existing=matches[0];
-  const editor=existing?`/wp-admin/post.php?post=${existing.id}&action=edit`:'/wp-admin/post-new.php?post_type=chuyen-huong-link';
+  let routeId=existing?.id;
+  if(!routeId){
+    const type=await api('GET','/wp-json/wp/v2/types/chuyen-huong-link',n);
+    assert(type.response.ok(),`Routing CPT REST API unavailable HTTP ${type.response.status()}`);
+    const base=String(type.body?.rest_base||'').trim();
+    assert(/^[a-z0-9-]+$/.test(base),`Invalid WordPress routing REST base: ${base}`);
+    const created=await api('POST',`/wp-json/wp/v2/${base}`,n,{title,status:'draft'});
+    assert(created.response.ok()&&Number(created.body?.id)>0,`Cannot create routing CPT draft via authenticated REST: HTTP ${created.response.status()} ${String(created.body?.code||'')}`);
+    routeId=Number(created.body.id);
+    log('POST_ROUTE_DRAFT',{status:'CREATED',id:routeId});
+  }
+  const editor=`/wp-admin/post.php?post=${routeId}&action=edit`;
   const res=await page.goto(uri(editor),{waitUntil:'domcontentloaded',timeout:45000});
   assert(res?.status()===200,'Cannot open WordPress routing CPT editor');
   const titleInput=page.locator('#title').first();
@@ -559,7 +570,7 @@ try{
     await inventoryTargetData();
     const n=await nonce();
     await ensureMenu(n);
-    await ensurePostDetailRoute();
+    await ensurePostDetailRoute(n);
     log('CMS',{status:'PASS',writes:cmsWrites});
     await buildThroughWordPress();
     await qa();
