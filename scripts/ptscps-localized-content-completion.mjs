@@ -488,7 +488,7 @@ async function sourceFeaturedUrl(id) {
   return String(body?.source_url || '');
 }
 
-async function ensureEnglishPosts(n, sourcePosts, targetPosts) {
+async function ensureEnglishPosts(n, sourcePosts, targetPosts, targetPages) {
   const sourceMap = new Map(sourcePosts.map(item => [Number(item.id), item]));
   const english = sourcePosts.filter(item => langOf(item) === 'en');
   let createdCount = 0;
@@ -502,6 +502,39 @@ async function ensureEnglishPosts(n, sourcePosts, targetPosts) {
     }
     const targetViCandidates = targetPosts.filter(item => item.slug === sourceVi.slug && acfValue(item.acf?.product_lang) !== 'en');
     if (targetViCandidates.length !== 1) {
+      const targetViPages = targetPages.filter(item => item.slug === sourceVi.slug && acfValue(item.acf?.product_lang) !== 'en');
+      if (targetViCandidates.length === 0 && targetViPages.length === 1) {
+        const targetViPage = targetViPages[0];
+        const existingPage = targetPages.find(item => acfValue(item.acf?.product_lang) === 'en' &&
+          (Number(acfValue(item.acf?.origin_page_id) || 0) === Number(targetViPage.id) || item.slug === sourceEn.slug));
+        if (existingPage) {
+          results.push({ slug: sourceEn.slug, id: Number(existingPage.id), state: 'REPRESENTED_BY_PAGE' });
+          continue;
+        }
+        const action = acfValue(targetViPage.acf?.action);
+        const key = acfValue(targetViPage.acf?.key);
+        if (action && key) {
+          const resolved = await contentForEnglishPage(targetViPage, sourceEn, n);
+          if (resolved.mode !== 'defer-table') {
+            const createdPage = await api('POST', '/wp-json/wp/v2/pages', n, {
+              title: plain(sourceEn.title?.rendered), slug: sourceEn.slug, status: 'publish', content: resolved.content,
+            }, 90000);
+            assert(createdPage.response.ok() && createdPage.body?.id, `Cannot create EN Page from legacy Post ${sourceEn.slug}`);
+            const id = Number(createdPage.body.id); writes++;
+            await setAcf(n, 'pages', id, { product_lang: 'en', action, key, origin_page_id: String(targetViPage.id) });
+            const verifyPage = await api('GET', `/wp-json/wp/v2/pages/${id}?context=edit&_fields=id,slug,status,title,content,acf`, n);
+            assert(verifyPage.response.ok() && verifyPage.body.status === 'publish' && acfValue(verifyPage.body.acf?.product_lang) === 'en',
+              `EN Page from legacy Post readback failed ${sourceEn.slug}`);
+            targetPages.push(verifyPage.body);
+            results.push({ slug: sourceEn.slug, id, state: 'CREATED_AS_PAGE', sourceViSlug: sourceVi.slug });
+            log('EN_PAGE_FROM_LEGACY_POST', results.at(-1));
+            continue;
+          }
+          deferred.push({ type: 'post', slug: sourceEn.slug, sourceViSlug: sourceVi.slug,
+            reason: `matching VI Page requires missing English ESC Table ${resolved.missingTable}`, sourceTable: resolved.sourceTable });
+          continue;
+        }
+      }
       deferred.push({ type: 'post', slug: sourceEn.slug, sourceViSlug: sourceVi.slug, reason: `target vi post candidates=${targetViCandidates.length}` });
       continue;
     }
@@ -725,7 +758,7 @@ try {
   targetPages = await collectTarget('pages', n, 'id,slug,status,title,content,acf,parent,date,date_gmt');
   const enPages = await ensureEnglishPages(n, sourcePages, targetPages);
   targetPages = await collectTarget('pages', n, 'id,slug,status,title,content,acf,parent,date,date_gmt');
-  const enPosts = await ensureEnglishPosts(n, sourcePosts, targetPosts);
+  const enPosts = await ensureEnglishPosts(n, sourcePosts, targetPosts, targetPages);
   await ensureEnglishHeader(n, targetPages);
 
   await writeFile(`${artifactDir}/deferred.json`, JSON.stringify(deferred, null, 2));
