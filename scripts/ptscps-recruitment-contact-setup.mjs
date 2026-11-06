@@ -195,14 +195,50 @@ async function setAcf(n,kind,id,values){
   assert(verify.r.ok()&&Object.entries(values).every(([k,v])=>val(verify.body?.acf?.[k])===v),`ACF readback failed ${kind} ${id}`);
   writes++;
 }
+const draftedDuplicates=[];
+const recruitmentIdentity=row=>{
+  const title=plain(row.title?.raw??row.title?.rendered??row.title);
+  const when=String(row.date||row.date_gmt||'').slice(0,19);
+  return `${title}\u0001${when}`;
+};
 async function migrateRecruitment(n,posts,categoryId){
+  const sourceIdentitySet=new Set(posts.map(recruitmentIdentity));
+  assert(sourceIdentitySet.size===posts.length,'Source recruitment has identical title and publish timestamp; inspect before deduplication');
   let created=0,existing=0;
   for(const row of posts){
     const slug=String(row.slug||'').trim();
     assert(slug,'Legacy recruitment Post without slug');
-    const find=await api('GET',`/wp-json/wp/v2/posts?context=edit&status=any&slug=${encodeURIComponent(slug)}&per_page=20&_fields=id,slug,status,title,content,categories,acf,date_gmt`,n);
-    assert(find.r.ok()&&find.body.length<=1,`Target Post lookup ambiguous ${slug}`);
-    let target=find.body[0];
+    // WordPress may reserve a slug or append -2/-3. Query the new recruitment
+    // category and match the original publish identity; NEVER create by slug alone.
+    const candidates=await api('GET',
+      `/wp-json/wp/v2/posts?context=edit&status=any&categories=${categoryId}&per_page=100&_fields=id,slug,status,title,content,categories,acf,date,date_gmt`,n);
+    assert(candidates.r.ok()&&Array.isArray(candidates.body),`Cannot identify target recruitment Posts ${slug}`);
+    const identity=recruitmentIdentity(row);
+    const matches=candidates.body.filter(candidate=>recruitmentIdentity(candidate)===identity)
+      .sort((a,b)=>Number(a.id)-Number(b.id));
+    let target=matches[0];
+    if(matches.length>1){
+      const snapshot=matches.map(x=>({id:Number(x.id),slug:String(x.slug),status:x.status,
+        title:plain(x.title?.raw??x.title?.rendered),date_gmt:x.date_gmt,
+        categories:(x.categories||[]).map(Number),acf:{action:val(x.acf?.action),key:val(x.acf?.key)}}));
+      await writeFile(`${artifact}/duplicates-${slug}.json`,JSON.stringify({sourceSlug:slug,identity,snapshot},null,2));
+      // These records are from this task's newly created category, with the
+      // same title and timestamp. Draft duplicates reversibly, never delete.
+      const canonicalText=plain(target.content?.raw??target.content?.rendered);
+      for(const duplicate of matches.slice(1)){
+        assert(plain(duplicate.content?.raw??duplicate.content?.rendered)===canonicalText,
+          `Duplicate body differs from canonical Post ${target.id}: ${duplicate.id}; review manually`);
+        assert(Array.isArray(duplicate.categories)&&duplicate.categories.map(Number).includes(Number(categoryId)),
+          `Duplicate Post is outside the task category: ${duplicate.id}`);
+        if(duplicate.status==='draft')continue;
+        assert(duplicate.status==='publish',`Refuse to alter unexpected duplicate status ${duplicate.id}: ${duplicate.status}`);
+        const changed=await api('POST',`/wp-json/wp/v2/posts/${duplicate.id}`,n,{status:'draft'});
+        assert(changed.r.ok()&&changed.body?.status==='draft',`Cannot safely draft duplicate ${duplicate.id}`);
+        const audit={sourceSlug:slug,canonicalId:Number(target.id),draftedId:Number(duplicate.id)};
+        draftedDuplicates.push(audit);writes++;
+        log('DUPLICATE_DRAFTED',audit);
+      }
+    }
     if(!target){
       const html=await localizeHtml(row.content?.rendered,n,slug);
       const excerpt=await localizeHtml(row.excerpt?.rendered,n,slug);
@@ -220,8 +256,8 @@ async function migrateRecruitment(n,posts,categoryId){
       assert(createdPost.r.ok()&&createdPost.body?.id,`Could not create recruitment Post ${slug}: HTTP ${createdPost.r.status()}`);
       target=createdPost.body;created++;writes++;
     }else{
-      // Preserve pre-existing editorial content; only repair required classification/ACF.
-      if(!Array.isArray(target.categories)||!target.categories.includes(categoryId)){
+      // Existing editorial content is preserved; only required ACF/classification may change.
+      if(!Array.isArray(target.categories)||!target.categories.map(Number).includes(Number(categoryId))){
         const fixed=await api('POST',`/wp-json/wp/v2/posts/${target.id}`,n,{categories:[...new Set([...(target.categories||[]),categoryId])]},60000);
         assert(fixed.r.ok(),`Cannot classify existing recruitment Post ${slug}`);writes++;
       }
@@ -233,7 +269,8 @@ async function migrateRecruitment(n,posts,categoryId){
     assert(check.r.ok()&&check.body.status==='publish'&&check.body.categories.includes(categoryId),`Recruitment post publish/category mismatch ${slug}`);
     assert(Object.entries(expected).every(([key,value])=>val(check.body.acf?.[key])===value),`Recruitment ACF mismatch ${slug}`);
   }
-  log('POSTS',{created,existing,source:posts.length});
+  await writeFile(`${artifact}/duplicates-drafted.json`,JSON.stringify(draftedDuplicates,null,2));
+  log('POSTS',{created,existing,source:posts.length,duplicatesDrafted:draftedDuplicates.length});
 }
 
 const tables=[
@@ -426,6 +463,10 @@ async function ensureMenu(n){
       log('MENU',{state:'PASS',top:list.map(x=>x.label)});return;
     }
   }
+  const diagnostic=await lookup();
+  log('MENU_READBACK_FAILED',{menuId:diagnostic.id,
+    items:(diagnostic.items||[]).map(x=>({label:x.label,href:x.href,slug:x.slug,
+      childrenCount:Array.isArray(x.children)?x.children.length:0}))});
   throw Error('Header native menu readback order or links mismatch');
 }
 async function readiness(){
