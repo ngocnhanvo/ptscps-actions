@@ -35,6 +35,7 @@ const maxAssetBytes=256*1024*1024;
 const targetCategoryBySourceId=new Map();
 const assetCache=new Map();
 const sourceAssetFallbacks=new Map();
+const sourceAssetContexts=new Map();
 const targetMediaLookupCache=new Map();
 const legacyMediaAliasOrigin='https://www.ptsc.com.vn';
 const mediaLookupConcurrency=6;
@@ -233,18 +234,33 @@ function inlineImageAttachmentRefs(html){
     const dataId=tag.match(/\bdata-attachment-id=["'](\d+)["']/i)?.[1]||'';
     const id=Number(dataId||classId||0);
     const urls=[...new Set((tag.match(sourceAssetRe)||[]).map(normalizeSourceAsset).filter(Boolean))];
-    if(!id||!urls.length)continue;
+    if(!urls.length)continue;
     refs.push({id,urls});
-    for(const original of urls)addSourceFallbacks(original,urls.filter(value=>value!==original));
+    if(id)for(const original of urls)addSourceFallbacks(original,urls.filter(value=>value!==original));
   }
   return refs;
 }
 
+function addSourceAssetContext(url,contextValue){
+  const normalized=normalizeSourceAsset(url);if(!normalized)return;
+  const existing=sourceAssetContexts.get(normalized)||[];
+  const key=JSON.stringify(contextValue);
+  if(!existing.some(value=>JSON.stringify(value)===key))sourceAssetContexts.set(normalized,[...existing,contextValue]);
+}
+
 async function registerInlineAttachmentFallbacks(source){
   const byId=new Map();
-  const htmlBlocks=[...source.posts.flatMap(post=>[post.content,post.excerpt]),source.gallery.content];
-  for(const html of htmlBlocks){
-    for(const ref of inlineImageAttachmentRefs(html)){
+  const htmlBlocks=[
+    ...source.posts.flatMap(post=>[
+      {kind:'post-content',id:post.id,slug:post.slug,html:post.content},
+      {kind:'post-excerpt',id:post.id,slug:post.slug,html:post.excerpt},
+    ]),
+    {kind:'gallery',id:source.gallery.id,slug:source.gallery.slug,html:source.gallery.content},
+  ];
+  for(const block of htmlBlocks){
+    for(const ref of inlineImageAttachmentRefs(block.html)){
+      for(const url of ref.urls)addSourceAssetContext(url,{kind:block.kind,id:block.id,slug:block.slug,attachmentId:ref.id||0});
+      if(!ref.id)continue;
       if(!byId.has(ref.id))byId.set(ref.id,new Set());
       for(const url of ref.urls)byId.get(ref.id).add(url);
     }
@@ -360,10 +376,41 @@ async function lookupMedia(n,slug,{refresh=false}={}){
 
 async function preloadTargetMedia(n,urls){
   const slugs=[...new Set(urls.map(assetSlug))];
-  for(let i=0;i<slugs.length;i+=mediaLookupConcurrency){
-    await Promise.all(slugs.slice(i,i+mediaLookupConcurrency).map(slug=>lookupMedia(n,slug)));
-    const done=Math.min(i+mediaLookupConcurrency,slugs.length);
-    if(done%120===0||done===slugs.length)log('MEDIA_LOOKUP_PROGRESS',{done,total:slugs.length,existing:[...targetMediaLookupCache.values()].filter(Boolean).length});
+  let probeSlug='';
+  for(const slug of slugs.slice(0,20)){
+    if(await lookupMedia(n,slug)){probeSlug=slug;break;}
+  }
+  let batchSupported=false;
+  if(probeSlug){
+    const sample=[probeSlug,...slugs.filter(slug=>slug!==probeSlug).slice(0,9)];
+    const {response,body}=await api('GET',`/wp-json/wp/v2/media?context=edit&slug=${sample.map(encodeURIComponent).join(',')}&per_page=${sample.length}&_fields=id,slug,source_url,alt_text,title,mime_type`,n);
+    batchSupported=response.ok()&&(body||[]).some(row=>String(row.slug||'')===probeSlug);
+  }
+  if(batchSupported){
+    const batchSize=50;
+    log('MEDIA_LOOKUP_MODE',{mode:'batch',batchSize});
+    for(let i=0;i<slugs.length;i+=batchSize){
+      const batch=slugs.slice(i,i+batchSize);
+      const {response,body}=await api('GET',`/wp-json/wp/v2/media?context=edit&slug=${batch.map(encodeURIComponent).join(',')}&per_page=${batch.length}&_fields=id,slug,source_url,alt_text,title,mime_type`,n);
+      assert(response.ok(),`Target media batch lookup failed at ${i}`);
+      const rows=new Map();
+      for(const row of body||[]){
+        const slug=String(row.slug||'');
+        assert(batch.includes(slug),`Unexpected target media slug ${slug}`);
+        assert(!rows.has(slug),`Duplicate target media ${slug}`);
+        rows.set(slug,row);
+      }
+      for(const slug of batch)targetMediaLookupCache.set(slug,rows.get(slug)||null);
+      const done=Math.min(i+batch.length,slugs.length);
+      if(done%200===0||done===slugs.length)log('MEDIA_LOOKUP_PROGRESS',{done,total:slugs.length,existing:[...targetMediaLookupCache.values()].filter(Boolean).length});
+    }
+  }else{
+    log('MEDIA_LOOKUP_MODE',{mode:'individual-fallback'});
+    for(let i=0;i<slugs.length;i+=mediaLookupConcurrency){
+      await Promise.all(slugs.slice(i,i+mediaLookupConcurrency).map(slug=>lookupMedia(n,slug)));
+      const done=Math.min(i+mediaLookupConcurrency,slugs.length);
+      if(done%120===0||done===slugs.length)log('MEDIA_LOOKUP_PROGRESS',{done,total:slugs.length,existing:[...targetMediaLookupCache.values()].filter(Boolean).length});
+    }
   }
   log('MEDIA_LOOKUP_PASS',{total:slugs.length,existing:[...targetMediaLookupCache.values()].filter(Boolean).length});
 }
@@ -386,15 +433,16 @@ async function ensureAsset(n,url,meta={}){
     }
     let source=await fetch(normalized,{headers:{'User-Agent':'PTSCPS News migration/1.0'},signal:AbortSignal.timeout(60000)});
     let resolvedSource=normalized;
+    let attemptedFallbacks=[];
     if(source.status===404){
       const responsiveFallbacks=sourceAssetFallbacks.get(normalized)||[];
-      const fallbacks=[
+      attemptedFallbacks=[...new Set([
         legacyMediaAlias(normalized),
         ...wordpressDerivativeFallbacks(normalized),
         ...responsiveFallbacks,
         ...responsiveFallbacks.flatMap(wordpressDerivativeFallbacks),
-      ].filter(Boolean);
-      for(const fallback of [...new Set(fallbacks)]){
+      ].filter(Boolean))];
+      for(const fallback of attemptedFallbacks){
         const candidate=await fetch(fallback,{headers:{'User-Agent':'PTSCPS News migration/1.0'},signal:AbortSignal.timeout(60000)}).catch(()=>null);
         if(candidate?.ok){
           source=candidate;
@@ -404,6 +452,7 @@ async function ensureAsset(n,url,meta={}){
         }
       }
     }
+    if(!source.ok)log('MEDIA_SOURCE_MISSING',{requested:normalized,http:source.status,references:sourceAssetContexts.get(normalized)||[],fallbacks:attemptedFallbacks.slice(0,40)});
     assert(source.ok,`Legacy asset HTTP ${source.status}: ${normalized}`);
     const bytes=Buffer.from(await source.arrayBuffer());
     assert(bytes.length>0,`Legacy asset empty: ${normalized}`);
