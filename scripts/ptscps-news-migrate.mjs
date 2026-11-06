@@ -39,6 +39,10 @@ const sourceAssetContexts=new Map();
 const targetMediaLookupCache=new Map();
 const currentPtscArticleCache=new Map();
 const waybackAssetCache=new Map();
+const currentPtscNewsAssetFolders=new Map([
+  ['doan-thanh-nien-cong-ty-pps-huong-ung-ngay-moi-truong-the-gioi',['/Data/Sites/1/News/1490/']],
+  ['hoi-thao-cong-ty-pps-nam-2019',['/Data/Sites/1/News/1084/']],
+]);
 const currentPtscArticlePathOverrides=new Map([
   ['cong-ty-pps-to-chuc-cac-hoat-dong-nhan-ngay-thuong-binh-liet-sy-27-7',[
     '/tin-tuc/tin-ptsc-1/doan-the-xa-hoi/cong-ty-pps-to-chuc-cac-hoat-dong-nhan-ngay-thuong-binh-liet-sy-277',
@@ -423,6 +427,30 @@ function wordpressDerivativeFallbacks(value){
   return [original,legacyMediaAlias(original)].filter(Boolean);
 }
 
+function currentPtscNewsAssetFallbacks(value,siblingValues=[]){
+  const normalized=normalizeSourceAsset(value);if(!normalized)return [];
+  const contexts=sourceAssetContexts.get(normalized)||[];
+  const slugs=[...new Set(contexts.map(item=>String(item?.slug||'').trim()).filter(Boolean))];
+  const sourceCandidates=[...new Set([
+    normalized,
+    ...wordpressDerivativeFallbacks(normalized),
+    ...siblingValues,
+    ...siblingValues.flatMap(wordpressDerivativeFallbacks),
+  ].map(normalizeSourceAsset).filter(Boolean))];
+  const filenames=[...new Set(sourceCandidates.map(candidate=>{
+    try{return decodeURIComponent(basename(new URL(candidate).pathname));}catch{return '';}
+  }).filter(Boolean))];
+  const fallbacks=[];
+  for(const slug of slugs){
+    for(const folder of currentPtscNewsAssetFolders.get(slug)||[]){
+      for(const filename of filenames){
+        fallbacks.push(new URL(`${folder}${encodeURIComponent(filename)}`,legacyMediaAliasOrigin).href);
+      }
+    }
+  }
+  return [...new Set(fallbacks)];
+}
+
 function assetStem(value){
   try{
     const u=new URL(value,legacyMediaAliasOrigin);
@@ -703,6 +731,18 @@ async function ensureAsset(n,url,meta={}){
         for(const fallback of currentPtscFallbacks){
           const candidate=await fetch(fallback,{headers:{'User-Agent':'PTSCPS News migration/1.0'},signal:AbortSignal.timeout(60000)}).catch(()=>null);
           if(candidate?.ok){source=candidate;resolvedSource=fallback;log('MEDIA_SOURCE_RECOVERED_CURRENT_PTSC',{requested:normalized,resolved:fallback});break;}
+        }
+      }
+      if(!source.ok){
+        const currentNewsAssetFallbacks=currentPtscNewsAssetFallbacks(normalized,responsiveFallbacks);
+        attemptedFallbacks=[...new Set([...attemptedFallbacks,...currentNewsAssetFallbacks])];
+        for(const fallback of currentNewsAssetFallbacks){
+          const candidate=await fetch(fallback,{headers:{'User-Agent':'PTSCPS News migration/1.0'},signal:AbortSignal.timeout(20000)}).catch(()=>null);
+          const contentType=String(candidate?.headers?.get('content-type')||'').toLowerCase();
+          if(!candidate?.ok||!contentType.startsWith('image/'))continue;
+          source=candidate;resolvedSource=fallback;
+          log('MEDIA_SOURCE_RECOVERED_CURRENT_NEWS_ASSET',{requested:normalized,resolved:fallback});
+          break;
         }
       }
       if(!source.ok){
