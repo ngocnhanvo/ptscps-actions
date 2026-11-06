@@ -377,10 +377,41 @@ async function contentForEnglishPage(targetVi, sourceEn, n) {
   return { content, mode: 'translated-table-reuse', tables: pairs };
 }
 
-function sourceViForEnglish(row, sourceMap) {
+const legacyViPathCache = new Map();
+const normalizeLegacyPath = value => {
+  try { return decodeURIComponent(new URL(String(value || ''), source).pathname).replace(/\/+$/, '') || '/'; }
+  catch { return ''; }
+};
+
+async function legacyVietnamesePath(row) {
+  const link = String(row?.link || '');
+  if (!link) return '';
+  if (legacyViPathCache.has(link)) return legacyViPathCache.get(link);
+  let result = '';
+  try {
+    const url = new URL(link, source);
+    const { body: html } = await sourceGet(`${url.pathname}${url.search}`, false);
+    const anchors = [...String(html || '').matchAll(/<a[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)];
+    for (const match of anchors) {
+      const text = plain(match[2] || '').trim();
+      if (!/^vi$/i.test(text)) continue;
+      const candidate = normalizeLegacyPath(match[1]);
+      if (candidate && !candidate.startsWith('/e/')) { result = candidate; break; }
+    }
+  } catch (error) {
+    log('LEGACY_LANG_SWITCH_WARNING', { slug: row?.slug, reason: String(error?.message || error) });
+  }
+  legacyViPathCache.set(link, result);
+  return result;
+}
+
+async function sourceViForEnglish(row, sourceMap, sourceRows) {
   const id = translationId(row, 'vi');
   if (id && sourceMap.has(id)) return sourceMap.get(id);
-  return null;
+  const viPath = await legacyVietnamesePath(row);
+  if (!viPath) return null;
+  const matches = sourceRows.filter(item => langOf(item) !== 'en' && normalizeLegacyPath(item.link) === viPath);
+  return matches.length === 1 ? matches[0] : null;
 }
 
 async function ensureEnglishPages(n, sourcePages, targetPages) {
@@ -388,9 +419,9 @@ async function ensureEnglishPages(n, sourcePages, targetPages) {
   const english = sourcePages.filter(item => langOf(item) === 'en');
   const results = [];
   for (const sourceEn of english) {
-    const sourceVi = sourceViForEnglish(sourceEn, sourceMap);
+    const sourceVi = await sourceViForEnglish(sourceEn, sourceMap, sourcePages);
     if (!sourceVi) {
-      deferred.push({ type: 'page', slug: sourceEn.slug, reason: 'legacy translation pairing missing vi id' });
+      deferred.push({ type: 'page', slug: sourceEn.slug, reason: 'legacy translation pairing unavailable' });
       continue;
     }
     const targetViCandidates = targetPages.filter(item => item.slug === sourceVi.slug && acfValue(item.acf?.product_lang) !== 'en');
@@ -452,9 +483,9 @@ async function ensureEnglishPosts(n, sourcePosts, targetPosts) {
   let existingCount = 0;
   const results = [];
   for (const sourceEn of english) {
-    const sourceVi = sourceViForEnglish(sourceEn, sourceMap);
+    const sourceVi = await sourceViForEnglish(sourceEn, sourceMap, sourcePosts);
     if (!sourceVi) {
-      deferred.push({ type: 'post', slug: sourceEn.slug, reason: 'legacy translation pairing missing vi id' });
+      deferred.push({ type: 'post', slug: sourceEn.slug, reason: 'legacy translation pairing unavailable' });
       continue;
     }
     const targetViCandidates = targetPosts.filter(item => item.slug === sourceVi.slug && acfValue(item.acf?.product_lang) !== 'en');
