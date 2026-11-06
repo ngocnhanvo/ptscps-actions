@@ -384,31 +384,34 @@ async function currentPtscArticleFallbacks(value){
   const slugs=[...new Set(contexts.map(item=>String(item?.slug||'').trim()).filter(Boolean))];
   const matches=[];
   for(const slug of slugs){
-    let html=currentPtscArticleCache.get(slug);
-    if(html===undefined){
-      const response=await fetch(`${legacyMediaAliasOrigin}/${slug}`,{headers:{'User-Agent':'PTSCPS News migration/1.0'},signal:AbortSignal.timeout(60000)}).catch(()=>null);
-      html=response?.ok?await response.text():'';
-      currentPtscArticleCache.set(slug,html);
-    }
-    if(!html)continue;
-    for(const tag of html.match(/<img\b[^>]*>/gi)||[]){
-      const candidates=new Set();
-      for(const match of tag.matchAll(/\b(?:src|data-src|data-original|data-lazy-src)=(["'])([^"']+)\1/gi)){
-        if(match[2])candidates.add(match[2]);
+    const articleSlugs=[...new Set([slug,slug.replace(/(\d{4})-(\d{4})(?=$|-)/g,'$1--$2')])];
+    for(const articleSlug of articleSlugs){
+      let html=currentPtscArticleCache.get(articleSlug);
+      if(html===undefined){
+        const response=await fetch(`${legacyMediaAliasOrigin}/${articleSlug}`,{headers:{'User-Agent':'PTSCPS News migration/1.0'},signal:AbortSignal.timeout(60000)}).catch(()=>null);
+        html=response?.ok?await response.text():'';
+        currentPtscArticleCache.set(articleSlug,html);
       }
-      for(const match of tag.matchAll(/\b(?:srcset|data-srcset)=(["'])([^"']+)\1/gi)){
-        for(const item of String(match[2]||'').split(',')){
-          const raw=item.trim().split(/\s+/)[0];
-          if(raw)candidates.add(raw);
+      if(!html)continue;
+      for(const tag of html.match(/<img\b[^>]*>/gi)||[]){
+        const candidates=new Set();
+        for(const match of tag.matchAll(/\b(?:src|data-src|data-original|data-lazy-src)=(["'])([^"']+)\1/gi)){
+          if(match[2])candidates.add(match[2]);
         }
-      }
-      for(const raw of candidates){
-        try{
-          const candidate=new URL(raw,legacyMediaAliasOrigin);
-          if(!/^https?:$/.test(candidate.protocol)||!/(^|\.)ptsc\.com\.vn$/i.test(candidate.hostname))continue;
-          if(assetStem(candidate.href)!==wantedStem)continue;
-          matches.push(candidate.href);
-        }catch{}
+        for(const match of tag.matchAll(/\b(?:srcset|data-srcset)=(["'])([^"']+)\1/gi)){
+          for(const item of String(match[2]||'').split(',')){
+            const raw=item.trim().split(/\s+/)[0];
+            if(raw)candidates.add(raw);
+          }
+        }
+        for(const raw of candidates){
+          try{
+            const candidate=new URL(raw,legacyMediaAliasOrigin);
+            if(!/^https?:$/.test(candidate.protocol)||!/(^|\.)ptsc\.com\.vn$/i.test(candidate.hostname))continue;
+            if(assetStem(candidate.href)!==wantedStem)continue;
+            matches.push(candidate.href);
+          }catch{}
+        }
       }
     }
   }
