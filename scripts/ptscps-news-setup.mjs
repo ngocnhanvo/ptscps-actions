@@ -234,38 +234,6 @@ async function inventoryTargetData(){
   return {categories,galleryPage:pages[0]};
 }
 
-async function ensureGalleryPageBuildLog(n){
-  const publicResponse=await page.request.get(front+'/thu-vien-pps?_news_gallery_cache='+Date.now(),{timeout:30000,headers:{'Cache-Control':'no-cache'}}).catch(()=>null);
-  if(publicResponse?.status()===200){log('GALLERY_CACHE','ALREADY_PUBLISHED');return;}
-  const current=await api('GET','/wp-json/wp/v2/pages?context=edit&slug=thu-vien-pps&status=publish&per_page=20&_fields=id,slug,status,menu_order,acf',n);
-  assert(current.response.ok(),'Cannot read gallery Page for build-log refresh');
-  const rows=Array.isArray(current.body)?current.body:[];
-  assert(rows.length===1,'Gallery Page missing or ambiguous for build-log refresh');
-  const row=rows[0];
-  assert(String(row.acf?.key||'')==='news-gallery'&&String(row.acf?.action||'')==='IntroPage','Gallery Page frontend metadata mismatch before build-log refresh');
-  const originalOrder=Number(row.menu_order||0);
-  const temporaryOrder=originalOrder===0?1:0;
-  const bump=await api('POST',`/wp-json/wp/v2/pages/${row.id}`,n,{menu_order:temporaryOrder});
-  assert(bump.response.ok(),'Gallery Page temporary menu_order update failed');
-  const restore=await api('POST',`/wp-json/wp/v2/pages/${row.id}`,n,{menu_order:originalOrder});
-  assert(restore.response.ok(),'Gallery Page menu_order restore failed');
-  cmsWrites+=2;
-  const readback=await api('GET',`/wp-json/wp/v2/pages/${row.id}?context=edit&_fields=id,slug,status,menu_order`,n);
-  assert(readback.response.ok(),'Cannot verify gallery Page after log refresh');
-  assert(Number(readback.body?.menu_order||0)===originalOrder,'Gallery Page menu_order was not restored');
-  const logResponse=await page.request.get(uri('/wp-json/astro/v1/get-page-logs?_news_gallery_log='+Date.now()),{timeout:30000,headers:{'Cache-Control':'no-cache'}});
-  assert(logResponse.ok(),'Cannot verify gallery Page build log');
-  const logs=await logResponse.json();
-  const entry=(Array.isArray(logs)?logs:[]).find(item=>Number(item?.id)===Number(row.id)&&item?.action==='modify'&&String(item?.page?.slug||'')==='thu-vien-pps');
-  assert(entry,'Gallery Page modify log not emitted');
-  log('GALLERY_CACHE',{
-    state:'PAGE_LOG_REFRESHED',
-    id:Number(row.id),
-    previousHttp:publicResponse?.status()??null,
-    menuOrderRestored:originalOrder,
-  });
-}
-
 async function ensureMenu(n){
   const response=await page.request.get(uri('/wp-json/esc-api/v1/menus?_news_menu='+Date.now()),{timeout:30000,headers:{'Cache-Control':'no-cache'}});
   assert(response.ok(),'ESC Header menu endpoint unavailable');
@@ -435,7 +403,6 @@ try{
     await inventoryTargetData();
     const n=await nonce();
     await ensureMenu(n);
-    await ensureGalleryPageBuildLog(n);
     log('CMS',{status:'PASS',writes:cmsWrites});
     await buildThroughWordPress();
     await qa();
