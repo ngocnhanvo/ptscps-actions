@@ -384,8 +384,28 @@ async function ensurePostDetailRoute(){
   const save=page.locator('#publish');
   assert(await save.count()===1,'Publish routing CPT button missing');
   await Promise.all([page.waitForNavigation({waitUntil:'domcontentloaded',timeout:50000}),save.click()]);
-  const savedId=Number(new URL(page.url()).searchParams.get('post'));
-  assert(savedId>0,'Routing CPT save did not return an edit ID');
+  const saveUrl=new URL(page.url());
+  let savedId=Number(saveUrl.searchParams.get('post')||0);
+  if(savedId<=0){
+    log('POST_ROUTE_SAVE_LOCATION',{path:saveUrl.pathname,queryKeys:[...saveUrl.searchParams.keys()]});
+    const list=await page.goto(uri('/wp-admin/edit.php?post_type=chuyen-huong-link'),{waitUntil:'domcontentloaded',timeout:45000});
+    assert(list?.status()===200,'Cannot read WordPress routing CPT after save');
+    const items=page.locator('tr[id^="post-"]');
+    const candidates=[];
+    for(let i=0;i<await items.count();i++){
+      const item=items.nth(i);
+      const source=clean(await item.locator('.column-esc_from_link code').textContent().catch(()=>''));
+      const label=clean(await item.locator('a.row-title').textContent().catch(()=>''));
+      if(source===from||label.includes('Chi tiết bài viết - URL một cấp')){
+        const id=Number((await item.getAttribute('id')||'').replace(/^post-/,''));
+        if(id>0)candidates.push(id);
+      }
+    }
+    assert(candidates.length===1,`Route save not verifiable in WordPress admin: ${JSON.stringify(candidates)}`);
+    savedId=candidates[0];
+  }
+  const edit=await page.goto(uri(`/wp-admin/post.php?post=${savedId}&action=edit`),{waitUntil:'domcontentloaded',timeout:45000});
+  assert(edit?.status()===200,'Cannot reopen saved WordPress route');
   for(const [name,want] of Object.entries(wanted))assert.equal(await value(name),want,`Routing field readback mismatch: ${name}`);
   assert.equal(await priority.inputValue(),'900','Routing priority readback mismatch');
   assert.equal(await row.locator('select[name="esc_route_condition_type[]"]').inputValue(),'page_not_exists','Routing condition readback mismatch');
