@@ -547,8 +547,10 @@ function normalizeArchivedAsset(value){
     const u=new URL(String(value||'').trim());
     if(!/^https?:$/.test(u.protocol))return null;
     const host=u.hostname.toLowerCase();
-    if(host!=='ptscps.com.vn'&&host!=='www.ptsc.com.vn')return null;
-    if(!u.pathname.startsWith('/wp-content/uploads/'))return null;
+    if(!['ptscps.com.vn','www.ptsc.com.vn','ptsc.com.vn'].includes(host))return null;
+    const legacyUpload=u.pathname.startsWith('/wp-content/uploads/');
+    const ptscNewsAsset=(host==='www.ptsc.com.vn'||host==='ptsc.com.vn')&&u.pathname.startsWith('/Data/Sites/1/News/');
+    if(!legacyUpload&&!ptscNewsAsset)return null;
     u.hash='';
     return u.href;
   }catch{return null;}
@@ -558,9 +560,14 @@ async function waybackSnapshots(value){
   const archived=normalizeArchivedAsset(value);if(!archived)return [];
   if(waybackAssetCache.has(archived))return waybackAssetCache.get(archived);
   const promise=(async()=>{
+    const archivedUrl=new URL(archived);
+    const hostVariants=(archivedUrl.hostname==='www.ptsc.com.vn'||archivedUrl.hostname==='ptsc.com.vn')
+      ?['www.ptsc.com.vn','ptsc.com.vn']:[archivedUrl.hostname];
     const queryUrls=[];
     for(const protocol of ['https:','http:']){
-      const candidate=new URL(archived);candidate.protocol=protocol;queryUrls.push(candidate.href);
+      for(const host of hostVariants){
+        const candidate=new URL(archived);candidate.protocol=protocol;candidate.hostname=host;queryUrls.push(candidate.href);
+      }
     }
     const snapshots=[];
     for(const queryUrl of [...new Set(queryUrls)]){
@@ -574,9 +581,42 @@ async function waybackSnapshots(value){
         const timestamp=String(row[0]||'').trim();
         const original=String(row[1]||'').trim();
         const mimetype=String(row[2]||'').trim();
-        if(!/^\d{14}$/.test(timestamp)||!/^https?:\/\//i.test(original)||!archivedMimeAccepted(queryUrl,mimetype))continue;
-        snapshots.push({timestamp,original,mimetype,url:`https://web.archive.org/web/${timestamp}id_/${original}`});
+        const normalizedOriginal=normalizeArchivedAsset(original);
+        if(!/^\d{14}$/.test(timestamp)||!normalizedOriginal||!archivedMimeAccepted(normalizedOriginal,mimetype))continue;
+        snapshots.push({timestamp,original:normalizedOriginal,mimetype,url:`https://web.archive.org/web/${timestamp}id_/${original}`});
       }
+    }
+    if(!snapshots.length){
+      const requested=new URL(archived);
+      const wantedStem=assetStem(archived);
+      const directory=requested.pathname.slice(0,requested.pathname.lastIndexOf('/')+1);
+      const filename=decodeURIComponent(basename(requested.pathname));
+      const extension=extname(filename);
+      const prefixName=basename(filename,extension).replace(/-\d+x\d+$/,'').replace(/-scaled$/,'');
+      const prefixQueries=[];
+      for(const queryUrl of [...new Set(queryUrls)]){
+        const candidate=new URL(queryUrl);candidate.pathname=directory+prefixName;prefixQueries.push(candidate.href);
+      }
+      for(const prefixQuery of [...new Set(prefixQueries)]){
+        const cdx=`https://web.archive.org/cdx/search/cdx?url=${encodeURIComponent(prefixQuery)}&matchType=prefix&output=json&filter=statuscode:200&fl=timestamp,original,mimetype,digest&collapse=digest&limit=100`;
+        const response=await fetch(cdx,{headers:{'User-Agent':'PTSCPS News migration/1.0'},signal:AbortSignal.timeout(15000)}).catch(()=>null);
+        if(!response?.ok)continue;
+        const rows=await response.json().catch(()=>null);
+        if(!Array.isArray(rows)||rows.length<2)continue;
+        for(const row of rows.slice(1).reverse()){
+          if(!Array.isArray(row)||row.length<3)continue;
+          const timestamp=String(row[0]||'').trim();
+          const original=String(row[1]||'').trim();
+          const mimetype=String(row[2]||'').trim();
+          const normalizedOriginal=normalizeArchivedAsset(original);
+          if(!/^\d{14}$/.test(timestamp)||!normalizedOriginal||assetStem(normalizedOriginal)!==wantedStem||!archivedMimeAccepted(normalizedOriginal,mimetype))continue;
+          const originalUrl=new URL(normalizedOriginal);
+          const originalDirectory=originalUrl.pathname.slice(0,originalUrl.pathname.lastIndexOf('/')+1);
+          if(originalDirectory!==directory)continue;
+          snapshots.push({timestamp,original:normalizedOriginal,mimetype,url:`https://web.archive.org/web/${timestamp}id_/${original}`});
+        }
+      }
+      if(snapshots.length)log('WAYBACK_PREFIX_MATCH',{requested:archived,count:snapshots.length,stem:wantedStem});
     }
     const unique=[...new Map(snapshots.map(item=>[item.url,item])).values()].slice(0,10);
     if(unique.length)log('WAYBACK_MATCH',{requested:archived,count:unique.length,first:{timestamp:unique[0].timestamp,original:unique[0].original,mimetype:unique[0].mimetype}});
@@ -786,15 +826,19 @@ async function ensureAsset(n,url,meta={}){
           ...responsiveFallbacks,
           ...responsiveFallbacks.flatMap(wordpressDerivativeFallbacks),
         ].map(normalizeSourceAsset).filter(Boolean))];
-        const archiveCandidates=[...new Set(archiveBaseCandidates.flatMap(candidate=>[
-          candidate,
-          legacyMediaAlias(candidate),
-        ]).filter(Boolean))];
+        const currentNewsArchiveCandidates=currentPtscNewsAssetFallbacks(normalized,responsiveFallbacks);
+        const archiveCandidates=[...new Set([
+          ...archiveBaseCandidates.flatMap(candidate=>[
+            candidate,
+            legacyMediaAlias(candidate),
+          ]),
+          ...currentNewsArchiveCandidates,
+        ].filter(Boolean))];
         for(const archiveCandidate of archiveCandidates){
           const snapshots=await waybackSnapshots(archiveCandidate);
           for(const snapshot of snapshots){
             const candidate=await fetch(snapshot.url,{headers:{'User-Agent':'PTSCPS News migration/1.0'},signal:AbortSignal.timeout(60000)}).catch(()=>null);
-            if(!candidate?.ok||!archivedMimeAccepted(archiveCandidate,candidate.headers.get('content-type')))continue;
+            if(!candidate?.ok||!archivedMimeAccepted(snapshot.original,candidate.headers.get('content-type')))continue;
             source=candidate;resolvedSource=snapshot.url;attemptedFallbacks.push(snapshot.url);
             log('MEDIA_SOURCE_RECOVERED_WAYBACK',{requested:normalized,archivedOriginal:snapshot.original,timestamp:snapshot.timestamp,resolved:snapshot.url});
             break;
