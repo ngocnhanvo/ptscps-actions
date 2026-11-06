@@ -79,6 +79,12 @@ const verifiedRecovery8098={
   article:'https://www.ptsc.com.vn/doan-thanh-nien-cong-ty-pps-huong-ung--quotngay-moi-truong-the-gioi-quot',
   note:'Verified current PTSC image Moi truong 3 from the same 2019 article for legacy attachment 8098',
 };
+const verifiedRecovery8099={
+  canonicalSource:'https://ptscps.com.vn/wp-content/uploads/2019/06/Anh-4.png',
+  url:'https://cdn.petrotimes.vn/stores/news_dataimages/lemaiphuong/062019/17/09/5908_Anh-4-1024x682.jpg',
+  article:'https://petrovietnam.petrotimes.vn/tuoi-tre-pps-huong-ung-ngay-moi-truong-the-gioi-540054.html',
+  note:'Exact syndicated image from the same 17/06/2019 PPS Environment Day article; filename stem and 1024x682 dimensions match legacy attachment 8099',
+};
 const verifiedRecovery8418={
   canonicalSource:'https://ptscps.com.vn/wp-content/uploads/2019/08/1-2.jpg',
   url:'https://www.ptsc.com.vn/Data/Sites/1/News/1084/1-2.jpg',
@@ -90,6 +96,12 @@ const verifiedRecovery8420={
   url:'https://www.ptsc.com.vn/Data/Sites/1/media/89.jpg',
   article:'https://www.ptsc.com.vn/hoi-thao-cong-ty-pps-nam-2019',
   note:'Verified retained sports-article image with the unique legacy 3-1 aspect ratio (1024x622) for attachment 8420',
+};
+const verifiedRecovery8422={
+  canonicalSource:'https://ptscps.com.vn/wp-content/uploads/2019/08/5-2.jpg',
+  url:'https://www.ptsc.com.vn/Data/Sites/1/media/899.jpg',
+  article:'https://www.ptsc.com.vn/hoi-thao-cong-ty-pps-nam-2019',
+  note:'Verified closing-ceremony image retained on the same 2019 PPS sports article; retained legacy sequence maps opening 1-2 to 0i, volleyball 3-1 to 89, and closing 5-2 to 899',
 };
 const verifiedExternalAssetRecoveries=new Map([
   ['https://ptscps.com.vn/wp-content/uploads/2019/09/124-1024x767.jpg',verifiedRecovery8492],
@@ -106,10 +118,14 @@ const verifiedExternalAssetRecoveries=new Map([
   ['https://ptscps.com.vn/wp-content/uploads/2019/06/Anh-1-2-1024x681.jpg',verifiedRecovery8096],
   ['https://ptscps.com.vn/wp-content/uploads/2019/06/Anh-3-2.jpg',verifiedRecovery8098],
   ['https://ptscps.com.vn/wp-content/uploads/2019/06/Anh-3-2-1024x684.jpg',verifiedRecovery8098],
+  ['https://ptscps.com.vn/wp-content/uploads/2019/06/Anh-4.png',verifiedRecovery8099],
+  ['https://ptscps.com.vn/wp-content/uploads/2019/06/Anh-4-1024x682.png',verifiedRecovery8099],
   ['https://ptscps.com.vn/wp-content/uploads/2019/08/1-2.jpg',verifiedRecovery8418],
   ['https://ptscps.com.vn/wp-content/uploads/2019/08/1-2-1024x543.jpg',verifiedRecovery8418],
   ['https://ptscps.com.vn/wp-content/uploads/2019/08/3-1.jpg',verifiedRecovery8420],
   ['https://ptscps.com.vn/wp-content/uploads/2019/08/3-1-1024x622.jpg',verifiedRecovery8420],
+  ['https://ptscps.com.vn/wp-content/uploads/2019/08/5-2.jpg',verifiedRecovery8422],
+  ['https://ptscps.com.vn/wp-content/uploads/2019/08/5-2-1024x683.jpg',verifiedRecovery8422],
 ]);
 const mediaLookupConcurrency=6;
 const created={categories:[],media:[],posts:[],pages:[]};
