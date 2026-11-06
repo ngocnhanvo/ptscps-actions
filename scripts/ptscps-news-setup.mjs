@@ -312,10 +312,15 @@ async function ensureMenu(n){
 async function publishedProbe(){
   const probe=await context.newPage();
   try{
-    for(const path of ['/tin-tuc','/c/tin-tuc/hoat-dong-cua-cong-ty','/c/tin-tuc/dau-khi-trong-nuoc-va-khu-vuc','/thu-vien-pps','/thu-moi-chao-gia']){
+    for(const path of ['/tin-tuc','/c/tin-tuc/hoat-dong-cua-cong-ty','/c/tin-tuc/dau-khi-trong-nuoc-va-khu-vuc','/thu-moi-chao-gia']){
       const response=await probe.goto(front+path+'?_news_publish='+Date.now(),{waitUntil:'domcontentloaded',timeout:40000}).catch(()=>null);
       if(response?.status()!==200)return false;
     }
+    const galleryResponse=await probe.goto(front+'/thu-vien-pps?_news_publish='+Date.now(),{waitUntil:'domcontentloaded',timeout:40000}).catch(()=>null);
+    if(galleryResponse?.status()!==200)return false;
+    if(!(await probe.locator('body').innerText().catch(()=>'' )).includes('Thư viện PPS'))return false;
+    const expectedGalleryImages=Number(sourceRestInventory?.galleryImages?.length||0);
+    if(expectedGalleryImages>0&&await probe.locator('#main-content img').count()!==expectedGalleryImages)return false;
     const response=await probe.goto(front+'/tin-tuc?_news_menu='+Date.now(),{waitUntil:'domcontentloaded',timeout:40000}).catch(()=>null);
     if(response?.status()!==200)return false;
     const toggle=probe.locator('#header-navrow button').filter({hasText:'Tin tức'}).first();
@@ -374,6 +379,11 @@ async function qa(){
     const gallery=await p.goto(front+'/thu-vien-pps?_news_qa='+Date.now(),{waitUntil:'load',timeout:50000});
     assert(gallery?.status()===200,`Thư viện PPS ${viewport.name} HTTP failure`);
     assert((await p.locator('body').innerText()).includes('Thư viện PPS'),`Thư viện PPS title missing ${viewport.name}`);
+    const expectedGalleryImages=Number(sourceRestInventory?.galleryImages?.length||0);
+    assert(expectedGalleryImages>0,'Source gallery image inventory missing');
+    assert.equal(await p.locator('#main-content img').count(),expectedGalleryImages,`Thư viện PPS image-count mismatch ${viewport.name}`);
+    assert(await p.evaluate(()=>document.documentElement.scrollWidth<=document.documentElement.clientWidth+2),`Thư viện PPS horizontal overflow ${viewport.name}`);
+    await p.screenshot({path:`${artifactDir}/${viewport.name}-gallery.png`,fullPage:true});
     const allNews=await p.goto(front+'/tin-tuc?_news_qa='+Date.now(),{waitUntil:'load',timeout:50000});
     assert(allNews?.status()===200,`Tin tức ${viewport.name} HTTP failure`);
     assert(clean(await p.locator('h1').first().textContent())==='Tin tức',`Tin tức H1 mismatch ${viewport.name}`);
