@@ -37,6 +37,7 @@ const assetCache=new Map();
 const sourceAssetFallbacks=new Map();
 const sourceAssetContexts=new Map();
 const targetMediaLookupCache=new Map();
+const currentPtscArticleCache=new Map();
 const legacyMediaAliasOrigin='https://www.ptsc.com.vn';
 const verifiedRecovery8492={
   canonicalSource:'https://ptscps.com.vn/wp-content/uploads/2019/09/124-1024x767.jpg',
@@ -367,6 +368,45 @@ function wordpressDerivativeFallbacks(value){
   return [original,legacyMediaAlias(original)].filter(Boolean);
 }
 
+function assetStem(value){
+  try{
+    const u=new URL(value,legacyMediaAliasOrigin);
+    const filename=decodeURIComponent(basename(u.pathname));
+    const extension=extname(filename);
+    return basename(filename,extension).replace(/-\d+x\d+$/,'').replace(/-scaled$/,'').toLowerCase();
+  }catch{return '';}
+}
+
+async function currentPtscArticleFallbacks(value){
+  const normalized=normalizeSourceAsset(value);if(!normalized)return [];
+  const wantedStem=assetStem(normalized);if(!wantedStem)return [];
+  const contexts=sourceAssetContexts.get(normalized)||[];
+  const slugs=[...new Set(contexts.map(item=>String(item?.slug||'').trim()).filter(Boolean))];
+  const matches=[];
+  for(const slug of slugs){
+    let html=currentPtscArticleCache.get(slug);
+    if(html===undefined){
+      const response=await fetch(`${legacyMediaAliasOrigin}/${slug}`,{headers:{'User-Agent':'PTSCPS News migration/1.0'},signal:AbortSignal.timeout(60000)}).catch(()=>null);
+      html=response?.ok?await response.text():'';
+      currentPtscArticleCache.set(slug,html);
+    }
+    if(!html)continue;
+    for(const tag of html.match(/<img\b[^>]*>/gi)||[]){
+      const raw=tag.match(/\bsrc=(["'])([^"']+)\1/i)?.[2]||tag.match(/\bdata-src=(["'])([^"']+)\1/i)?.[2]||'';
+      if(!raw)continue;
+      try{
+        const candidate=new URL(raw,legacyMediaAliasOrigin);
+        if(!/^https?:$/.test(candidate.protocol)||!/(^|\.)ptsc\.com\.vn$/i.test(candidate.hostname))continue;
+        if(assetStem(candidate.href)!==wantedStem)continue;
+        matches.push(candidate.href);
+      }catch{}
+    }
+  }
+  const unique=[...new Set(matches)];
+  if(unique.length)log('CURRENT_PTSC_MEDIA_MATCH',{requested:normalized,contexts,matched:unique});
+  return unique;
+}
+
 function assetSlug(url){return 'legacy-news-'+createHash('sha256').update(url).digest('hex').slice(0,20);}
 function assetFilename(url,mime=''){
   const u=new URL(url);let ext=extname(u.pathname).toLowerCase();
@@ -467,6 +507,14 @@ async function ensureAsset(n,url,meta={}){
           if(verifiedRecovery?.url===fallback)log('MEDIA_SOURCE_RECOVERED_VERIFIED',{requested:normalized,resolved:fallback,article:verifiedRecovery.article,note:verifiedRecovery.note});
           else log('MEDIA_SOURCE_RECOVERED',{requested:normalized,resolved:fallback});
           break;
+        }
+      }
+      if(!source.ok){
+        const currentPtscFallbacks=await currentPtscArticleFallbacks(normalized);
+        attemptedFallbacks=[...new Set([...attemptedFallbacks,...currentPtscFallbacks])];
+        for(const fallback of currentPtscFallbacks){
+          const candidate=await fetch(fallback,{headers:{'User-Agent':'PTSCPS News migration/1.0'},signal:AbortSignal.timeout(60000)}).catch(()=>null);
+          if(candidate?.ok){source=candidate;resolvedSource=fallback;log('MEDIA_SOURCE_RECOVERED_CURRENT_PTSC',{requested:normalized,resolved:fallback});break;}
         }
       }
     }
