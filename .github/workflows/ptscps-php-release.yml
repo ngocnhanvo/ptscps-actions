@@ -2,7 +2,7 @@ name: PTSCPS PHP deployment (manual opt-in)
 on:
   push:
     branches: [main]
-    paths: [.ptscps-folders-count-release-request, .ptscps-ml-prefill-release-request, .ptscps-preview-css-release-request, .ptscps-agent-locale-release-request, .ptscps-agent-history-locale-release-request, .ptscps-agent-synthesis-release-request, .ptscps-product-menu-order-rest-release-request]
+    paths: [.ptscps-folders-count-release-request, .ptscps-ml-prefill-release-request, .ptscps-preview-css-release-request, .ptscps-preview-inline-style-release-request, .ptscps-agent-locale-release-request, .ptscps-agent-history-locale-release-request, .ptscps-agent-synthesis-release-request, .ptscps-product-menu-order-rest-release-request]
   workflow_dispatch:
     inputs:
       confirm:
@@ -23,6 +23,7 @@ jobs:
               && (github.event.head_commit.message == 'deploy(ptscps): accurate Folders counts PHP only'
                   || github.event.head_commit.message == 'deploy(ptscps): English Page ACF prefill PHP only'
                   || github.event.head_commit.message == 'deploy(ptscps): TablePress preview CSS PHP only'
+                  || github.event.head_commit.message == 'deploy(ptscps): ESC Table preview inline style PHP only'
                   || github.event.head_commit.message == 'deploy(ptscps): bilingual Agent PHP only'
                   || github.event.head_commit.message == 'deploy(ptscps): language-scoped Agent PHP history only'
                   || github.event.head_commit.message == 'deploy(ptscps): English Agent synthesis PHP only'
@@ -60,6 +61,10 @@ jobs:
                 test "$(cat .ptscps-preview-css-release-request)" = 'PTSCPS_PREVIEW_CSS_ONLY source=539bd8ab8a7f266832304923a894fca9730a49d9'
                 test "$(git -C source-php rev-parse HEAD)" = '539bd8ab8a7f266832304923a894fca9730a49d9'
                 ;;
+              'deploy(ptscps): ESC Table preview inline style PHP only')
+                test "$(cat .ptscps-preview-inline-style-release-request)" = 'PTSCPS_PREVIEW_INLINE_STYLE_ONLY source=3f0518ba76b0b3a35be990207a831fefc74d1780'
+                test "$(git -C source-php rev-parse HEAD)" = '3f0518ba76b0b3a35be990207a831fefc74d1780'
+                ;;
               'deploy(ptscps): bilingual Agent PHP only')
                 test "$(cat .ptscps-agent-locale-release-request)" = 'PTSCPS_AGENT_LOCALE_ONLY source=2a7417e1bec7f71474200137feace3221672c4ed'
                 test "$(git -C source-php rev-parse HEAD)" = '2a7417e1bec7f71474200137feace3221672c4ed'
@@ -89,6 +94,7 @@ jobs:
           php -l source-php/wp-content/mu-plugins/esc-seo-files.php
           php -l source-php/wp-content/themes/vibe-code-theme/functions.php
           php -l source-php/wp-content/themes/vibe-code-theme/inc/tablepress/wysiwyg.php
+          php source-php/wp-content/themes/vibe-code-theme/tests/tablepress-preview-inline-style-test.php
           ! grep -Eqi 'nghiencuukhoahoc|EduResearch Hub' source-php/wp-content/mu-plugins/esc-seo-files.php
           php -l source-php/wp-content/plugins/github-trigger/tests/build-status-regression.php
           if [[ "${{ github.event_name }}" != "push" ]]; then
@@ -123,7 +129,7 @@ jobs:
           PTSCPS_ML_ONLY: >-
             ${{ github.event_name == 'push' && github.event.head_commit.message == 'deploy(ptscps): English Page ACF prefill PHP only' && '1' || '0' }}
           PTSCPS_PREVIEW_CSS_ONLY: >-
-            ${{ github.event_name == 'push' && github.event.head_commit.message == 'deploy(ptscps): TablePress preview CSS PHP only' && '1' || '0' }}
+            ${{ github.event_name == 'push' && (github.event.head_commit.message == 'deploy(ptscps): TablePress preview CSS PHP only' || github.event.head_commit.message == 'deploy(ptscps): ESC Table preview inline style PHP only') && '1' || '0' }}
           PTSCPS_AGENT_LOCALE_ONLY: >-
             ${{ github.event_name == 'push' && github.event.head_commit.message == 'deploy(ptscps): bilingual Agent PHP only' && '1' || '0' }}
           PTSCPS_AGENT_HISTORY_LOCALE_ONLY: >-
