@@ -24,10 +24,11 @@ const uri = path => wp + path;
 const log = (key, value) => console.log(`PTSCPS_STATIC_RECOVERY_${key}=${typeof value === 'string' ? value : JSON.stringify(value)}`);
 const acfValue = value => String(value?.value ?? value?.ID ?? value?.id ?? value ?? '').trim();
 
+// This recovery is intentionally scoped to Sitemap. Regression QA may inspect
+// other routes in separate read-only jobs, but this writer must not touch
+// unrelated WordPress Pages merely to create build logs.
 const specs = [
   { id: 84805, slug: 'sitemap', title: 'Sitemap', key: 'sitemap' },
-  { id: 84807, slug: 'dieu-khoan-dich-vu', title: 'Điều khoản dịch vụ', key: 'dieu-khoan-dich-vu' },
-  { id: 84809, slug: 'chinh-sach-bao-mat', title: 'Chính sách bảo mật', key: 'chinh-sach-bao-mat' },
 ];
 
 const CSS_START = '/* PTSCPS_STATIC_READABILITY_START */';
@@ -162,6 +163,25 @@ async function login() {
 }
 
 async function nonce() {
+  // Reuse the already authenticated admin document first. Avoid another full
+  // wp-admin navigation when WordPress has already exposed wpApiSettings.
+  const current = await page.evaluate(() => String(globalThis.wpApiSettings?.nonce || '').trim()).catch(() => '');
+  if (/^[A-Za-z0-9_-]{8,32}$/.test(current)) {
+    log('NONCE_SOURCE', 'current-admin');
+    return current;
+  }
+
+  // The lightweight authenticated nonce endpoint is much cheaper than loading
+  // another admin screen. Keep UI navigation only as a compatibility fallback.
+  const direct = await page.request.post(uri('/wp-admin/admin-ajax.php'), {
+    form: { action: 'rest-nonce' }, timeout: 15000,
+  }).catch(() => null);
+  const directValue = direct?.ok() ? (await direct.text()).trim() : '';
+  if (/^[A-Za-z0-9_-]{8,32}$/.test(directValue)) {
+    log('NONCE_SOURCE', 'admin-ajax');
+    return directValue;
+  }
+
   const menus = await page.request.get(uri(`/wp-json/esc-api/v1/menus?_nonce_probe=${Date.now()}`), {
     timeout: 30000, headers: { 'Cache-Control': 'no-cache' },
   }).catch(() => null);
@@ -179,13 +199,7 @@ async function nonce() {
       return value;
     }
   }
-  const fallback = await page.request.post(uri('/wp-admin/admin-ajax.php'), {
-    form: { action: 'rest-nonce' }, timeout: 30000,
-  }).catch(() => null);
-  const value = fallback?.ok() ? (await fallback.text()).trim() : '';
-  assert(/^[A-Za-z0-9_-]{8,32}$/.test(value), 'Authenticated REST nonce unavailable');
-  log('NONCE_SOURCE', 'admin-ajax');
-  return value;
+  throw new Error('Authenticated REST nonce unavailable');
 }
 
 async function api(method, path, n, data, timeout = 60000) {
