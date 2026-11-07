@@ -64,6 +64,32 @@ try {
     });
     log('ROUTE', { route, http: response?.status() || 0, ...snapshot });
   }
+
+  const probeRoute = async route => {
+    const response = await page.goto(`${front}${route}${route.includes('?') ? '&' : '?'}_diag=${Date.now()}`, {
+      waitUntil: 'domcontentloaded', timeout: 50000,
+    }).catch(() => null);
+    const snapshot = await page.evaluate(() => ({
+      title: document.title,
+      lang: document.documentElement.lang,
+      main: String(document.querySelector('main')?.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 600),
+      body: String(document.body?.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 600),
+    })).catch(() => ({ title: '', lang: '', main: '', body: '' }));
+    log('CONTENT_ROUTE', { route, http: response?.status() || 0, finalUrl: page.url(), ...snapshot });
+  };
+  for (const route of ['/tin-tuc?lang=en', '/tin-tuc?lang=vi', '/search-jobs']) await probeRoute(route);
+
+  const probeRest = async (key, path) => {
+    const response = await page.request.get(`${wp}${path}`, {
+      timeout: 30000,
+      headers: { 'Cache-Control': 'no-cache', Accept: 'application/json' },
+    });
+    const text = await response.text().catch(() => '');
+    log(key, { http: response.status(), ok: response.ok(), body: text.slice(0, 1200) });
+  };
+  await probeRest('POSTS_EN', '/wp-json/wp/v2/posts?_embed=true&status=publish&per_page=3&page=1&lang=en&cat=tin-tuc&include_children=true');
+  await probeRest('POSTS_VI', '/wp-json/wp/v2/posts?_embed=true&status=publish&per_page=3&page=1&lang=vi&cat=tin-tuc&include_children=true');
+  await probeRest('CATEGORY_TIN_TUC', '/wp-json/wp/v2/categories?slug=tin-tuc&hide_empty=false&per_page=20');
   log('RESULT', 'PASS_READ_ONLY');
 } finally {
   await browser.close();
