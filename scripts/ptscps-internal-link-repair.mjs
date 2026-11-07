@@ -278,33 +278,25 @@ async function repairContent(n, pages, categories, products) {
 
   for (const item of categories) {
     const current = String(item.description?.raw ?? item.description ?? '');
-    // Remove duplicate standalone project text links, not project records/cards.
-    // Only these two WordPress service categories are in the write scope.
-    const cleanService = ['manpower-supply', 'fpso-fso-om-services'].includes(String(item.slug || ''));
-    const projectSlugs = new Set(products.filter(product => product.status === 'publish').map(product => String(product.slug || '')));
-    const legacyProjectSlugs = new Set([
-      'fso-pps-01-e-translation', 'fso-golden-star-2', '648',
-      'fso-ptsc-bien-dong-01-2', 'fpso-ruby-ii-2', 'fso-ptsc-bach-ho-2',
-      'fpso-ruby-princess-2', '5454',
-    ]);
+    // Historical duplicate project text links are owned by these two service
+    // category descriptions. Keep image anchors and dynamically rendered cards.
+    const duplicateProjectSlugs = {
+      'manpower-supply': ['5454', 'fpso-thai-binh-vn-2', 'fso-orkid-2', 'upstream-plant-long-son-petrochemical-complex'],
+      'fpso-fso-om-services': ['fso-pps-01-e-translation', 'fso-golden-star-2', '648', 'fso-ptsc-bien-dong-01-2', 'fpso-ruby-ii-2', 'fso-ptsc-bach-ho-2', 'fpso-ruby-princess-2'],
+    };
+    const duplicateSlugs = new Set(duplicateProjectSlugs[String(item.slug || '')] || []);
     let removedTextLinks = 0;
-    const withoutDuplicateText = cleanService ? current.replace(/<(p|li)\b[^>]*>[\s\S]*?<\/\1>/gi, block => {
-      const links = [...block.matchAll(/<a\b[^>]*\bhref\s*=\s*(["'])([^"']+)\1[^>]*>[\s\S]*?<\/a>/gi)];
-      if (!links.length) return block;
-      const remainingText = block.replace(/<a\b[^>]*\bhref\s*=\s*(["'])[^"']+\1[^>]*>[\s\S]*?<\/a>/gi, '')
-        .replace(/<\/?(?:p|li|span|strong|em|b|i|u|br)\b[^>]*>/gi, '')
-        .replace(/&nbsp;|&#160;|\s/gi, '').trim();
-      if (remainingText) return block;
-      const projectLinksOnly = links.every(match => {
-        try {
-          const slug = new URL(match[2], front).pathname.replace(/\/+$/, '').split('/').filter(Boolean).at(-1)?.replace(/\.html?$/i, '') || '';
-          return projectSlugs.has(slug) || legacyProjectSlugs.has(slug);
-        } catch { return false; }
-      });
-      if (!projectLinksOnly) return block;
-      removedTextLinks += links.length;
-      return '';
-    }) : current;
+    const withoutDuplicateText = duplicateSlugs.size ? current.replace(
+      /<a\b[^>]*\bhref\s*=\s*(["'])([^"']+)\1[^>]*>[\s\S]*?<\/a>/gi,
+      (anchor, _quote, href) => {
+        let slug = '';
+        try { slug = new URL(href, front).pathname.replace(/\/+$/, '').split('/').filter(Boolean).at(-1)?.replace(/\.html?$/i, '') || ''; }
+        catch { return anchor; }
+        if (!duplicateSlugs.has(slug) || /<(?:img|picture|svg|video)\b/i.test(anchor)) return anchor;
+        removedTextLinks++;
+        return '';
+      },
+    ).replace(/<(p|li|div|ul|ol)\b[^>]*>(?:\s|&nbsp;|&#160;|<br\s*\/?>)*<\/\1>/gi, '') : current;
     const { next, changed } = rewriteHtml(withoutDuplicateText, `product_cat:${item.id}:${item.slug}`);
     if (!changed && !removedTextLinks) continue;
     if (removedTextLinks) {
