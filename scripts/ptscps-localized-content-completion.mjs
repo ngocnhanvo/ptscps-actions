@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { chromium } from 'playwright';
 import { waitForWordPressBuild } from './ptscps-wordpress-build-monitor.mjs';
@@ -195,6 +196,24 @@ const filenameFromUrl = value => {
   catch { return ''; }
 };
 
+const safeUploadFilename = value => {
+  const original = filenameFromUrl(value);
+  if (!original) return '';
+  // Keep already-safe ASCII names unchanged so existing migrated media are reused.
+  if (/^[\x20-\x7e]+$/.test(original) && !/["\\\r\n]/.test(original)) return original;
+  const extensionMatch = original.match(/(\.[A-Za-z0-9]{1,8})$/);
+  const extension = extensionMatch?.[1]?.toLowerCase() || '.jpg';
+  const sourceStem = extensionMatch ? original.slice(0, -extensionMatch[1].length) : original;
+  const asciiStem = sourceStem.normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\x20-\x7e]+/g, '-')
+    .replace(/[^A-Za-z0-9._-]+/g, '-')
+    .replace(/^[._-]+|[._-]+$/g, '')
+    .slice(0, 80);
+  const digest = createHash('sha256').update(new URL(value, source).href).digest('hex').slice(0, 12);
+  return `${asciiStem || 'legacy-asset'}-${digest}${extension}`;
+};
+
 const mimeFor = value => {
   const lower = filenameFromUrl(value).toLowerCase();
   if (lower.endsWith('.png')) return 'image/png';
@@ -221,9 +240,11 @@ async function ensureMedia(n, sourceUrl, owner) {
   if (!/(?:^|\.)ptscps\.com\.vn$/i.test(parsed.hostname) || !parsed.pathname.startsWith('/wp-content/uploads/')) {
     return { id: 0, url: normalized };
   }
-  const file = filenameFromUrl(normalized);
-  if (!file) return { id: 0, url: '' };
-  const existing = await targetMediaByFilename(n, file);
+  const sourceFile = filenameFromUrl(normalized);
+  if (!sourceFile) return { id: 0, url: '' };
+  const file = safeUploadFilename(normalized);
+  let existing = await targetMediaByFilename(n, sourceFile);
+  if (!existing && file !== sourceFile) existing = await targetMediaByFilename(n, file);
   if (existing) {
     const result = { id: Number(existing.id), url: String(existing.source_url) };
     mediaCache.set(normalized, result);
@@ -250,15 +271,22 @@ async function ensureMedia(n, sourceUrl, owner) {
       const result = { id: Number(saved.id), url: String(saved.source_url) };
       mediaCache.set(normalized, result);
       writes++;
-      log('MEDIA', { state: 'UPLOADED', file, owner, id: result.id });
+      log('MEDIA', { state: 'UPLOADED', sourceFile, file, owner, id: result.id });
       return result;
     } catch (error) {
       reason = String(error?.message || error);
+      const recovered = await targetMediaByFilename(n, file).catch(() => null);
+      if (recovered) {
+        const result = { id: Number(recovered.id), url: String(recovered.source_url) };
+        mediaCache.set(normalized, result);
+        log('MEDIA', { state: 'UPLOADED_RECOVERED', sourceFile, file, owner, id: result.id });
+        return result;
+      }
       if (attempt < 3) await sleep(1000 * attempt);
     }
   }
-  deferred.push({ type: 'asset', url: normalized, file, owner, attempts: 3, reason });
-  log('ASSET_DEFERRED', { file, owner, attempts: 3, reason });
+  deferred.push({ type: 'asset', url: normalized, sourceFile, file, owner, attempts: 3, reason });
+  log('ASSET_DEFERRED', { sourceFile, file, owner, attempts: 3, reason });
   const result = { id: 0, url: '' };
   mediaCache.set(normalized, result);
   return result;
