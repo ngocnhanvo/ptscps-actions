@@ -163,45 +163,22 @@ async function login() {
 }
 
 async function nonce() {
-  // Reuse the already authenticated admin document first. Avoid another full
-  // wp-admin navigation when WordPress has already exposed wpApiSettings.
+  // Reuse the authenticated document when it already exposes a REST nonce.
   const current = await page.evaluate(() => String(globalThis.wpApiSettings?.nonce || '').trim()).catch(() => '');
   if (/^[A-Za-z0-9_-]{8,32}$/.test(current)) {
     log('NONCE_SOURCE', 'current-admin');
     return current;
   }
 
-  // The lightweight authenticated nonce endpoint is much cheaper than loading
-  // another admin screen. Keep UI navigation only as a compatibility fallback.
-  const direct = await page.request.post(uri('/wp-admin/admin-ajax.php'), {
-    form: { action: 'rest-nonce' }, timeout: 15000,
-  }).catch(() => null);
-  const directValue = direct?.ok() ? (await direct.text()).trim() : '';
-  if (/^[A-Za-z0-9_-]{8,32}$/.test(directValue)) {
-    log('NONCE_SOURCE', 'admin-ajax');
-    return directValue;
-  }
-
-  const menus = await page.request.get(uri(`/wp-json/esc-api/v1/menus?_nonce_probe=${Date.now()}`), {
-    timeout: 30000, headers: { 'Cache-Control': 'no-cache' },
-  }).catch(() => null);
-  let menuId = 0;
-  if (menus?.ok()) menuId = Number((await menus.json())?.menus?.Header?.vi?.id || 0);
-  const paths = [
-    ...(menuId ? [`/wp-admin/nav-menus.php?action=edit&menu=${menuId}&esc_full_admin=1`] : []),
-    '/wp-admin/edit-tags.php?taxonomy=product_cat&post_type=product&esc_full_admin=1',
-  ];
-  for (const path of paths) {
-    await page.goto(uri(path), { waitUntil: 'domcontentloaded', timeout: 50000 });
-    const value = await page.evaluate(() => String(globalThis.wpApiSettings?.nonce || '').trim());
-    if (/^[A-Za-z0-9_-]{8,32}$/.test(value)) {
-      log('NONCE_SOURCE', path.split('?')[0]);
-      return value;
-    }
-  }
-  throw new Error('Authenticated REST nonce unavailable');
+  // This admin screen is the proven nonce source for this WordPress install.
+  // Go there directly; do not probe admin-ajax or unrelated menu screens first.
+  const path = '/wp-admin/edit-tags.php?taxonomy=product_cat&post_type=product&esc_full_admin=1';
+  await page.goto(uri(path), { waitUntil: 'domcontentloaded', timeout: 50000 });
+  const value = await page.evaluate(() => String(globalThis.wpApiSettings?.nonce || '').trim());
+  assert(/^[A-Za-z0-9_-]{8,32}$/.test(value), 'Authenticated REST nonce unavailable');
+  log('NONCE_SOURCE', path.split('?')[0]);
+  return value;
 }
-
 async function api(method, path, n, data, timeout = 60000) {
   const response = await page.request.fetch(uri(path), {
     method, timeout, headers: { 'X-WP-Nonce': n, 'Cache-Control': 'no-cache' },
