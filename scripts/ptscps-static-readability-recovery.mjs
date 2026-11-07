@@ -200,16 +200,20 @@ async function readMenus() {
 
 async function repairAndTouchPages(n) {
   const menuItems = await readMenus();
-  const results = [];
+  const results = { changed: [], skipped: [] };
   for (const spec of specs) {
     const current = await api('GET', `/wp-json/wp/v2/pages/${spec.id}?context=edit&_fields=id,slug,status,title,content,acf`, n);
     assert(current.response.ok() && Number(current.body?.id) === spec.id && current.body?.slug === spec.slug,
       `Cannot read target Page ${spec.slug}`);
     const raw = String(current.body?.content?.raw ?? current.body?.content?.rendered ?? '').trim();
+    const currentTitle = String(current.body?.title?.raw ?? current.body?.title?.rendered ?? '').trim();
     const currentCss = acfValue(current.body?.acf?.cssmore);
-    const action = acfValue(current.body?.acf?.action) || 'IntroPage';
-    const key = acfValue(current.body?.acf?.key) || spec.key;
-    const lang = acfValue(current.body?.acf?.product_lang) || 'vi';
+    const currentAction = acfValue(current.body?.acf?.action);
+    const currentKey = acfValue(current.body?.acf?.key);
+    const currentLang = acfValue(current.body?.acf?.product_lang);
+    const action = currentAction || 'IntroPage';
+    const key = currentKey || spec.key;
+    const lang = currentLang || 'vi';
     let content = raw;
     if (spec.slug === 'sitemap') {
       content = wrapPage(buildSitemap(menuItems), spec);
@@ -217,6 +221,20 @@ async function repairAndTouchPages(n) {
       content = wrapPage(raw, spec);
     }
     const cssmore = mergeCss(currentCss);
+    const changed = current.body?.status !== 'publish'
+      || currentTitle !== spec.title
+      || raw !== content
+      || currentCss !== cssmore
+      || currentAction !== action
+      || currentKey !== key
+      || currentLang !== lang;
+
+    if (!changed) {
+      results.skipped.push({ id: spec.id, slug: spec.slug });
+      log('CMS_PAGE', { id: spec.id, slug: spec.slug, state: 'PASS_UNCHANGED' });
+      continue;
+    }
+
     const saved = await api('POST', `/wp-json/wp/v2/pages/${spec.id}`, n, {
       title: spec.title, status: 'publish', content,
       acf: { product_lang: lang, action, key, cssmore },
@@ -228,24 +246,35 @@ async function repairAndTouchPages(n) {
     assert(verify.response.ok() && verify.body?.status === 'publish' && verifyContent.includes('data-ptscps-readable-page="1"')
       && verifyCss.includes(CSS_START), `Readable Page readback failed ${spec.slug}`);
     if (spec.slug === 'sitemap') assert(verifyContent.includes('ptscps-sitemap-grid'), 'Semantic sitemap grid did not persist');
-    results.push({ id: spec.id, slug: spec.slug });
-    log('CMS_PAGE', { id: spec.id, slug: spec.slug, state: 'PASS_TOUCHED' });
+    results.changed.push({ id: spec.id, slug: spec.slug });
+    log('CMS_PAGE', { id: spec.id, slug: spec.slug, state: 'PASS_CHANGED' });
   }
 
-  const logsResponse = await page.request.get(uri(`/wp-json/astro/v1/get-page-logs?_readability=${Date.now()}`), {
-    timeout: 45000, headers: { 'Cache-Control': 'no-cache' },
-  });
-  assert(logsResponse.ok(), `Page log endpoint HTTP ${logsResponse.status()}`);
-  const logs = await logsResponse.json();
-  assert(Array.isArray(logs), 'Page log endpoint returned non-array');
-  for (const spec of specs) {
-    const item = logs.find(row => Number(row?.id) === spec.id && row?.action === 'modify');
-    assert(item?.page?.id && String(item?.page?.content?.rendered || '').includes('data-ptscps-readable-page="1"'),
-      `Pending page modify log missing readable payload for ${spec.slug}`);
+  if (results.changed.length) {
+    const logsResponse = await page.request.get(uri(`/wp-json/astro/v1/get-page-logs?_readability=${Date.now()}`), {
+      timeout: 45000, headers: { 'Cache-Control': 'no-cache' },
+    });
+    assert(logsResponse.ok(), `Page log endpoint HTTP ${logsResponse.status()}`);
+    const logs = await logsResponse.json();
+    assert(Array.isArray(logs), 'Page log endpoint returned non-array');
+    for (const spec of results.changed) {
+      const item = logs.find(row => Number(row?.id) === spec.id && row?.action === 'modify');
+      assert(item?.page?.id && String(item?.page?.content?.rendered || '').includes('data-ptscps-readable-page="1"'),
+        `Pending page modify log missing readable payload for ${spec.slug}`);
+    }
+    log('PAGE_LOGS', { state: 'PASS', ids: results.changed.map(x => x.id), pending: logs.length });
+  } else {
+    log('PAGE_LOGS', { state: 'SKIPPED_NO_CHANGE', ids: [], pending: null });
   }
-  log('PAGE_LOGS', { state: 'PASS', ids: specs.map(x => x.id), pending: logs.length });
+  log('CMS_WRITE_SUMMARY', {
+    changed: results.changed.length,
+    skipped_unchanged: results.skipped.length,
+    temporary_created: 0,
+    cleanup_remaining: 0,
+  });
   return results;
 }
+
 
 async function nativeStatus() {
   return page.evaluate(async () => {
@@ -309,7 +338,7 @@ async function githubRun(runId) {
   } finally { clearTimeout(timer); }
 }
 
-async function triggerAndWaitBuild() {
+async function triggerAndWaitBuild(expectedPending) {
   await page.goto(uri('/wp-admin/admin.php?page=vcs-build-trigger'), { waitUntil: 'domcontentloaded', timeout: 50000 });
   await page.locator('#vcs-build-btn-main').waitFor({ state: 'attached', timeout: 30000 });
   let initial = await page.evaluate(() => ({
@@ -329,8 +358,8 @@ async function triggerAndWaitBuild() {
     }));
   }
   assert(!initial.active, 'WordPress build still active after native reconciliation');
-  assert(Number(initial.pending || 0) >= specs.length,
-    `Expected at least ${specs.length} pending Page logs before build, got ${initial.pending || 0}`);
+  assert(Number(initial.pending || 0) >= expectedPending,
+    `Expected at least ${expectedPending} pending Page logs before build, got ${initial.pending || 0}`);
   const button = page.locator('#vcs-build-btn-main');
   assert(!await button.isDisabled(), 'WordPress Build Website button disabled with pending changes');
   const ack = page.waitForResponse(response => response.url().startsWith(wp + '/wp-admin/admin-ajax.php')
@@ -470,10 +499,19 @@ async function productionQa() {
 try {
   await login();
   const n = await nonce();
-  await repairAndTouchPages(n);
-  const build = await triggerAndWaitBuild();
+  const mutation = await repairAndTouchPages(n);
+  let build = { state: 'SKIPPED_NO_CHANGE' };
+  if (mutation.changed.length > 0) {
+    build = await triggerAndWaitBuild(mutation.changed.length);
+  } else {
+    log('BUILD_SKIPPED', { state: 'SKIPPED_NO_CHANGE', changed: 0 });
+  }
   await productionQa();
-  log('RESULT', { state: 'PASS', build });
+  log('RESULT', {
+    state: 'PASS',
+    build,
+    cms: { changed: mutation.changed.length, skipped_unchanged: mutation.skipped.length },
+  });
 } finally {
   await browser.close();
 }
