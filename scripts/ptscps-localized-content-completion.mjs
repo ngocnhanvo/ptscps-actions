@@ -553,6 +553,11 @@ async function listProductCategories(n) {
 }
 
 const normalizeMatchText = value => plain(value).normalize('NFKC').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+const localizedMediaRefs = value => [...new Set(
+  [...String(value ?? '').matchAll(/\b(?:src|href)\s*=\s*["']([^"']+)["']/gi)]
+    .map(match => String(match[1] || '').replace(/&amp;/gi, '&'))
+    .filter(url => url.includes('/wp-content/uploads/'))
+)].sort();
 const productCategoryIds = product => Array.isArray(product?.product_categories)
   ? product.product_categories.map(item => Number(item?.id || item)).filter(Boolean)
   : Array.isArray(product?.product_cat) ? product.product_cat.map(Number).filter(Boolean) : [];
@@ -592,7 +597,10 @@ async function ensureProductCategory(n, spec) {
     log('EN_SERVICE_CATEGORY', { slug: spec.slug, id: row.id, state: 'CREATED', parent: payload.parent });
   } else {
     const currentDescription = String(row.description?.raw ?? row.description ?? '');
-    const changed = plain(row.name) !== plain(spec.name) || Number(row.parent || 0) !== payload.parent || plain(currentDescription) !== plain(payload.description);
+    const changed = plain(row.name) !== plain(spec.name)
+      || Number(row.parent || 0) !== payload.parent
+      || plain(currentDescription) !== plain(payload.description)
+      || JSON.stringify(localizedMediaRefs(currentDescription)) !== JSON.stringify(localizedMediaRefs(payload.description));
     if (changed) {
       const updated = await api('POST', `/wp-json/wp/v2/product_cat/${row.id}`, n, payload);
       assert(updated.response.ok(), `Cannot update EN product_cat ${spec.slug}: HTTP ${updated.response.status()}`);
