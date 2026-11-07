@@ -1,0 +1,47 @@
+name: PTSCPS English Header production diagnostic (read-only)
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'audit/ptscps-en-header-readonly-diagnostic.ready'
+      - 'scripts/ptscps-en-header-readonly-diagnostic.mjs'
+      - '.github/workflows/ptscps-en-header-readonly-diagnostic.yml'
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.0-noble
+      options: --ipc=host
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Resolve configured PTSCPS origins
+        shell: bash
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os,re
+          from urllib.parse import urlsplit
+          vals=dict(re.findall(r'^\s*(?:export\s+)?(WC_URL|WC_URL_CLIENT)\s*=\s*(.+)\s*$',os.environ.get('ENV_FILE',''),re.M))
+          def origin(key):
+              u=urlsplit(vals.get(key,'').strip().strip('"\''))
+              if u.scheme!='https' or not u.hostname or u.path not in ('','/') or u.query or u.fragment or u.username or u.password or u.port not in (None,443):
+                  raise SystemExit('INVALID_ORIGIN '+key)
+              return 'https://'+u.hostname
+          wp,front=origin('WC_URL'),origin('WC_URL_CLIENT')
+          if wp==front: raise SystemExit('ORIGIN_COLLISION')
+          with open(os.environ['GITHUB_ENV'],'a') as f:
+              f.write('WP_ORIGIN='+wp+'\nFRONT_ORIGIN='+front+'\n')
+          print('PTSCPS_EN_HEADER_DIAG_ORIGINS=PASS')
+          PY
+      - name: Install Playwright driver
+        run: npm install --no-save --no-package-lock --ignore-scripts --no-audit --no-fund playwright@1.64.0
+      - name: Diagnose WordPress, built cache and production Header without writes
+        run: node scripts/ptscps-en-header-readonly-diagnostic.mjs
