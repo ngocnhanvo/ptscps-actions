@@ -399,20 +399,40 @@ const legacyHomeUrl = /https?:\/\/(?:www\.)?ptscps\.com\.vn(?:\/[\w\-./%?=&+#~:]
 const legacyLinkHost = /(?:^|\.)ptscps\.com\.vn$/i;
 const homeLinkAudit = [];
 
-function homepageLinkTarget(value, locale, pages) {
+function homepageLinkTarget(value, locale, pages, translatedNews) {
   let url;
   try { url = new URL(value); } catch { return null; }
   if (!legacyLinkHost.test(url.hostname)) return null;
   if (/\/(?:wp-content\/uploads|wp-json|wp-admin)\//.test(url.pathname) || /\.(?:pdf|png|jpe?g|gif|webp|svg|zip|docx?|xlsx?)$/i.test(url.pathname)) return null;
   let target = rewriteHref(value);
   const path = new URL(target, front).pathname;
-  const slug = decodeURIComponent(url.pathname).split('/').filter(Boolean).at(-1) || '';
+  const slug = decodeURIComponent(url.pathname).split('/').filter(Boolean).at(-1)?.replace(/\.html?$/i, '') || '';
   const source = pages.find(p => String(p.slug || '') === slug);
   const sourceKey = source ? acfValue(source.acf?.key) : '';
   const counterpart = sourceKey ? pages.find(p => acfValue(p.acf?.key) === sourceKey && acfValue(p.acf?.product_lang) === locale && p.status === 'publish') : null;
+  if (/\.html?$/i.test(url.pathname)) {
+    // Legacy .htm URLs are not public routes on the new Astro site.
+    // For pages, resolve the real localized Page identity by ACF key.
+    if (source && acfValue(source.acf?.product_lang) === locale) target = '/' + source.slug + url.search + url.hash;
+    else if (source && counterpart) target = '/' + counterpart.slug + url.search + url.hash;
+    else if (locale === 'en') target = translatedNews.get(slug) || '/news';
+    else target = '/' + slug + url.search + url.hash;
+  }
   if (source && acfValue(source.acf?.product_lang) !== locale && counterpart) {
     const newPath = '/' + String(counterpart.slug).replace(/^\/+/, '');
     target = newPath + url.search + url.hash;
+  }
+  // English homepage service cards must not send visitors into Vietnamese categories.
+  const serviceEN = new Map([
+    ['/dich-vu/van-hanh-va-bao-duong-fpso-fso-mopu', '/services/fpso-fso-om-services'],
+    ['/dich-vu/cung-ung-nhan-luc-ky-thuat-van-hanh-va-bao-duong', '/services/manpower-supply'],
+    ['/dich-vu/dich-vu-thiet-ke-mua-sam-gia-cong-che-tao%E2%80%8B', '/services'],
+    ['/dich-vu/dich-vu-sua-chua-bao-duong-cac-thiet-bi-va-cong-trinh-cong-nghiep', '/services/repairs-maintenance-services'],
+    ['/c/tuyen-dung', '/search-jobs'],
+  ]);
+  if (locale === 'en') {
+    const redirect = serviceEN.get(url.pathname);
+    if (redirect) target = redirect + url.search + url.hash;
   }
   return { target, path, sourceKey, locale };
 }
@@ -436,7 +456,29 @@ async function readNativeHomeTable(id) {
   return table;
 }
 
-async function repairHomepageTables(pages) {
+async function resolveEnglishLegacyNews(viSlug, n) {
+  // Resolve a historical VI Post through its translated legacy record,
+  // then verify that the EN Post was imported and tagged product_lang=en.
+  const source = 'https://ptscps.com.vn';
+  try {
+    const viResponse = await context.request.get(`${source}/wp-json/wp/v2/posts?slug=${encodeURIComponent(viSlug)}&_fields=id,slug,translations`, { timeout: 25000 });
+    if (!viResponse.ok()) return null;
+    const rows = await viResponse.json();
+    if (!Array.isArray(rows) || rows.length !== 1) return null;
+    const translation = rows[0]?.translations?.en;
+    const id = Number(translation?.id || translation?.ID || translation?.value || translation || 0);
+    if (!id) return null;
+    const enResponse = await context.request.get(`${source}/wp-json/wp/v2/posts/${id}?_fields=id,slug`, { timeout: 25000 });
+    if (!enResponse.ok()) return null;
+    const enSlug = String((await enResponse.json())?.slug || '').trim();
+    if (!enSlug) return null;
+    const { response, body } = await api('GET', `/wp-json/wp/v2/posts?context=edit&status=publish&slug=${encodeURIComponent(enSlug)}&_fields=id,slug,status,acf`, n);
+    const match = response.ok() && Array.isArray(body) ? body.find(p => p.slug === enSlug && p.status === 'publish' && acfValue(p.acf?.product_lang) === 'en') : null;
+    return match ? `/${enSlug}` : null;
+  } catch { return null; }
+}
+
+async function repairHomepageTables(pages, n) {
   const homePages = pages.filter(p => {
     const slug = String(p.slug || '').toLowerCase();
     const key = acfValue(p.acf?.key).toLowerCase();
@@ -447,18 +489,38 @@ async function repairHomepageTables(pages) {
   assert(ids.length > 0, 'HOME_TABLES_MISSING: Cannot resolve editable home ESC Table ids from published WordPress pages');
   log('HOME_TABLES', { pages: homePages.map(p => ({ id: p.id, slug: p.slug, locale: acfValue(p.acf?.product_lang) })), ids });
 
+  // Read all tables before writing; keep their existing metadata and layout.
+  const snapshots = [];
+  for (const id of ids) snapshots.push({ id, table: await readNativeHomeTable(id) });
+  const translatedNews = new Map();
+  const englishNews = snapshots.filter(x => /^home_05_en$/i.test(x.id));
+  for (const { table } of englishNews) {
+    for (const row of table.data) for (const cell of row) {
+      if (typeof cell !== 'string') continue;
+      for (const match of cell.matchAll(legacyHomeUrl)) {
+        let url;
+        try { url = new URL(match[0]); } catch { continue; }
+        if (!/\.html?$/i.test(url.pathname)) continue;
+        const slug = url.pathname.split('/').pop().replace(/\.html?$/i, '');
+        if (slug === 'thu-ngo' || translatedNews.has(slug)) continue;
+        const direct = await resolveEnglishLegacyNews(slug, n);
+        translatedNews.set(slug, direct || '/news');
+        log('HOME_EN_NEWS_ROUTE', { legacySlug: slug, route: direct || '/news', paired: Boolean(direct) });
+      }
+    }
+  }
+
   // Collect and validate candidates before the first TablePress write.
   const changes = [];
   const unresolved = [];
   const availability = new Map();
-  for (const id of ids) {
+  for (const { id, table } of snapshots) {
     const locale = /_en$/i.test(id) ? 'en' : 'vi';
-    const table = await readNativeHomeTable(id);
     let altered = 0;
     const data = table.data.map((row, rowIndex) => row.map((cell, colIndex) => {
       if (typeof cell !== 'string' || !/ptscps\.com\.vn/i.test(cell)) return cell;
       return cell.replace(legacyHomeUrl, oldUrl => {
-        const candidate = homepageLinkTarget(oldUrl, locale, pages);
+        const candidate = homepageLinkTarget(oldUrl, locale, pages, translatedNews);
         if (!candidate) return oldUrl;
         const { target } = candidate;
         if (!target.startsWith('/') || target.startsWith('//') || /ptscps\.com\.vn/i.test(target)) {
@@ -640,7 +702,7 @@ try {
 
   prepareRoutes(pages, categories, products);
   await repairContent(n, pages, categories, products);
-  await repairHomepageTables(pages);
+  await repairHomepageTables(pages, n);
   await writeFile(`${artifactDir}/repairs.json`, JSON.stringify({ repairs, ambiguities }, null, 2));
   log('REPAIR', { writes, replacements: repairs.length, ambiguous: ambiguities.length });
 
