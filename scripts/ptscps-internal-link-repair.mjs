@@ -550,28 +550,72 @@ async function repairHomepageTables(pages, n) {
     throw Error(`HOME_LINK_UNRESOLVED=${unresolved.length}: some legacy links do not resolve to live routes`);
   }
   for (const { id, table, data, altered } of changes) {
-    const form = {
-      action: 'tablepress_save_table',
-      _ajax_nonce: table.nonce,
-      'tablepress[id]': id,
-      'tablepress[new_id]': id,
-      'tablepress[name]': table.name,
-      'tablepress[description]': table.description,
-      'tablepress[data]': JSON.stringify(data),
-      'tablepress[options]': JSON.stringify(table.options),
-      'tablepress[visibility]': JSON.stringify(table.visibility),
-      'tablepress[number][rows]': String(data.length),
-      'tablepress[number][columns]': String(table.columns),
-    };
-    const response = await page.request.post(uri('/wp-admin/admin-ajax.php'), { form, timeout: 90000 });
-    const body = await response.json().catch(() => null);
-    assert(response.ok() && body?.success === true && body.table_id === id,
-      `ESC Table native save rejected ${id}: HTTP=${response.status()} message=${body?.message || 'unknown'}`);
+    const original = JSON.stringify(table.data);
+    const desired = JSON.stringify(data);
+    let confirmed = false;
+    let savedInThisRun = false;
+    for (let attempt = 1; attempt <= 4 && !confirmed; attempt++) {
+      let latest;
+      try { latest = await readNativeHomeTable(id); }
+      catch (error) {
+        if (attempt === 4) throw error;
+        log('HOME_TABLE_READ_RETRY', { id, attempt, error: String(error?.code || error?.message || 'read failed').slice(0, 90) });
+        await sleep(attempt * 2000);
+        continue;
+      }
+      const actual = JSON.stringify(latest.data);
+      if (actual === desired) {
+        confirmed = true;
+        log('HOME_TABLE_READBACK_CONFIRMED', { id, attempt });
+        break;
+      }
+      assert(actual === original, `ESC Table concurrent data change: ${id}; refusing overwrite`);
+      const form = {
+        action: 'tablepress_save_table',
+        _ajax_nonce: latest.nonce,
+        'tablepress[id]': id,
+        'tablepress[new_id]': id,
+        'tablepress[name]': latest.name,
+        'tablepress[description]': latest.description,
+        'tablepress[data]': desired,
+        'tablepress[options]': JSON.stringify(latest.options),
+        'tablepress[visibility]': JSON.stringify(latest.visibility),
+        'tablepress[number][rows]': String(data.length),
+        'tablepress[number][columns]': String(latest.columns),
+      };
+      try {
+        const response = await page.request.post(uri('/wp-admin/admin-ajax.php'), { form, timeout: 90000 });
+        const body = await response.json().catch(() => null);
+        if (!response.ok() || body?.success !== true || body.table_id !== id) {
+          if ([502, 503, 504].includes(response.status()) && attempt < 4) {
+            log('HOME_TABLE_SAVE_RETRY', { id, attempt, http: response.status() });
+            await sleep(attempt * 2000);
+            continue;
+          }
+          throw Error(`ESC Table native save rejected ${id}: HTTP=${response.status()} message=${body?.message || 'unknown'}`);
+        }
+        savedInThisRun = true;
+      } catch (error) {
+        const reason = String(error?.code || error?.message || 'save failed').slice(0, 120);
+        if (!/ECONNRESET|ETIMEDOUT|socket hang up|EPIPE|ECONNABORTED/i.test(reason) || attempt === 4) {
+          // Even a failed final attempt may have been committed server-side.
+          const readback = await readNativeHomeTable(id).catch(() => null);
+          if (readback && JSON.stringify(readback.data) === desired) { confirmed = true; savedInThisRun = true; break; }
+          throw error;
+        }
+        log('HOME_TABLE_SAVE_RETRY', { id, attempt, reason });
+        await sleep(attempt * 2000);
+      }
+    }
+    assert(confirmed || savedInThisRun, `ESC Table save not confirmed ${id}`);
     const verified = await readNativeHomeTable(id);
-    assert(JSON.stringify(verified.data) === JSON.stringify(data), `ESC Table readback mismatch ${id}`);
-    writes++;
-    repairs.push({ owner: `table:${id}`, fixed: altered });
-    log('HOME_TABLE_SAVED', { id, fixed: altered });
+    assert(JSON.stringify(verified.data) === desired, `ESC Table readback mismatch ${id}`);
+    if (savedInThisRun) {
+      writes++;
+      repairs.push({ owner: `table:${id}`, fixed: altered });
+      log('HOME_TABLE_SAVED', { id, fixed: altered });
+    } else log('HOME_TABLE_ALREADY_SAVED', { id, fixed: altered });
+    await sleep(800);
   }
 }
 
