@@ -105,7 +105,7 @@ const productCategoryIds = product => Array.isArray(product?.product_categories)
 function pathKey(value) {
   try {
     const url = new URL(String(value || ''), 'https://ptscps.local');
-    let path = decodeURIComponent(url.pathname || '/').replace(/\/{2,}/g, '/');
+    let path = String(url.pathname || '/').replace(/\/{2,}/g, '/');
     if (path.length > 1) path = path.replace(/\/+$/, '');
     return path || '/';
   } catch { return ''; }
@@ -160,13 +160,16 @@ function prepareRoutes(pages, categories, products) {
     const lang = acfValue(item.acf?.product_lang).toLowerCase();
     const key = acfValue(item.acf?.key);
     if (!slug) continue;
-    if (key.startsWith('hseq-')) {
+    if (key.startsWith('hseq-') && slug !== 'hseq' && slug !== 'hseq-en') {
       registerRoute(`/${slug}`, `/hseq/${slug}`, `page:${item.id}`);
       if (lang === 'en') registerRoute(`/e/${slug}`, `/hseq/${slug}`, `page:${item.id}`);
     } else if (lang === 'en') {
       registerRoute(`/e/${slug}`, `/${slug}`, `page:${item.id}`);
     }
   }
+
+  registerRoute('/hseq/hseq', '/hseq', 'repair:legacy-hseq-root');
+  registerRoute('/hseq/hseq-en', '/hseq-en', 'repair:legacy-hseq-en-root');
 
   for (const item of products) {
     const slug = String(item.slug || '').trim();
@@ -317,8 +320,7 @@ async function collectLinkRecords(pages, categories, products) {
   return records;
 }
 
-async function triggerBuildAndWait() {
-  assert(githubToken, 'SOURCE_REPO_PAT is required to monitor the exact Astro build run');
+async function openBuildPage() {
   await page.goto(uri('/wp-admin/admin.php?page=vcs-build-trigger'), { waitUntil: 'domcontentloaded', timeout: 50000 });
   const button = page.locator('#vcs-build-btn-main');
   assert(await button.count() === 1, 'WordPress Build Website button unavailable');
@@ -327,11 +329,31 @@ async function triggerBuildAndWait() {
     active: globalThis.vcsBuild?.initial_active,
   }));
   assert(state.configured === true || state.configured === 1 || state.configured === '1', 'WordPress Build Website is not configured');
-  const force = page.locator('#vcs-force-build');
-  if (state.active || await button.isDisabled()) {
-    assert(await force.count() === 1 && !await force.isDisabled(), 'Active/stale build requires force control');
-    if (!await force.isChecked()) await force.check();
+  return { button, state, disabled: await button.isDisabled() };
+}
+
+async function waitForBuildSlot() {
+  for (let attempt = 1; attempt <= 6; attempt++) {
+    const current = await openBuildPage();
+    if (!current.state.active && !current.disabled) return current;
+    log('BUILD_SLOT_WAIT', { attempt, active: Boolean(current.state.active), disabled: current.disabled });
+    const existing = await waitForWordPressBuild({
+      page,
+      log: (key, value) => log(`BUILD_EXISTING_${key}`, value),
+      expectTriggered: false,
+      buildTimeoutMs: 900000,
+      githubRepository: 'ngocnhanvo/ptscps-astro',
+      githubToken,
+    });
+    log('BUILD_EXISTING_RESULT', existing);
+    if (attempt < 6) await sleep(3000);
   }
+  throw Error('WordPress Build Website stayed active/disabled after existing build completed');
+}
+
+async function triggerBuildAndWait() {
+  assert(githubToken, 'SOURCE_REPO_PAT is required to monitor the exact Astro build run');
+  const { button } = await waitForBuildSlot();
   const ack = page.waitForResponse(response => response.url().startsWith(wp + '/wp-admin/admin-ajax.php')
     && response.request().method() === 'POST'
     && String(response.request().postData() || '').includes('action=vcs_trigger_build'), { timeout: 45000 });
@@ -339,7 +361,7 @@ async function triggerBuildAndWait() {
   const response = await ack;
   const body = await response.json().catch(() => null);
   assert(response.ok() && body?.success, 'WordPress Build Website rejected trigger');
-  log('BUILD', state.active ? 'TRIGGERED_VIA_WORDPRESS_FORCE_STALE_ACTIVE' : 'TRIGGERED_VIA_WORDPRESS');
+  log('BUILD', 'TRIGGERED_VIA_WORDPRESS');
   const result = await waitForWordPressBuild({
     page,
     log: (key, value) => log(`BUILD_${key}`, value),
@@ -411,10 +433,8 @@ try {
 
   const records = await collectLinkRecords(pages, categories, products);
   await writeFile(`${artifactDir}/link-records.json`, JSON.stringify(records, null, 2));
-  if (writes > 0) {
-    await triggerBuildAndWait();
-    await waitFrontReady();
-  } else log('BUILD', 'NO_CMS_CHANGES_SKIP_TRIGGER');
+  await triggerBuildAndWait();
+  await waitFrontReady();
   await qaLinks(records);
   log('RESULT', { status: 'PASS', writes, replacements: repairs.length });
 } finally {
