@@ -1,9 +1,9 @@
 {
   "php": "fcdb935f439ad9d5358b660e8d901aeff9fea383",
-  "astro": "1ef8414f38ded8bf167c56ec49390d47919d4cbf",
-  "scope": "PTSCPS homepage metadata and CTA URLs; backed-up reversible acceptance; auto-build",
-  "phase": "release",
-  "acceptance_attempt": 18,
+  "astro": "a19740fc10fd29fb2c9f5fa6615b0d892911c095",
+  "scope": "PTSCPS home_14 quick links native source selection and safe CMS rollback; auto-build",
+  "phase": "build",
+  "acceptance_attempt": 19,
   "verify_final_controls": false,
   "skip_completed_shared": true,
   "skip_completed_text": false
