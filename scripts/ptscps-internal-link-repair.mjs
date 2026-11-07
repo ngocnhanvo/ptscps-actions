@@ -171,6 +171,52 @@ function prepareRoutes(pages, categories, products) {
   registerRoute('/hseq/hseq', '/hseq', 'repair:legacy-hseq-root');
   registerRoute('/hseq/hseq-en', '/hseq-en', 'repair:legacy-hseq-en-root');
 
+  const legacyAliases = new Map([
+    ['/job/vi-tri-3-3-2-2-2', '/search-jobs'],
+    ['/job/vi-tri-3-3-2-2', '/search-jobs'],
+    ['/job/vi-tri-3-3-2', '/search-jobs'],
+    ['/job/vi-tri-3-3', '/search-jobs'],
+    ['/job/vi-tri-3-2', '/search-jobs'],
+    ['/job/vi-tri-1-2-2', '/search-jobs'],
+    ['/job/category-2', '/search-jobs'],
+    ['/job/category-1', '/search-jobs'],
+    ['/cac-du-an-tieu-bieu', '/dich-vu'],
+    ['/careers', '/search-jobs'],
+    ['/careers/careers-contacts', '/contact'],
+    ['/careers/pps-benefits-culture', '/search-jobs'],
+    ['/careers/search-jobs', '/search-jobs'],
+    ['/dich-vu/dich-vu-thiet-ke-mua-sam-gia-cong-che-tao%E2%80%8B', '/dich-vu'],
+    ['/dich-vu/van-hanh-va-bao-duong-cac-cong-trinh-co-dinh-tren-bien-hoac-tren-bo', '/dich-vu'],
+    ['/hseq-en/hseq-certification', '/hseq/hseq-certification'],
+    ['/hseq-en/hseq-management-system', '/hseq/hseq-management-system'],
+    ['/hseq-en/hseq-policy', '/hseq/hseq-policy'],
+    ['/hseq-en/hseq-target', '/hseq/hseq-target'],
+    ['/services/engineering-procurement-construction-and-installation-epci', '/services'],
+    ['/services/providing-qualified-personnel-for-om-of-fpso-fso-and-offshore-floating-unit%E2%80%8B', '/services'],
+    ['/tuyen-dung/lien-he-tuyen-dung', '/lien-he'],
+    ['/tuyen-dung/thong-tin-tuyen-dung', '/tuyen-dung'],
+    ['/tuyen-dung/van-hoa-doanh-nghiep', '/tuyen-dung'],
+    ['/track-record', '/services'],
+    ['/c/about-us', '/about-us'],
+    ['/c/du-an', '/dich-vu'],
+    ['/c/du-an/cung-ung-nhan-luc-ky-thuat-van-hanh-va-bao-duong', '/dich-vu/cung-ung-nhan-luc-ky-thuat-van-hanh-va-bao-duong'],
+    ['/c/du-an/van-hanh-va-bao-duong-fpso-fso-mopu', '/dich-vu/van-hanh-va-bao-duong-fpso-fso-mopu'],
+    ['/c/gioi-thieu', '/gioi-thieu'],
+    ['/c/news', '/news'],
+    ['/c/news/activity-of-the-company', '/c/news/company-activities'],
+    ['/c/news/event', '/news'],
+    ['/c/thu-moi-chao-gia', '/thu-moi-chao-gia'],
+    ['/c/thu-vien', '/thu-vien-pps'],
+    ['/c/tin-tuc', '/tin-tuc'],
+    ['/c/tin-tuc/su-kien', '/tin-tuc'],
+    ['/c/track-record', '/services'],
+    ['/c/track-record/fpso-fso-om-services', '/services/fpso-fso-om-services'],
+    ['/c/track-record/manpower-supply', '/services/manpower-supply'],
+    ['/c/tuyen-dung', '/tuyen-dung'],
+    ['/c/uncategorized-vi', '/tin-tuc'],
+  ]);
+  for (const [from, to] of legacyAliases) registerRoute(from, to, 'repair:legacy-content-link');
+
   for (const item of products) {
     const slug = String(item.slug || '').trim();
     if (!slug) continue;
@@ -180,6 +226,7 @@ function prepareRoutes(pages, categories, products) {
     if (!root) continue;
     const route = `/${root.slug}/${category.slug}/${slug}`;
     registerRoute(`/${slug}`, route, `product:${item.id}`);
+    registerRoute(`/${slug}.htm`, route, `product:${item.id}:legacy-htm`);
     if (root.lang === 'en') registerRoute(`/e/${slug}`, route, `product:${item.id}`);
   }
   log('ROUTES', { mapped: routeMap.size, ambiguous: ambiguousRoutes.size });
@@ -342,7 +389,7 @@ async function waitForBuildSlot() {
       log: (key, value) => log(`BUILD_EXISTING_${key}`, value),
       expectTriggered: false,
       buildTimeoutMs: 900000,
-      githubRepository: 'ngocnhanvo/ptscps-astro',
+      githubRepository: 'ngocnhanvo/ptscps-actions',
       githubToken,
     });
     log('BUILD_EXISTING_RESULT', existing);
@@ -365,7 +412,7 @@ async function triggerBuildAndWait() {
   const result = await waitForWordPressBuild({
     page,
     log: (key, value) => log(`BUILD_${key}`, value),
-    githubRepository: 'ngocnhanvo/ptscps-astro',
+    githubRepository: 'ngocnhanvo/ptscps-actions',
     githubToken,
   });
   log('BUILD_RESULT', result);
