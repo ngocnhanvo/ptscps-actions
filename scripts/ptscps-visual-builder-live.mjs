@@ -337,6 +337,7 @@ try {
     assert.equal(stale.status, 409);
     assert.equal(stale.body.code, 'editor_preview_stale');
     checks.push({ source: 'ESC Table', exact_selection: 'PASS', cancel: 'PASS', stale_version: '409' });
+    const failedExactTexts = [];
     for (const fragment of ['Khám phá dịch vụ', 'Lĩnh vực hoạt động',
       'Giải pháp toàn diện cho công trình dầu khí trên biển']) {
       const exactNodes = frame.locator('[data-esc-builder-cell-row][data-esc-builder-cell-field]:visible')
@@ -356,12 +357,24 @@ try {
       const expectedKey = coords.row === 'section' ? 'section'
         : coords.row === 'description' ? 'section_description'
         : `${coords.row}:${coords.field}`;
-      await page.waitForFunction(({ expectedKey, fragment }) => {
-        const select = document.getElementById('esc-vb-edit-row');
-        const input = document.getElementById('esc-vb-edit-title');
-        return select?.selectedIndex >= 0 && select.value === expectedKey &&
-          input && !input.disabled && input.value.includes(fragment);
-      }, { expectedKey, fragment }, { timeout: 30000 });
+      try {
+        await page.waitForFunction(({ expectedKey, fragment }) => {
+          const select = document.getElementById('esc-vb-edit-row');
+          const input = document.getElementById('esc-vb-edit-title');
+          return select?.selectedIndex >= 0 && select.value === expectedKey &&
+            input && !input.disabled && input.value.includes(fragment);
+        }, { expectedKey, fragment }, { timeout: 12000 });
+      } catch {
+        const state = await page.evaluate(() => ({
+          row: document.getElementById('esc-vb-edit-row')?.value,
+          input: document.getElementById('esc-vb-edit-title')?.value?.slice(0, 120),
+          disabled: document.getElementById('esc-vb-edit-title')?.disabled,
+          feedback: document.getElementById('esc-vb-edit-feedback')?.textContent?.slice(0, 160),
+        }));
+        log('PTSCPS_BUILDER_TEXT_WAIT', { fragment, coords, expectedKey, state });
+        failedExactTexts.push(fragment);
+        continue;
+      }
       const editorValue = await page.locator('#esc-vb-edit-title').inputValue();
       log('PTSCPS_BUILDER_TEXT_DIAG', {fragment, table: coords.table, row: coords.row,
         field: coords.field, editorValue: editorValue.slice(0, 120), match: editorValue.includes(fragment)});
@@ -371,6 +384,7 @@ try {
         field: coords.field, selection: 'PASS', no_cms_write: true});
       await page.locator('#esc-vb-edit-cancel').click();
     }
+    assert.deepEqual(failedExactTexts, [], 'Unresolved homepage text cells');
     checks.push({source:'PTSCPS homepage exact text',cases:3,selection:'PASS',no_cms_write:true});
     }
     const heroButtons = await frame.locator('[data-tablepress-preview="home_00"] button').evaluateAll(nodes =>
