@@ -1396,20 +1396,47 @@ async function productionQa(viPages, enProducts, enPosts, targetPages) {
   }
   const englishHome = targetPages.find(p => acfValue(p.acf?.product_lang) === 'en' && acfValue(p.acf?.key) === 'home');
   if (englishHome) {
-    const response = await qa.goto(`${front}/${englishHome.slug}?_qa=${Date.now()}`, { waitUntil: 'load', timeout: 50000 });
-    assert(response?.status() === 200, 'English home production route failed');
-    const text = await qa.locator('footer').innerText();
-    for (const forbidden of ['Sitemap', 'Terms of Service', 'Privacy Policy', 'Điều khoản dịch vụ', 'Chính sách bảo mật']) {
-      assert(!text.includes(forbidden), `Untranslated policy label leaked into EN footer: ${forbidden}`);
+    const requiredHeader = ['Services', 'News', 'HSEQ', 'Contact'];
+    const forbiddenHeader = ['Dịch vụ', 'Tin tức', 'Tuyển dụng', 'Liên hệ'];
+    let response = null;
+    let headerText = '';
+    let footerText = '';
+    let readyAttempt = 0;
+    for (let attempt = 1; attempt <= 18; attempt++) {
+      readyAttempt = attempt;
+      try {
+        response = await qa.goto(`${front}/${englishHome.slug}?_qa_ready=${Date.now()}-${attempt}`, { waitUntil: 'load', timeout: 50000 });
+        if (response?.status() === 200) {
+          headerText = await qa.locator('#header-navrow').innerText().catch(() => '');
+          footerText = await qa.locator('footer').innerText().catch(() => '');
+          if (requiredHeader.every(label => headerText.includes(label))
+            && forbiddenHeader.every(label => !headerText.includes(label))) {
+            log('PRODUCTION_READY', { route: `/${englishHome.slug}`, attempt, header: 'PASS' });
+            break;
+          }
+        }
+      } catch (error) {
+        response = null;
+        headerText = '';
+        footerText = '';
+        log('PRODUCTION_READY_RETRY', { route: `/${englishHome.slug}`, attempt, reason: error?.message || 'navigation failed' });
+      }
+      if (attempt < 18) {
+        log('PRODUCTION_READY_WAIT', { route: `/${englishHome.slug}`, attempt, http: response?.status?.() || 0, header: headerText.slice(0, 240) });
+        await sleep(5000);
+      }
     }
-    const headerText = await qa.locator('#header-navrow').innerText();
-    for (const required of ['Services', 'News', 'HSEQ', 'Contact']) {
+    assert(response?.status() === 200, 'English home production route failed');
+    for (const forbidden of ['Sitemap', 'Terms of Service', 'Privacy Policy', 'Điều khoản dịch vụ', 'Chính sách bảo mật']) {
+      assert(!footerText.includes(forbidden), `Untranslated policy label leaked into EN footer: ${forbidden}`);
+    }
+    for (const required of requiredHeader) {
       assert(headerText.includes(required), `English Header missing ${required}`);
     }
-    for (const forbidden of ['Dịch vụ', 'Tin tức', 'Tuyển dụng', 'Liên hệ']) {
+    for (const forbidden of forbiddenHeader) {
       assert(!headerText.includes(forbidden), `Vietnamese Header label leaked into EN menu: ${forbidden}`);
     }
-    results.push({ route: `/${englishHome.slug}`, status: 200, policiesHidden: true, headerLocalized: true });
+    results.push({ route: `/${englishHome.slug}`, status: 200, policiesHidden: true, headerLocalized: true, readyAttempt });
   }
 
   const servicesPage = targetPages.find(p => acfValue(p.acf?.product_lang) === 'en' && acfValue(p.acf?.key) === 'ssr-products');
