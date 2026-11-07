@@ -355,6 +355,49 @@ async function setAcf(n, collection, id, values) {
     `ACF readback failed ${collection} ${id}`);
 }
 
+const STATIC_READABILITY_CSS_START = '/* PTSCPS_STATIC_READABILITY_START */';
+const STATIC_READABILITY_CSS_END = '/* PTSCPS_STATIC_READABILITY_END */';
+const STATIC_READABILITY_CSS = `${STATIC_READABILITY_CSS_START}
+.ptscps-readable-page{background:#fff;color:#334155;padding:48px 20px 72px}
+.ptscps-readable-page__inner{width:100%;max-width:1180px;margin:0 auto}
+.ptscps-readable-page__header{max-width:900px;margin:0 0 32px;padding:0 0 18px;border-bottom:1px solid #dbe4ee}
+.ptscps-readable-page__title{margin:0;color:#102a43;font-size:clamp(2rem,4vw,3rem);font-weight:750;line-height:1.12;letter-spacing:-.025em}
+.ptscps-readable-page__body{max-width:900px;color:#334155;font-size:17px;line-height:1.8}
+.ptscps-readable-page--sitemap .ptscps-readable-page__body{max-width:1100px}
+.ptscps-readable-page__body>*:first-child{margin-top:0}
+.ptscps-readable-page__body>*:last-child{margin-bottom:0}
+.ptscps-readable-page__body p{margin:0 0 1.05rem}
+.ptscps-readable-page__body h1,.ptscps-readable-page__body h2,.ptscps-readable-page__body h3,.ptscps-readable-page__body h4,.ptscps-readable-page__body h5,.ptscps-readable-page__body h6{color:#102a43;font-weight:700;line-height:1.3}
+.ptscps-readable-page__body h1{font-size:2rem;margin:2.2rem 0 1rem}
+.ptscps-readable-page__body h2{font-size:1.75rem;margin:2.2rem 0 .9rem}
+.ptscps-readable-page__body h3{font-size:1.45rem;margin:2rem 0 .8rem;padding-left:14px;border-left:4px solid #1f5fae}
+.ptscps-readable-page__body h4{font-size:1.2rem;margin:1.8rem 0 .7rem}
+.ptscps-readable-page__body h5,.ptscps-readable-page__body h6{font-size:1.05rem;margin:1.5rem 0 .6rem}
+.ptscps-readable-page__body ul,.ptscps-readable-page__body ol{margin:.75rem 0 1.25rem;padding-left:1.6rem}
+.ptscps-readable-page__body ul{list-style:disc}
+.ptscps-readable-page__body ul ul{list-style:circle;margin:.45rem 0 .65rem}
+.ptscps-readable-page__body ol{list-style:decimal}
+.ptscps-readable-page__body li{padding-left:.18rem}
+.ptscps-readable-page__body li+li{margin-top:.45rem}
+.ptscps-readable-page__body a{color:#1557a5;text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:3px}
+.ptscps-readable-page__body a:hover{color:#0b3c78;text-decoration-thickness:2px}
+.ptscps-readable-page__body a:focus-visible{outline:2px solid #1f5fae;outline-offset:3px;border-radius:2px}
+@media (min-width:900px){.ptscps-readable-page--sitemap .ptscps-readable-page__body>ul{columns:2;column-gap:64px}.ptscps-readable-page--sitemap .ptscps-readable-page__body>ul>li{break-inside:avoid;margin:0 0 .8rem}}
+@media (max-width:640px){.ptscps-readable-page{padding:34px 16px 54px}.ptscps-readable-page__header{margin-bottom:24px;padding-bottom:14px}.ptscps-readable-page__title{font-size:2rem}.ptscps-readable-page__body{font-size:16px;line-height:1.72}.ptscps-readable-page__body h2{font-size:1.5rem}.ptscps-readable-page__body h3{font-size:1.3rem}.ptscps-readable-page__body h4{font-size:1.12rem}.ptscps-readable-page__body ul,.ptscps-readable-page__body ol{padding-left:1.35rem}}
+${STATIC_READABILITY_CSS_END}`;
+
+const escapeStaticTitle = value => String(value || '')
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+function wrapStaticPageHtml(html, spec) {
+  return `<section class="ptscps-readable-page ptscps-readable-page--${spec.slug}" data-ptscps-readable-page="1"><div class="ptscps-readable-page__inner"><header class="ptscps-readable-page__header"><h1 class="ptscps-readable-page__title">${escapeStaticTitle(spec.title)}</h1></header><div class="ptscps-readable-page__body">${String(html || '').trim()}</div></div></section>`;
+}
+
+function mergeStaticReadabilityCss(value) {
+  const withoutOld = String(value || '').replace(/\/\* PTSCPS_STATIC_READABILITY_START \*\/[\s\S]*?\/\* PTSCPS_STATIC_READABILITY_END \*\//g, '').trim();
+  return [withoutOld, STATIC_READABILITY_CSS].filter(Boolean).join('\n\n');
+}
+
 async function ensureVietnameseStaticPages(n, sourcePages, targetPages) {
   const specs = [
     { slug: 'sitemap', title: 'Sitemap', key: 'sitemap' },
@@ -366,10 +409,12 @@ async function ensureVietnameseStaticPages(n, sourcePages, targetPages) {
     const sources = sourcePages.filter(item => item.slug === spec.slug && langOf(item) !== 'en');
     assert(sources.length === 1, `Legacy VI static Page mismatch ${spec.slug}: ${sources.length}`);
     const sourcePage = sources[0];
-    const localized = await localizeHtml(sourcePage.content?.rendered || '', n, `page:${spec.slug}`);
-    assert(plain(localized).length > 30, `Legacy VI static Page content unexpectedly empty ${spec.slug}`);
+    const localizedSource = await localizeHtml(sourcePage.content?.rendered || '', n, `page:${spec.slug}`);
+    assert(plain(localizedSource).length > 30, `Legacy VI static Page content unexpectedly empty ${spec.slug}`);
+    const localized = wrapStaticPageHtml(localizedSource, spec);
     let target = targetPages.find(item => item.slug === spec.slug && acfValue(item.acf?.product_lang) === 'vi')
       || targetPages.find(item => item.slug === spec.slug && !acfValue(item.acf?.product_lang));
+    const previousCss = acfValue(target?.acf?.cssmore);
     const payload = { title: spec.title, slug: spec.slug, status: 'publish', content: localized };
     if (!target) {
       const created = await api('POST', '/wp-json/wp/v2/pages', n, payload, 90000);
@@ -377,7 +422,7 @@ async function ensureVietnameseStaticPages(n, sourcePages, targetPages) {
       target = created.body; writes++;
     } else {
       const current = String(target.content?.raw ?? target.content?.rendered ?? '');
-      if (plain(current) !== plain(localized) || target.status !== 'publish') {
+      if (plain(current) !== plain(localized) || !current.includes('data-ptscps-readable-page="1"') || target.status !== 'publish') {
         const updated = await api('POST', `/wp-json/wp/v2/pages/${target.id}`, n, payload, 90000);
         assert(updated.response.ok(), `Cannot update VI static Page ${spec.slug}`);
         target = updated.body; writes++;
@@ -385,12 +430,17 @@ async function ensureVietnameseStaticPages(n, sourcePages, targetPages) {
     }
     const currentAction = acfValue(target.acf?.action) || 'IntroPage';
     const currentKey = acfValue(target.acf?.key) || spec.key;
-    await setAcf(n, 'pages', Number(target.id), { product_lang: 'vi', action: currentAction, key: currentKey });
+    await setAcf(n, 'pages', Number(target.id), {
+      product_lang: 'vi', action: currentAction, key: currentKey, cssmore: mergeStaticReadabilityCss(previousCss),
+    });
     const verify = await api('GET', `/wp-json/wp/v2/pages/${target.id}?context=edit&_fields=id,slug,status,title,content,acf`, n);
-    assert(verify.response.ok() && verify.body.status === 'publish' && plain(verify.body.content?.raw ?? verify.body.content?.rendered).length > 30,
-      `VI static Page readback failed ${spec.slug}`);
-    results.push({ slug: spec.slug, id: Number(target.id), action: acfValue(verify.body.acf?.action), key: acfValue(verify.body.acf?.key) });
-    log('VI_STATIC_PAGE', { slug: spec.slug, id: target.id, state: 'PASS' });
+    const verifiedContent = String(verify.body?.content?.raw ?? verify.body?.content?.rendered ?? '');
+    const verifiedCss = acfValue(verify.body?.acf?.cssmore);
+    assert(verify.response.ok() && verify.body.status === 'publish' && plain(verifiedContent).length > 30
+      && verifiedContent.includes('data-ptscps-readable-page="1"') && verifiedCss.includes(STATIC_READABILITY_CSS_START),
+      `VI static Page readability readback failed ${spec.slug}`);
+    results.push({ slug: spec.slug, title: spec.title, id: Number(target.id), action: acfValue(verify.body.acf?.action), key: acfValue(verify.body.acf?.key) });
+    log('VI_STATIC_PAGE', { slug: spec.slug, id: target.id, state: 'PASS_READABLE' });
   }
   return results;
 }
@@ -1380,20 +1430,89 @@ async function triggerBuildAndWait() {
   const body = await response.json().catch(() => null);
   assert(response.ok() && body?.success, 'WordPress Build Website rejected trigger');
   log('BUILD', state.active ? 'TRIGGERED_VIA_WORDPRESS_FORCE_STALE_ACTIVE' : 'TRIGGERED_VIA_WORDPRESS');
-  const build = await waitForWordPressBuild({ page, wpOrigin: wp, logPrefix: 'PTSCPS_LOCALIZED_BUILD' });
+  const githubToken = String(process.env.SOURCE_REPO_PAT || '').trim();
+  assert(githubToken, 'SOURCE_REPO_PAT is required to monitor the exact Astro build run');
+  const build = await waitForWordPressBuild({
+    page,
+    log: (key, value) => log(`BUILD_${key}`, value),
+    githubRepository: 'ngocnhanvo/ptscps-astro',
+    githubToken,
+  });
   log('BUILD_RESULT', build);
   return build;
+}
+
+async function assertReadableStaticPage(qa, item, viewportLabel) {
+  const marker = qa.locator('[data-ptscps-readable-page="1"]');
+  assert(await marker.count() === 1, `Readable wrapper missing ${item.slug} (${viewportLabel})`);
+  const title = marker.locator('h1.ptscps-readable-page__title');
+  assert((await title.innerText()).trim() === item.title, `Readable H1 mismatch ${item.slug} (${viewportLabel})`);
+  assert((await qa.locator('main').innerText()).trim().length > 80, `VI static production content empty ${item.slug}`);
+  const metrics = await marker.evaluate((root, slug) => {
+    const body = root.querySelector('.ptscps-readable-page__body');
+    const h1 = root.querySelector('h1');
+    const list = body?.querySelector('ul,ol');
+    const bodyStyle = body ? getComputedStyle(body) : null;
+    const h1Style = h1 ? getComputedStyle(h1) : null;
+    const listStyle = list ? getComputedStyle(list) : null;
+    const rect = body?.getBoundingClientRect();
+    return {
+      bodyLeft: rect?.left ?? 0,
+      bodyWidth: rect?.width ?? 0,
+      bodyFont: parseFloat(bodyStyle?.fontSize || '0'),
+      bodyLine: parseFloat(bodyStyle?.lineHeight || '0'),
+      h1Font: parseFloat(h1Style?.fontSize || '0'),
+      h1Weight: Number(h1Style?.fontWeight || 0),
+      listCount: body?.querySelectorAll('ul,ol').length || 0,
+      listStyle: listStyle?.listStyleType || '',
+      overflow: document.documentElement.scrollWidth - window.innerWidth,
+      viewport: window.innerWidth,
+      slug,
+    };
+  }, item.slug);
+  assert(metrics.bodyLeft >= 12, `Readable body touches viewport edge ${item.slug} (${viewportLabel})`);
+  assert(metrics.bodyWidth > 250 && metrics.bodyWidth <= metrics.viewport - 24,
+    `Readable body width invalid ${item.slug} (${viewportLabel}) width=${metrics.bodyWidth} viewport=${metrics.viewport}`);
+  assert(metrics.h1Font >= (viewportLabel === 'mobile' ? 28 : 30) && metrics.h1Weight >= 600,
+    `Readable H1 typography invalid ${item.slug} (${viewportLabel})`);
+  assert(metrics.bodyLine >= metrics.bodyFont * 1.45, `Readable line-height too tight ${item.slug} (${viewportLabel})`);
+  assert(metrics.overflow <= 2, `Horizontal overflow ${item.slug} (${viewportLabel}) delta=${metrics.overflow}`);
+  if (metrics.listCount > 0) assert(metrics.listStyle && metrics.listStyle !== 'none', `List markers reset on ${item.slug} (${viewportLabel})`);
+  if (item.slug === 'sitemap') assert(metrics.listCount > 0, 'Sitemap has no semantic list after migration');
+  return metrics;
 }
 
 async function productionQa(viPages, enProducts, enPosts, targetPages) {
   const qa = await context.newPage();
   const results = [];
   for (const item of viPages) {
-    const response = await qa.goto(`${front}/${item.slug}?_qa=${Date.now()}`, { waitUntil: 'load', timeout: 50000 });
+    let response = null;
+    let readyAttempt = 0;
+    for (let attempt = 1; attempt <= 18; attempt++) {
+      readyAttempt = attempt;
+      response = await qa.goto(`${front}/${item.slug}?_qa_readable=${Date.now()}-${attempt}`, { waitUntil: 'load', timeout: 50000 }).catch(() => null);
+      if (response?.status() === 200 && await qa.locator('[data-ptscps-readable-page="1"]').count() === 1) break;
+      if (attempt < 18) {
+        log('PRODUCTION_READY_WAIT', { route: `/${item.slug}`, attempt, http: response?.status?.() || 0, marker: false });
+        await sleep(5000);
+      }
+    }
     assert(response?.status() === 200, `VI static production route failed ${item.slug}`);
-    assert((await qa.locator('main').innerText()).trim().length > 80, `VI static production content empty ${item.slug}`);
-    results.push({ route: `/${item.slug}`, status: 200 });
+    const desktopMetrics = await assertReadableStaticPage(qa, item, 'desktop');
+    await qa.screenshot({ path: `${artifactDir}/${item.slug}-desktop.png`, fullPage: true });
+    results.push({ route: `/${item.slug}`, status: 200, readable: true, readyAttempt, desktopMetrics });
   }
+  const mobileQa = await context.newPage();
+  await mobileQa.setViewportSize({ width: 390, height: 844 });
+  for (const item of viPages) {
+    const response = await mobileQa.goto(`${front}/${item.slug}?_qa_mobile=${Date.now()}`, { waitUntil: 'load', timeout: 50000 });
+    assert(response?.status() === 200, `VI static mobile production route failed ${item.slug}`);
+    const mobileMetrics = await assertReadableStaticPage(mobileQa, item, 'mobile');
+    await mobileQa.screenshot({ path: `${artifactDir}/${item.slug}-mobile.png`, fullPage: true });
+    const result = results.find(entry => entry.route === `/${item.slug}`);
+    if (result) result.mobileMetrics = mobileMetrics;
+  }
+  await mobileQa.close();
   const englishHome = targetPages.find(p => acfValue(p.acf?.product_lang) === 'en' && acfValue(p.acf?.key) === 'home');
   if (englishHome) {
     const requiredHeader = ['Services', 'News', 'HSEQ', 'Contact'];
