@@ -50,6 +50,9 @@ async function inspect(page, spec, label) {
     const listStyle = firstList ? getComputedStyle(firstList).listStyleType : '';
     const paragraphStyle = firstParagraph ? getComputedStyle(firstParagraph) : null;
     const linkStyle = firstLink ? getComputedStyle(firstLink) : null;
+    const rootRect = root.getBoundingClientRect();
+    const footer = document.querySelector('#footer-contact');
+    const footerRect = footer?.getBoundingClientRect();
     return {
       viewport: innerWidth,
       bodyLeft: bodyRect.left,
@@ -68,6 +71,7 @@ async function inspect(page, spec, label) {
       linkCount: body.querySelectorAll('a').length,
       linkDecoration: linkStyle?.textDecorationLine || '',
       overflow: document.documentElement.scrollWidth - innerWidth,
+      footerGap: footerRect ? Math.max(0, footerRect.top - rootRect.bottom) : -1,
     };
   });
   assert(metrics, `PTSCPS_STATIC_QA=FAIL missing readable DOM ${spec.slug} ${label}`);
@@ -81,6 +85,8 @@ async function inspect(page, spec, label) {
   assert(metrics.bodyFont >= 15 && metrics.bodyLine >= metrics.bodyFont * 1.45,
     `PTSCPS_STATIC_QA=FAIL body typography ${spec.slug} ${label}`);
   assert(metrics.overflow <= 2, `PTSCPS_STATIC_QA=FAIL horizontal overflow ${spec.slug} ${label}`);
+  assert(metrics.footerGap >= 0 && metrics.footerGap <= 2,
+    `PTSCPS_STATIC_QA=FAIL footer gap ${spec.slug} ${label}: ${metrics.footerGap}px`);
   if (metrics.paragraphCount > 0) assert(metrics.paragraphMarginBottom >= 8,
     `PTSCPS_STATIC_QA=FAIL paragraph spacing ${spec.slug} ${label}`);
   if (metrics.listCount > 0) assert(metrics.listStyle && metrics.listStyle !== 'none',
