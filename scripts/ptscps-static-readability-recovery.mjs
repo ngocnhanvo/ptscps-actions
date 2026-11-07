@@ -391,6 +391,9 @@ async function inspect(qa, spec, label) {
     const h1Style = h1 ? getComputedStyle(h1) : null;
     const grid = el.querySelector('.ptscps-sitemap-grid');
     const gridStyle = grid ? getComputedStyle(grid) : null;
+    const rootRect = el.getBoundingClientRect();
+    const footer = document.querySelector('#footer-contact');
+    const footerRect = footer?.getBoundingClientRect();
     return {
       viewport: innerWidth,
       bodyLeft: bodyRect?.left ?? 0,
@@ -408,6 +411,7 @@ async function inspect(qa, spec, label) {
       sitemapGroups: body?.querySelectorAll('.ptscps-sitemap-group').length || 0,
       gridColumns: gridStyle?.gridTemplateColumns ? gridStyle.gridTemplateColumns.split(' ').filter(Boolean).length : 0,
       overflow: document.documentElement.scrollWidth - innerWidth,
+      footerGap: footerRect ? Math.max(0, footerRect.top - rootRect.bottom) : -1,
       slug,
     };
   }, spec.slug);
@@ -419,6 +423,8 @@ async function inspect(qa, spec, label) {
   assert(metrics.bodyFont >= 15 && metrics.bodyLine >= metrics.bodyFont * 1.45,
     `QA_FAILED body typography ${spec.slug} ${label}`);
   assert(metrics.overflow <= 2, `QA_FAILED horizontal overflow ${spec.slug} ${label}`);
+  assert(metrics.footerGap >= 0 && metrics.footerGap <= 2,
+    `QA_FAILED footer gap ${spec.slug} ${label}: ${metrics.footerGap}px`);
   if (spec.slug === 'sitemap') {
     assert(metrics.sitemapGroups >= 4 && metrics.listCount >= 2 && metrics.linkCount >= 8,
       `QA_FAILED sitemap hierarchy ${label}: ${JSON.stringify(metrics)}`);
