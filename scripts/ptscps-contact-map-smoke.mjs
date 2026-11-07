@@ -38,5 +38,44 @@ try{
   await page.screenshot({path:`${artifact}/contact-after-9s.png`,fullPage:true,timeout:20000});
   console.log('PTSCPS_CONTACT_MAP_SMOKE='+JSON.stringify({status:response?.status(),source,credentialless,loading,frameUrl,mapImages,bodyLength:body?.length||0,bodyPreview:body?.slice(0,350)||'',mapsResponses:mapsResponses.slice(-12),failures:failures.slice(-12),consoleErrors:consoleErrors.slice(-12)}));
   assert(credentialless&&loading==='eager'&&source,'Iframe configuration missing');
+  const layoutChecks=[];
+  for(const width of [1440,390]){
+    await page.setViewportSize({width,height:900});
+    const english=await page.goto(`${front}/contact?_layout_smoke=${Date.now()}`,{waitUntil:'domcontentloaded',timeout:45000});
+    assert(english?.status()===200,`English Contact HTTP ${english?.status()} at ${width}px`);
+    const root=page.locator('[data-tablepress-preview="contact_00_en"] > main');
+    await root.waitFor({state:'visible',timeout:15000});
+    const panel=root.locator('.glass-panel');
+    assert(await panel.count()===1,`English Contact form card missing at ${width}px`);
+    const metrics=await root.evaluate((el)=>{
+      const panel=el.querySelector('.glass-panel');
+      const rootStyle=getComputedStyle(el);
+      const panelStyle=panel?getComputedStyle(panel):null;
+      const rect=el.getBoundingClientRect();
+      return {
+        maxWidth:rootStyle.maxWidth,
+        paddingLeft:rootStyle.paddingLeft,
+        paddingRight:rootStyle.paddingRight,
+        paddingBottom:rootStyle.paddingBottom,
+        marginLeft:rootStyle.marginLeft,
+        marginRight:rootStyle.marginRight,
+        panelPadding:panelStyle?.padding||'',
+        panelRadius:panelStyle?.borderRadius||'',
+        left:rect.left,right:rect.right,width:rect.width,
+        viewport:window.innerWidth,
+        scrollWidth:document.documentElement.scrollWidth,
+      };
+    });
+    assert(metrics.maxWidth==='1200px',`English Contact max-width mismatch at ${width}px: ${metrics.maxWidth}`);
+    assert(parseFloat(metrics.paddingLeft)>=19&&parseFloat(metrics.paddingRight)>=19,
+      `English Contact wrapper padding missing at ${width}px: ${JSON.stringify(metrics)}`);
+    assert(parseFloat(metrics.panelPadding)>=31,
+      `English Contact card padding missing at ${width}px: ${metrics.panelPadding}`);
+    assert(metrics.scrollWidth<=metrics.viewport+2,
+      `English Contact horizontal overflow at ${width}px: ${JSON.stringify(metrics)}`);
+    await page.screenshot({path:`${artifact}/contact-en-${width}.png`,fullPage:true,timeout:20000});
+    layoutChecks.push({width,...metrics});
+  }
+  console.log('PTSCPS_CONTACT_EN_FORM_LAYOUT='+JSON.stringify(layoutChecks));
   await context.close();
 }finally{await browser.close();}
