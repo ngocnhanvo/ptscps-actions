@@ -472,6 +472,7 @@ try {
       {table:'home_04',row:'description',field:'section_description',label:'DỰ ÁN TIÊU BIỂU'},
       {table:'home_04',row:'section',field:'section_title',label:'Những công trình khẳng định năng lực PPS'},
       {table:'home_14',row:'section',field:'section_title',label:'Liên kết nhanh'},
+      {table:'home_15',row:'section',field:'section_title',label:'Khách hàng'},
     ]) {
       frame = await openBuilder();
       const cell = frame.locator('[data-tablepress-preview="' + test.table + '"]')
