@@ -168,6 +168,10 @@ if os.environ.get("PTSCPS_PRODUCT_CATEGORY_MEDIA_ONLY") == "1":
 if os.environ.get("PTSCPS_PRODUCT_MENU_ORDER_REST_ONLY") == "1":
     FILES = ("wp-content/plugins/github-trigger/products/endpoint.php",)
 
+# Incremental Page/config logging is owned by the REST plugin bootstrap filter.
+if os.environ.get("PTSCPS_REST_CONTENT_LOGGING_ONLY") == "1":
+    FILES = ("wp-content/mu-plugins/disable-plugins-for-api.php",)
+
 # Install the compatible helper before the endpoint that requires it.
 # This scope never uploads unrelated plugins or triggers an Astro build.
 if os.environ.get("PTSCPS_BUILD_DELTA_ONLY") == "1":

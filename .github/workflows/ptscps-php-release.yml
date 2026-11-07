@@ -2,7 +2,7 @@ name: PTSCPS PHP deployment (manual opt-in)
 on:
   push:
     branches: [main]
-    paths: [.ptscps-folders-count-release-request, .ptscps-ml-prefill-release-request, .ptscps-preview-css-release-request, .ptscps-preview-inline-style-release-request, .ptscps-agent-locale-release-request, .ptscps-agent-history-locale-release-request, .ptscps-agent-synthesis-release-request, .ptscps-product-menu-order-rest-release-request]
+    paths: [.ptscps-folders-count-release-request, .ptscps-ml-prefill-release-request, .ptscps-preview-css-release-request, .ptscps-preview-inline-style-release-request, .ptscps-agent-locale-release-request, .ptscps-agent-history-locale-release-request, .ptscps-agent-synthesis-release-request, .ptscps-product-menu-order-rest-release-request, .ptscps-rest-content-logging-release-request]
   workflow_dispatch:
     inputs:
       confirm:
@@ -27,7 +27,8 @@ jobs:
                   || github.event.head_commit.message == 'deploy(ptscps): bilingual Agent PHP only'
                   || github.event.head_commit.message == 'deploy(ptscps): language-scoped Agent PHP history only'
                   || github.event.head_commit.message == 'deploy(ptscps): English Agent synthesis PHP only'
-                  || github.event.head_commit.message == 'deploy(ptscps): product menu order REST field PHP only')))
+                  || github.event.head_commit.message == 'deploy(ptscps): product menu order REST field PHP only'
+                  || github.event.head_commit.message == 'deploy(ptscps): REST content logging PHP only')))
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
@@ -81,12 +82,17 @@ jobs:
                 test "$(cat .ptscps-product-menu-order-rest-release-request)" = 'PTSCPS_PRODUCT_MENU_ORDER_REST_ONLY source=1c02bd52e4ff10322d6ca7fe83f0367bc0827592'
                 test "$(git -C source-php rev-parse HEAD)" = '1c02bd52e4ff10322d6ca7fe83f0367bc0827592'
                 ;;
+              'deploy(ptscps): REST content logging PHP only')
+                test "$(cat .ptscps-rest-content-logging-release-request)" = 'PTSCPS_REST_CONTENT_LOGGING_ONLY source=6c7f3ff8e591b3edc93b0c27f664834b5c2d2a75'
+                test "$(git -C source-php rev-parse HEAD)" = '6c7f3ff8e591b3edc93b0c27f664834b5c2d2a75'
+                ;;
               *) exit 1 ;;
             esac
           fi
           php -l source-php/wp-content/mu-plugins/ptscps-folders-accurate-counts.php
           php source-php/wp-content/mu-plugins/tests/ptscps-folders-accurate-counts-test.php
           php -l source-php/wp-content/mu-plugins/esc-multilingual-admin.php
+          php -l source-php/wp-content/mu-plugins/disable-plugins-for-api.php
           php source-php/wp-content/mu-plugins/tests/esc-multilingual-prefill-test.php
           php -l source-php/ptscps-unzip.php
           php -l source-php/wp-content/plugins/github-trigger/vcs-build-trigger.php
@@ -138,6 +144,8 @@ jobs:
             ${{ github.event_name == 'push' && github.event.head_commit.message == 'deploy(ptscps): English Agent synthesis PHP only' && '1' || '0' }}
           PTSCPS_PRODUCT_MENU_ORDER_REST_ONLY: >-
             ${{ github.event_name == 'push' && github.event.head_commit.message == 'deploy(ptscps): product menu order REST field PHP only' && '1' || '0' }}
+          PTSCPS_REST_CONTENT_LOGGING_ONLY: >-
+            ${{ github.event_name == 'push' && github.event.head_commit.message == 'deploy(ptscps): REST content logging PHP only' && '1' || '0' }}
           ENV_FILE: ${{ secrets.ENV_FILE }}
           FTP_SERVER: ${{ secrets.FTP_SERVER }}
           FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
