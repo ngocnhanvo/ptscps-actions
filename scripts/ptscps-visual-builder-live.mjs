@@ -105,6 +105,29 @@ async function backup(item) {
 async function restoreAll() {
   for (const item of [...pending].reverse()) {
     if (item.restored) continue;
+    if (item.read === 'editable-text') {
+      const current = await okApi('editable-text', item.identity);
+      const row = current.rows.find(r => String(r.row) === String(item.row) && r.field === item.field);
+      const entry = item.row === 'section' ? current.section_title : row;
+      assert(entry, 'ESC Table restore coordinate missing');
+      if (entry.title === item.before.title) { item.restored = true; continue; }
+      assert.equal(entry.title, item.temporary, 'Concurrent ESC cell edit; do not overwrite');
+      assert.equal(current.version, item.savedVersion, 'Concurrent ESC Table version; do not overwrite');
+      const restored = await okApi('save-text', {
+        ...item.identity, source_type: 'esc_table', row: item.row, field: item.field,
+        title: item.before.title, original_hash: entry.hash,
+        rendered_version: current.version, expected_version: current.version,
+      });
+      assert.equal(restored.saved, true);
+      const readback = await okApi('editable-text', item.identity);
+      const original = item.row === 'section' ? readback.section_title :
+        readback.rows.find(r => String(r.row) === String(item.row) && r.field === item.field);
+      assert.equal(original?.title, item.before.title, 'ESC Table restore readback mismatch');
+      item.restored = true;
+      log('PTSCPS_BUILDER_CMS_RESTORE', {source: item.read, table: item.identity.table_id,
+        row: item.row, field: item.field, verified: true});
+      continue;
+    }
     const current = await okApi(item.read, item.identity);
     if (current[item.key] === item.before[item.key]) { item.restored = true; continue; }
     assert.equal(current[item.key], item.temporary, 'Concurrent edit: do not overwrite a newer native value');
@@ -386,6 +409,62 @@ try {
     }
     assert.deepEqual(failedExactTexts, [], 'Unresolved homepage text cells');
     checks.push({source:'PTSCPS homepage exact text',cases:3,selection:'PASS',no_cms_write:true});
+    // Exercise a bounded native CMS write, reload, and exact-cell restoration.
+    for (const fragment of ['Khám phá dịch vụ', 'Lĩnh vực hoạt động',
+      'Giải pháp toàn diện cho công trình dầu khí trên biển']) {
+      frame = await openBuilder();
+      const cell = frame.locator('[data-esc-builder-cell-row][data-esc-builder-cell-field]:visible')
+        .filter({hasText: fragment}).first();
+      const coordinate = await cell.evaluate(node => ({
+        table_id: node.closest('[data-tablepress-preview]')?.getAttribute('data-tablepress-preview'),
+        row: node.getAttribute('data-esc-builder-cell-row'),
+        field: node.getAttribute('data-esc-builder-cell-field'),
+      }));
+      assert(coordinate.table_id && coordinate.row !== null && coordinate.field);
+      await cell.click();
+      const key = coordinate.row === 'section' ? 'section' :
+        coordinate.row === 'description' ? 'section_description' :
+          coordinate.row + ':' + coordinate.field;
+      await page.waitForFunction(({key,fragment}) => {
+        const s=document.getElementById('esc-vb-edit-row');
+        const t=document.getElementById('esc-vb-edit-title');
+        return s?.value===key && t && !t.disabled &&
+          t.value.toLocaleLowerCase('vi').includes(fragment.toLocaleLowerCase('vi'));
+      }, {key,fragment}, {timeout:12000});
+      const before = await okApi('editable-text', {table_id:coordinate.table_id});
+      const row = coordinate.row === 'section' ? before.section_title :
+        before.rows.find(r => String(r.row) === coordinate.row && r.field === coordinate.field);
+      assert(row?.editable, 'ESC Table cell not safely editable: ' + fragment);
+      const original = await page.locator('#esc-vb-edit-title').inputValue();
+      assert.equal(row.title, original);
+      const temporary = original + ' · VB QA';
+      const rollback = {read:'editable-text', identity:{table_id:coordinate.table_id},
+        row: coordinate.row, field: coordinate.field, before:{title:original}, temporary};
+      await backup(rollback);
+      await page.locator('#esc-vb-edit-title').fill(temporary);
+      const saved = await uiSave(page.locator('#esc-vb-text-editor'), 'save-text');
+      rollback.savedVersion = saved.version;
+      assert.equal(saved.row, coordinate.row === 'section' || coordinate.row === 'description'
+        ? coordinate.row : Number(coordinate.row));
+      assert.equal(saved.field, coordinate.field);
+      const readback = await okApi('editable-text', {table_id:coordinate.table_id});
+      const savedRow = coordinate.row === 'section' ? readback.section_title :
+        readback.rows.find(r => String(r.row) === coordinate.row && r.field === coordinate.field);
+      assert.equal(savedRow?.title, temporary, 'ESC Table REST readback mismatch');
+      frame = await openBuilder();
+      const refreshed = frame.locator('[data-esc-builder-cell-row="' + coordinate.row +
+        '"][data-esc-builder-cell-field="' + coordinate.field + '"]').filter({hasText: temporary}).first();
+      await refreshed.waitFor({state:'visible',timeout:20000});
+      await restoreAll();
+      frame = await openBuilder();
+      const restoredCell = frame.locator('[data-esc-builder-cell-row="' + coordinate.row +
+        '"][data-esc-builder-cell-field="' + coordinate.field + '"]').filter({hasText: original}).first();
+      await restoredCell.waitFor({state:'visible',timeout:20000});
+      checks.push({source:'ESC Table exact save',table:coordinate.table_id,row:coordinate.row,
+        field:coordinate.field,save:'PASS',readback:'PASS',reload:'PASS',restore:'PASS'});
+      log('PTSCPS_BUILDER_EXACT_SAVE', {fragment,table:coordinate.table_id,
+        row:coordinate.row,field:coordinate.field,result:'PASS',restored:true});
+    }
     }
     const heroButtons = await frame.locator('[data-tablepress-preview="home_00"] button').evaluateAll(nodes =>
       nodes.map(node => Object.fromEntries(Array.from(node.attributes)
