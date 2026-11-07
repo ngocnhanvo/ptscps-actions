@@ -508,6 +508,292 @@ async function ensureEnglishSupportTables() {
 }
 
 
+const representedServicePages = new Set();
+const representedServicePosts = new Set();
+
+async function listProductCategories(n) {
+  const out = [];
+  for (let p = 1; p <= 10; p++) {
+    const { response, body } = await api('GET', `/wp-json/wp/v2/product_cat?context=edit&hide_empty=false&per_page=100&page=${p}&_fields=id,name,slug,parent,description`, n);
+    if (response.status() === 400 && p > 1) break;
+    assert(response.ok() && Array.isArray(body), `Target product_cat HTTP ${response.status()} page=${p}`);
+    out.push(...body);
+    const max = Number(response.headers()['x-wp-totalpages'] || 1);
+    if (p >= max || body.length < 100) break;
+  }
+  return out;
+}
+
+const normalizeMatchText = value => plain(value).normalize('NFKC').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+const productCategoryIds = product => Array.isArray(product?.product_categories)
+  ? product.product_categories.map(item => Number(item?.id || item)).filter(Boolean)
+  : Array.isArray(product?.product_cat) ? product.product_cat.map(Number).filter(Boolean) : [];
+
+async function termThumbnailId(termId) {
+  await page.goto(uri(`/wp-admin/term.php?taxonomy=product_cat&tag_ID=${Number(termId)}&post_type=product&esc_full_admin=1`), { waitUntil: 'domcontentloaded', timeout: 50000 });
+  const input = page.locator('#product_cat_thumbnail_id');
+  if (await input.count() !== 1) return 0;
+  return Number(await input.inputValue() || 0);
+}
+
+async function setTermThumbnailId(termId, mediaId) {
+  if (!Number(mediaId)) return;
+  await page.goto(uri(`/wp-admin/term.php?taxonomy=product_cat&tag_ID=${Number(termId)}&post_type=product&esc_full_admin=1`), { waitUntil: 'domcontentloaded', timeout: 50000 });
+  const input = page.locator('#product_cat_thumbnail_id');
+  assert(await input.count() === 1, `WooCommerce thumbnail field missing term=${termId}`);
+  if (Number(await input.inputValue() || 0) === Number(mediaId)) return;
+  await input.evaluate((el, id) => { el.value = String(id); el.dispatchEvent(new Event('change', { bubbles: true })); }, Number(mediaId));
+  const form = page.locator('form#edittag').first();
+  assert(await form.count() === 1, `Native product_cat edit form missing term=${termId}`);
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => null),
+    form.evaluate(el => { if (!(el instanceof HTMLFormElement)) throw Error('Invalid product_cat form'); el.requestSubmit(); }),
+  ]);
+}
+
+async function ensureProductCategory(n, spec) {
+  let rows = await listProductCategories(n);
+  const matches = rows.filter(item => item.slug === spec.slug);
+  assert(matches.length <= 1, `Duplicate target product_cat ${spec.slug}`);
+  let row = matches[0] || null;
+  const payload = { name: spec.name, slug: spec.slug, parent: Number(spec.parent || 0), description: String(spec.description || '') };
+  if (!row) {
+    const created = await api('POST', '/wp-json/wp/v2/product_cat', n, payload);
+    assert(created.response.ok() && created.body?.id, `Cannot create EN product_cat ${spec.slug}: HTTP ${created.response.status()}`);
+    row = created.body; writes++;
+    log('EN_SERVICE_CATEGORY', { slug: spec.slug, id: row.id, state: 'CREATED', parent: payload.parent });
+  } else {
+    const currentDescription = String(row.description?.raw ?? row.description ?? '');
+    const changed = plain(row.name) !== plain(spec.name) || Number(row.parent || 0) !== payload.parent || plain(currentDescription) !== plain(payload.description);
+    if (changed) {
+      const updated = await api('POST', `/wp-json/wp/v2/product_cat/${row.id}`, n, payload);
+      assert(updated.response.ok(), `Cannot update EN product_cat ${spec.slug}: HTTP ${updated.response.status()}`);
+      row = updated.body; writes++;
+      log('EN_SERVICE_CATEGORY', { slug: spec.slug, id: row.id, state: 'UPDATED', parent: payload.parent });
+    } else log('EN_SERVICE_CATEGORY', { slug: spec.slug, id: row.id, state: 'EXISTS', parent: payload.parent });
+  }
+  if (Number(spec.thumbnailId || 0)) {
+    await setTermThumbnailId(Number(row.id), Number(spec.thumbnailId));
+  }
+  rows = await listProductCategories(n);
+  const verified = rows.find(item => Number(item.id) === Number(row.id));
+  assert(verified && verified.slug === spec.slug && Number(verified.parent || 0) === payload.parent, `EN product_cat readback failed ${spec.slug}`);
+  return verified;
+}
+
+async function ensureEnglishServicesTable(rootId) {
+  const id = 'services_00_en';
+  let table = await readTable(id);
+  const matches = value => String(value?.meta?.api || '') === 'ProductCategory'
+    && String(value?.items?.[0]?.['api-key'] || '') === String(rootId)
+    && String(value?.items?.[0]?.['api-children'] || '') === 'children';
+  if (table && matches(table)) {
+    log('EN_TABLE', { id, state: 'PRESERVE_EXISTING', api: 'ProductCategory', rootId });
+    return false;
+  }
+  let currentId = id;
+  if (!table) {
+    await page.goto(uri('/wp-admin/admin.php?page=tablepress_add&esc_full_admin=1'), { waitUntil: 'domcontentloaded', timeout: 50000 });
+    await page.locator('input[name="table[name]"]').fill('Services');
+    await page.locator('textarea[name="table[description]"]').fill('Services landing using ProductCategory');
+    await page.locator('input[name="table[rows]"]').fill('3');
+    await page.locator('input[name="table[columns]"]').fill('2');
+    const add = page.getByRole('button', { name: /Add Table|Thêm bảng/i }).first();
+    assert(await add.count() === 1, 'ESC Table Add Table button missing for services_00_en');
+    await Promise.all([page.waitForURL(/table_id=[a-zA-Z0-9_-]+/, { timeout: 45000 }), add.click()]);
+    currentId = new URL(page.url()).searchParams.get('table_id') || '';
+    assert(currentId, 'New services_00_en TablePress ID missing');
+  }
+  await page.goto(uri(`/wp-admin/admin.php?page=tablepress&action=edit&table_id=${encodeURIComponent(currentId)}&esc_full_admin=1`), { waitUntil: 'load', timeout: 50000 });
+  await page.waitForFunction(() => Boolean(globalThis.tp?.editor?.options?.data), null, { timeout: 30000 });
+  await page.locator('#table-name').fill('Services');
+  await page.locator('#table-description').fill('Services landing using ProductCategory');
+  await page.locator('#js_custom_api').waitFor({ state: 'visible', timeout: 15000 });
+  await page.locator('#js_custom_api').fill('ProductCategory');
+  if (currentId !== id) {
+    page.once('dialog', dialog => dialog.accept());
+    await page.locator('#table-id').fill(id);
+    await page.locator('#table-id').press('Tab');
+  }
+  await page.evaluate(({ rootId }) => {
+    const editor = globalThis.tp.editor;
+    const values = [['api-key', 'api-children'], ['Root category', 'Service categories'], [String(rootId), 'children']];
+    if (editor.options.data.length !== 3 || editor.options.columns.length !== 2) throw Error('services_00_en must be 3x2');
+    values.forEach((row, y) => row.forEach((value, x) => editor.setValueFromCoords(x, y, value)));
+    globalThis.tp.helpers.unsaved_changes.set();
+  }, { rootId });
+  const save = page.getByRole('button', { name: /Save Changes|Lưu thay đổi|Lưu các thay đổi/i }).first();
+  const ackPromise = page.waitForResponse(resp => resp.url().startsWith(wp + '/wp-admin/admin-ajax.php') && String(resp.request().postData() || '').includes('action=tablepress_save_table'), { timeout: 45000 });
+  await save.click();
+  const ack = await ackPromise;
+  assert(ack.ok(), `services_00_en save HTTP ${ack.status()}`);
+  for (let attempt = 0; attempt < 8; attempt++) {
+    await sleep(700); table = await readTable(id).catch(() => null); if (table && matches(table)) break;
+  }
+  assert(table && matches(table), 'services_00_en readback mismatch');
+  writes++;
+  log('EN_TABLE', { id, state: 'CREATED_OR_UPDATED', api: 'ProductCategory', rootId });
+  return true;
+}
+
+function isDescendantTerm(row, rootId, byId) {
+  let current = row;
+  const seen = new Set();
+  while (current && Number(current.id) > 0 && !seen.has(Number(current.id))) {
+    if (Number(current.id) === Number(rootId)) return true;
+    seen.add(Number(current.id));
+    current = byId.get(Number(current.parent || 0));
+  }
+  return false;
+}
+
+function isDescendantPage(row, rootId, byId) {
+  let current = row;
+  const seen = new Set();
+  while (current && Number(current.id) > 0 && !seen.has(Number(current.id))) {
+    if (Number(current.id) === Number(rootId)) return true;
+    seen.add(Number(current.id));
+    current = byId.get(Number(current.parent || 0));
+  }
+  return false;
+}
+
+async function ensureEnglishServiceTaxonomy(n, sourcePages) {
+  const sourceById = new Map(sourcePages.map(item => [Number(item.id), item]));
+  const sourceViRoot = sourcePages.find(item => langOf(item) !== 'en' && item.slug === 'dich-vu');
+  assert(sourceViRoot, 'Legacy VI Services root Page missing');
+  const enByViSlug = new Map();
+  for (const en of sourcePages.filter(item => langOf(item) === 'en')) {
+    const vi = await sourceViForEnglish(en, sourceById, sourcePages);
+    if (vi) enByViSlug.set(vi.slug, en);
+  }
+  const categories = await listProductCategories(n);
+  const byId = new Map(categories.map(item => [Number(item.id), item]));
+  const viRoot = categories.find(item => item.slug === 'dich-vu' && Number(item.parent || 0) === 0);
+  assert(viRoot, 'Current VI Services product_cat root missing');
+  const currentViTerms = categories.filter(item => isDescendantTerm(item, Number(viRoot.id), byId));
+  const depthOf = row => { let depth = 0, current = row; const seen = new Set(); while (current && Number(current.parent || 0) && !seen.has(Number(current.id))) { seen.add(Number(current.id)); depth++; current = byId.get(Number(current.parent || 0)); } return depth; };
+  currentViTerms.sort((a, b) => depthOf(a) - depthOf(b));
+  const byViId = new Map();
+  const translatedViSlugs = new Set();
+  for (const viTerm of currentViTerms) {
+    const sourceEn = enByViSlug.get(viTerm.slug);
+    if (!sourceEn) continue;
+    const parentId = Number(viTerm.id) === Number(viRoot.id) ? 0 : Number(byViId.get(Number(viTerm.parent || 0))?.id || 0);
+    if (Number(viTerm.id) !== Number(viRoot.id) && !parentId) continue;
+    const description = Number(viTerm.id) === Number(viRoot.id) ? '' : await localizeHtml(sourceEn.content?.rendered || '', n, `service-category:${sourceEn.slug}`);
+    const thumbnailId = Number(viTerm.id) === Number(viRoot.id) ? 0 : await termThumbnailId(Number(viTerm.id));
+    const enTerm = await ensureProductCategory(n, {
+      name: plain(sourceEn.title?.rendered) || viTerm.name,
+      slug: sourceEn.slug,
+      parent: parentId,
+      description,
+      thumbnailId,
+    });
+    byViId.set(Number(viTerm.id), enTerm);
+    translatedViSlugs.add(viTerm.slug);
+    if (Number(viTerm.id) !== Number(viRoot.id)) representedServicePages.add(sourceEn.slug);
+  }
+  const enRoot = byViId.get(Number(viRoot.id));
+  assert(enRoot, 'English Services product_cat root could not be created');
+  const legacyTrackRecord = sourcePages.find(item => langOf(item) === 'en' && item.slug === 'track-record');
+  if (legacyTrackRecord) {
+    representedServicePages.add(legacyTrackRecord.slug);
+    log('EN_SERVICE_PAGE', { slug: legacyTrackRecord.slug, state: 'OMITTED_WITH_CURRENT_VI_LAYOUT', representedBy: 'services-products' });
+  }
+  await ensureEnglishServicesTable(Number(enRoot.id));
+
+  for (const en of sourcePages.filter(item => langOf(item) === 'en')) {
+    const vi = await sourceViForEnglish(en, sourceById, sourcePages);
+    if (!vi || Number(vi.id) === Number(sourceViRoot.id) || !isDescendantPage(vi, Number(sourceViRoot.id), sourceById)) continue;
+    if (!translatedViSlugs.has(vi.slug)) {
+      representedServicePages.add(en.slug);
+      log('EN_SERVICE_PAGE', { slug: en.slug, sourceViSlug: vi.slug, state: 'OMITTED_WITH_CURRENT_VI_LAYOUT' });
+    }
+  }
+  log('EN_SERVICE_TAXONOMY', { state: 'PASS', translatedCategories: byViId.size, root: enRoot.slug });
+  return { viRoot, enRoot, byViId };
+}
+
+const productSlugAliases = new Map([
+  ['fso-pps-01-e-translation', 'fso-pps-01'],
+  ['fpso-thai-binh-vn-2', 'fpso-thai-binh-vn'],
+  ['fso-orkid-2', 'fso-orkid'],
+  ['fso-mv12-2', 'fso-mv12'],
+  ['fso-golden-star-2', 'fso-golden-star'],
+  ['648', 'fpso-ptsc-lam-son'],
+  ['fso-ptsc-bien-dong-01-2', 'fso-ptsc-bien-dong-01'],
+  ['fpso-ruby-ii-2', 'fpso-ruby-ii'],
+  ['fso-ptsc-bach-ho-2', 'fso-ptsc-bach-ho'],
+  ['fpso-ruby-princess-2', 'fpso-ruby-princess'],
+  ['upstream-plant-long-son-petrochemical-complex', 'khu-vuc-thuong-nguon-nha-may-hoa-dau-long-son'],
+]);
+
+async function ensureEnglishProducts(n, sourcePosts, targetProducts, serviceContext) {
+  const sourceById = new Map(sourcePosts.map(item => [Number(item.id), item]));
+  let created = 0;
+  let existing = 0;
+  const results = [];
+  for (const sourceEn of sourcePosts.filter(item => langOf(item) === 'en')) {
+    const sourceVi = await sourceViForEnglish(sourceEn, sourceById, sourcePosts);
+    const wantedSlug = productSlugAliases.get(sourceEn.slug) || sourceVi?.slug || '';
+    let candidates = wantedSlug ? targetProducts.filter(item => item.slug === wantedSlug && acfValue(item.acf?.product_lang) !== 'en') : [];
+    if (!candidates.length) {
+      const titleKeys = new Set([normalizeMatchText(sourceEn.title?.rendered), normalizeMatchText(sourceVi?.title?.rendered)].filter(Boolean));
+      candidates = targetProducts.filter(item => acfValue(item.acf?.product_lang) !== 'en' && titleKeys.has(normalizeMatchText(item.title?.raw ?? item.title?.rendered)));
+    }
+    if (candidates.length !== 1) {
+      if (productSlugAliases.has(sourceEn.slug)) {
+        representedServicePosts.add(sourceEn.slug);
+        results.push({ slug: sourceEn.slug, state: 'OMITTED_WITH_CURRENT_VI_LAYOUT' });
+        log('EN_PRODUCT', results.at(-1));
+      }
+      continue;
+    }
+    const viProduct = candidates[0];
+    const viCategoryId = productCategoryIds(viProduct)[0];
+    const enCategory = serviceContext.byViId.get(Number(viCategoryId || 0));
+    if (!enCategory) continue;
+    representedServicePosts.add(sourceEn.slug);
+    const current = targetProducts.filter(item => acfValue(item.acf?.product_lang) === 'en' &&
+      (Number(acfValue(item.acf?.origin_product_id) || 0) === Number(viProduct.id) || item.slug === sourceEn.slug));
+    assert(current.length <= 1, `Duplicate EN Product ${sourceEn.slug}`);
+    if (current.length === 1) {
+      const row = current[0];
+      const needed = { product_lang: 'en', origin_product_id: String(viProduct.id) };
+      if (!Object.entries(needed).every(([key, value]) => String(acfValue(row.acf?.[key]) || '') === String(value))) {
+        await setAcf(n, 'product', Number(row.id), needed); writes++;
+      }
+      existing++;
+      results.push({ slug: sourceEn.slug, id: Number(row.id), state: 'EXISTS', origin: Number(viProduct.id) });
+      continue;
+    }
+    const content = await localizeHtml(sourceEn.content?.rendered || '', n, `product-en:${sourceEn.slug}`);
+    const excerpt = await localizeHtml(sourceEn.excerpt?.rendered || '', n, `product-en-excerpt:${sourceEn.slug}`);
+    if (plain(content).length < 10) {
+      deferred.push({ type: 'product', slug: sourceEn.slug, sourceViSlug: sourceVi?.slug || wantedSlug, reason: 'English Product content empty' });
+      representedServicePosts.delete(sourceEn.slug);
+      continue;
+    }
+    const payload = {
+      title: plain(sourceEn.title?.rendered), slug: sourceEn.slug, status: 'publish', content, excerpt,
+      featured_media: Number(viProduct.featured_media || 0), menu_order: Number(viProduct.menu_order || 0), product_cat: [Number(enCategory.id)],
+    };
+    const response = await api('POST', '/wp-json/wp/v2/product', n, payload, 90000);
+    assert(response.response.ok() && response.body?.id, `Cannot create EN Product ${sourceEn.slug}: HTTP ${response.response.status()}`);
+    const id = Number(response.body.id); writes++; created++;
+    await setAcf(n, 'product', id, { product_lang: 'en', origin_product_id: String(viProduct.id) });
+    const verify = await api('GET', `/wp-json/wp/v2/product/${id}?context=edit&_fields=id,slug,status,title,content,excerpt,featured_media,product_categories,acf`, n);
+    assert(verify.response.ok() && verify.body.status === 'publish' && acfValue(verify.body.acf?.product_lang) === 'en'
+      && Number(acfValue(verify.body.acf?.origin_product_id) || 0) === Number(viProduct.id), `EN Product readback failed ${sourceEn.slug}`);
+    targetProducts.push(verify.body);
+    results.push({ slug: sourceEn.slug, id, state: 'CREATED', origin: Number(viProduct.id), category: enCategory.slug });
+    log('EN_PRODUCT', results.at(-1));
+  }
+  log('EN_PRODUCT_SUMMARY', { created, existing, represented: results.length });
+  return { created, existing, results };
+}
+
 async function contentForEnglishPage(targetVi, sourceEn, n) {
   const viContent = String(targetVi.content?.raw ?? targetVi.content?.rendered ?? '');
   const ids = tableIds(viContent);
@@ -571,6 +857,10 @@ async function ensureEnglishPages(n, sourcePages, targetPages) {
   const english = sourcePages.filter(item => langOf(item) === 'en');
   const results = [];
   for (const sourceEn of english) {
+    if (representedServicePages.has(sourceEn.slug)) {
+      results.push({ slug: sourceEn.slug, state: 'REPRESENTED_BY_SERVICE_TAXONOMY' });
+      continue;
+    }
     const sourceVi = await sourceViForEnglish(sourceEn, sourceMap, sourcePages);
     if (!sourceVi) {
       deferred.push({ type: 'page', slug: sourceEn.slug, reason: 'legacy translation pairing unavailable' });
@@ -635,6 +925,10 @@ async function ensureEnglishPosts(n, sourcePosts, targetPosts, targetPages) {
   let existingCount = 0;
   const results = [];
   for (const sourceEn of english) {
+    if (representedServicePosts.has(sourceEn.slug)) {
+      results.push({ slug: sourceEn.slug, state: 'REPRESENTED_BY_PRODUCT' });
+      continue;
+    }
     const sourceVi = await sourceViForEnglish(sourceEn, sourceMap, sourcePosts);
     if (!sourceVi) {
       deferred.push({ type: 'post', slug: sourceEn.slug, reason: 'legacy translation pairing unavailable' });
@@ -897,16 +1191,20 @@ try {
   const sourcePosts = await collectSource('posts', 'id,slug,status,link,title,content,excerpt,featured_media,categories,tags,lang,translations,date,date_gmt');
   let targetPages = await collectTarget('pages', n, 'id,slug,status,title,content,acf,parent,date,date_gmt');
   let targetPosts = await collectTarget('posts', n, 'id,slug,status,title,content,excerpt,featured_media,categories,acf,date,date_gmt');
+  let targetProducts = await collectTarget('product', n, 'id,slug,status,title,content,excerpt,featured_media,menu_order,product_categories,acf,date,date_gmt');
   log('INVENTORY', {
     source: { pages: sourcePages.length, pagesEn: sourcePages.filter(x => langOf(x) === 'en').length, posts: sourcePosts.length, postsEn: sourcePosts.filter(x => langOf(x) === 'en').length },
-    target: { pages: targetPages.length, pagesEn: targetPages.filter(x => acfValue(x.acf?.product_lang) === 'en').length, posts: targetPosts.length, postsEn: targetPosts.filter(x => acfValue(x.acf?.product_lang) === 'en').length },
+    target: { pages: targetPages.length, pagesEn: targetPages.filter(x => acfValue(x.acf?.product_lang) === 'en').length, posts: targetPosts.length, postsEn: targetPosts.filter(x => acfValue(x.acf?.product_lang) === 'en').length, products: targetProducts.length, productsEn: targetProducts.filter(x => acfValue(x.acf?.product_lang) === 'en').length },
   });
 
   const viStatic = await ensureVietnameseStaticPages(n, sourcePages, targetPages);
+  const serviceContext = await ensureEnglishServiceTaxonomy(n, sourcePages);
   await ensureEnglishSupportTables();
   targetPages = await collectTarget('pages', n, 'id,slug,status,title,content,acf,parent,date,date_gmt');
   const enPages = await ensureEnglishPages(n, sourcePages, targetPages);
   targetPages = await collectTarget('pages', n, 'id,slug,status,title,content,acf,parent,date,date_gmt');
+  const enProducts = await ensureEnglishProducts(n, sourcePosts, targetProducts, serviceContext);
+  targetProducts = await collectTarget('product', n, 'id,slug,status,title,content,excerpt,featured_media,menu_order,product_categories,acf,date,date_gmt');
   const enPosts = await ensureEnglishPosts(n, sourcePosts, targetPosts, targetPages);
   await ensureEnglishHeader(n, targetPages);
 
@@ -914,6 +1212,7 @@ try {
   const summary = {
     status: deferred.length ? 'PARTIAL_WITH_DEFERRED' : 'PASS', writes,
     viStatic, enPages: { sourceEnglish: enPages.sourceEnglish, handled: enPages.results.length },
+    enProducts: { created: enProducts.created, existing: enProducts.existing, represented: enProducts.results.length },
     enPosts: { sourceEnglish: enPosts.sourceEnglish, created: enPosts.created, existing: enPosts.existing },
     deferredCount: deferred.length,
   };
