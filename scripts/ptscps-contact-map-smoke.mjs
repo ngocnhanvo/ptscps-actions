@@ -45,7 +45,7 @@ try{
     assert(english?.status()===200,`English Contact HTTP ${english?.status()} at ${width}px`);
     const root=page.locator('[data-tablepress-preview="contact_00_en"] > main');
     await root.waitFor({state:'visible',timeout:15000});
-    const panel=root.locator('.glass-panel');
+    const panel=root.locator(':scope > .glass-panel');
     assert(await panel.count()===1,`English Contact form card missing at ${width}px`);
     const metrics=await root.evaluate((el)=>{
       const panel=el.querySelector('.glass-panel');
