@@ -172,7 +172,12 @@ async function reconcileBuildPage() {
       disabled: Boolean(document.querySelector('#vcs-build-btn-main')?.disabled),
     }));
     assert(state.configured === true || state.configured === 1 || state.configured === '1', 'WordPress Build Website is not configured');
-    if (!state.active && !state.disabled) return state;
+    if (!state.active) {
+      const force = page.locator('#vcs-force-build');
+      const canEnableForce = Number(state.pending || 0) === 0
+        && await force.count() === 1 && !await force.isDisabled();
+      if (!state.disabled || canEnableForce) return state;
+    }
 
     const status = await readWordPressBuildStatus();
     assert(status?.success === true && status?.data, `Cannot reconcile WordPress build state: ${status?.transportError || 'invalid response'}`);
@@ -195,6 +200,7 @@ async function triggerBuild() {
   if (Number(state.pending || 0) === 0) {
     assert(await force.count() === 1 && !await force.isDisabled(), 'Build ngoại lệ control unavailable with empty queue');
     if (!await force.isChecked()) await force.check();
+    assert(!await button.isDisabled(), 'Build Website button remained disabled after enabling force build');
   }
   const ack = page.waitForResponse(response => response.url().startsWith(wp + '/wp-admin/admin-ajax.php')
     && response.request().method() === 'POST'
