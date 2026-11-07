@@ -278,8 +278,39 @@ async function repairContent(n, pages, categories, products) {
 
   for (const item of categories) {
     const current = String(item.description?.raw ?? item.description ?? '');
-    const { next, changed } = rewriteHtml(current, `product_cat:${item.id}:${item.slug}`);
-    if (!changed) continue;
+    // Remove duplicate standalone project text links, not project records/cards.
+    // Only these two WordPress service categories are in the write scope.
+    const cleanService = ['manpower-supply', 'fpso-fso-om-services'].includes(String(item.slug || ''));
+    const projectSlugs = new Set(products.filter(product => product.status === 'publish').map(product => String(product.slug || '')));
+    const legacyProjectSlugs = new Set([
+      'fso-pps-01-e-translation', 'fso-golden-star-2', '648',
+      'fso-ptsc-bien-dong-01-2', 'fpso-ruby-ii-2', 'fso-ptsc-bach-ho-2',
+      'fpso-ruby-princess-2', '5454',
+    ]);
+    let removedTextLinks = 0;
+    const withoutDuplicateText = cleanService ? current.replace(/<(p|li)\b[^>]*>[\s\S]*?<\/\1>/gi, block => {
+      const links = [...block.matchAll(/<a\b[^>]*\bhref\s*=\s*(["'])([^"']+)\1[^>]*>[\s\S]*?<\/a>/gi)];
+      if (!links.length) return block;
+      const remainingText = block.replace(/<a\b[^>]*\bhref\s*=\s*(["'])[^"']+\1[^>]*>[\s\S]*?<\/a>/gi, '')
+        .replace(/<\/?(?:p|li|span|strong|em|b|i|u|br)\b[^>]*>/gi, '')
+        .replace(/&nbsp;|&#160;|\s/gi, '').trim();
+      if (remainingText) return block;
+      const projectLinksOnly = links.every(match => {
+        try {
+          const slug = new URL(match[2], front).pathname.replace(/\/+$/, '').split('/').filter(Boolean).at(-1)?.replace(/\.html?$/i, '') || '';
+          return projectSlugs.has(slug) || legacyProjectSlugs.has(slug);
+        } catch { return false; }
+      });
+      if (!projectLinksOnly) return block;
+      removedTextLinks += links.length;
+      return '';
+    }) : current;
+    const { next, changed } = rewriteHtml(withoutDuplicateText, `product_cat:${item.id}:${item.slug}`);
+    if (!changed && !removedTextLinks) continue;
+    if (removedTextLinks) {
+      repairs.push({ owner: `product_cat:${item.id}:${item.slug}:project-text`, removed: removedTextLinks });
+      log('PROJECT_TEXT_REMOVED', { slug: item.slug, links: removedTextLinks });
+    }
     const saved = await api('POST', `/wp-json/wp/v2/product_cat/${item.id}`, n, { description: next }, 90000);
     assert(saved.response.ok(), `Product category link repair failed id=${item.id} HTTP=${saved.response.status()}`);
     item.description = next;
