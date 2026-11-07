@@ -7,7 +7,7 @@ const wp = String(process.env.WP_ORIGIN || '').replace(/\/$/, '');
 const front = String(process.env.FRONT_ORIGIN || '').replace(/\/$/, '');
 const user = process.env.WP_ADMIN_USERNAME;
 const pass = process.env.WP_ADMIN_PASSWORD;
-const githubToken = String(process.env.SOURCE_REPO_PAT || '').trim();
+const githubToken = String(process.env.GITHUB_TOKEN || '').trim();
 assert(wp.startsWith('https://') && front.startsWith('https://') && wp !== front && user && pass,
   'Missing validated PTSCPS origins or WordPress credentials');
 
@@ -352,7 +352,7 @@ async function waitForBuildSlot() {
 }
 
 async function triggerBuildAndWait() {
-  assert(githubToken, 'SOURCE_REPO_PAT is required to monitor the exact Astro build run');
+  assert(githubToken, 'GITHUB_TOKEN is required to monitor the exact Astro build run');
   const { button } = await waitForBuildSlot();
   const ack = page.waitForResponse(response => response.url().startsWith(wp + '/wp-admin/admin-ajax.php')
     && response.request().method() === 'POST'
@@ -433,7 +433,8 @@ try {
 
   const records = await collectLinkRecords(pages, categories, products);
   await writeFile(`${artifactDir}/link-records.json`, JSON.stringify(records, null, 2));
-  await triggerBuildAndWait();
+  if (writes > 0) await triggerBuildAndWait();
+  else log('BUILD', 'NO_CMS_CHANGES_SKIP_TRIGGER');
   await waitFrontReady();
   await qaLinks(records);
   log('RESULT', { status: 'PASS', writes, replacements: repairs.length });

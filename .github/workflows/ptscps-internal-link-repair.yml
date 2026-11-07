@@ -64,6 +64,7 @@ jobs:
         env:
           WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
           WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
+          GITHUB_TOKEN: ${{ github.token }}
           SOURCE_REPO_PAT: ${{ secrets.SOURCE_REPO_PAT }}
         run: node scripts/ptscps-internal-link-repair.mjs
       - name: Upload internal-link evidence
