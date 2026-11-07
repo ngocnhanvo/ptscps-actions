@@ -61,15 +61,31 @@ const CSS = `${CSS_START}
 .ptscps-readable-page__body th,.ptscps-readable-page__body td{border:1px solid #dbe4ee;padding:.7rem .8rem;text-align:left;vertical-align:top}
 .ptscps-readable-page__body th{background:#f5f8fc;color:#102a43;font-weight:700}
 .ptscps-readable-page__body blockquote{margin:1.25rem 0;padding:.9rem 1.1rem;border-left:4px solid #1f5fae;background:#f7faff;color:#42566b}
-.ptscps-sitemap-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;align-items:start}
-.ptscps-sitemap-group{min-width:0;padding:22px 22px 18px;border:1px solid #dbe4ee;border-radius:14px;background:#f9fbfd;box-shadow:0 8px 24px rgba(15,42,67,.05)}
-.ptscps-readable-page__body .ptscps-sitemap-group__title{margin:0 0 .8rem;padding:0 0 .7rem;border:0;border-bottom:1px solid #dbe4ee;font-size:1.15rem;line-height:1.35}
-.ptscps-sitemap-group__title a,.ptscps-sitemap-group__title span{font-weight:750;text-decoration:none;color:#102a43}
-.ptscps-sitemap-group ul{margin:.65rem 0 0;padding-left:1.25rem}
-.ptscps-sitemap-group li+li{margin-top:.4rem}
-.ptscps-sitemap-group ul ul{margin:.4rem 0 .55rem;padding-left:1.15rem}
-@media (min-width:1100px){.ptscps-sitemap-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
-@media (max-width:700px){.ptscps-readable-page{padding:34px 16px 54px}.ptscps-readable-page__header{margin-bottom:24px;padding-bottom:14px}.ptscps-readable-page__title{font-size:2rem}.ptscps-readable-page__body{font-size:16px;line-height:1.72}.ptscps-readable-page__body h2{font-size:1.5rem}.ptscps-readable-page__body h3{font-size:1.3rem}.ptscps-readable-page__body h4{font-size:1.12rem}.ptscps-readable-page__body ul,.ptscps-readable-page__body ol{padding-left:1.35rem}.ptscps-sitemap-grid{grid-template-columns:1fr;gap:14px}.ptscps-sitemap-group{padding:18px 18px 15px}}
+.ptscps-sitemap{display:grid;gap:30px}
+.ptscps-sitemap-quicklinks{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.ptscps-readable-page__body .ptscps-sitemap-quicklink{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:62px;padding:16px 18px;border:1px solid #dbe4ee;border-radius:10px;background:#f8fafc;color:#102a43;font-weight:750;text-decoration:none;transition:border-color .2s ease,background .2s ease,color .2s ease}
+.ptscps-sitemap-quicklink::after{content:'→';flex:0 0 auto;color:#c8243f;font-size:1.15em;line-height:1}
+.ptscps-readable-page__body .ptscps-sitemap-quicklink:hover{border-color:#b8c8d9;background:#fff;color:#1557a5;text-decoration:none}
+.ptscps-sitemap-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:22px;align-items:stretch}
+.ptscps-sitemap-group{min-width:0;padding:26px 28px 24px;border:1px solid #dbe4ee;border-radius:12px;background:#fff}
+.ptscps-readable-page__body .ptscps-sitemap-group__title{margin:0;padding:0;border:0;font-size:1.08rem;line-height:1.35;text-transform:uppercase;letter-spacing:.035em}
+.ptscps-sitemap-group__title::after{content:'';display:block;width:38px;height:2px;margin-top:10px;background:#c8243f}
+.ptscps-sitemap-group__title a,.ptscps-sitemap-group__title span{font-weight:800;text-decoration:none;color:#102a43}
+.ptscps-sitemap-group ul{margin:18px 0 0;padding:0;list-style:none}
+.ptscps-sitemap-group li{padding:0}
+.ptscps-sitemap-group li+li{margin-top:3px}
+.ptscps-readable-page__body .ptscps-sitemap-group li>a{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;padding:7px 0;color:#42566b;text-decoration:none}
+.ptscps-sitemap-group li>a::after{content:'→';flex:0 0 auto;color:#9aafc2}
+.ptscps-readable-page__body .ptscps-sitemap-group li>a:hover{color:#1557a5;text-decoration:none}
+.ptscps-sitemap-group ul ul{margin:2px 0 6px 12px;padding-left:14px;border-left:1px solid #dbe4ee}
+.ptscps-sitemap-policy{display:flex;align-items:center;justify-content:space-between;gap:28px;padding:23px 0;border-top:1px solid #dbe4ee;border-bottom:1px solid #dbe4ee}
+.ptscps-readable-page__body .ptscps-sitemap-policy__title{margin:0;padding:0;border:0;color:#102a43;font-size:1rem;font-weight:800;line-height:1.35;text-transform:uppercase;letter-spacing:.035em}
+.ptscps-sitemap-policy__title::after{content:'';display:block;width:38px;height:2px;margin-top:9px;background:#c8243f}
+.ptscps-sitemap-policy__links{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:12px 28px}
+.ptscps-readable-page__body .ptscps-sitemap-policy__links a{display:inline-flex;align-items:center;gap:9px;color:#42566b;font-weight:650;text-decoration:none}
+.ptscps-sitemap-policy__links a::after{content:'→';color:#c8243f}
+.ptscps-readable-page__body .ptscps-sitemap-policy__links a:hover{color:#1557a5;text-decoration:none}
+@media (max-width:700px){.ptscps-readable-page{padding:34px 16px 54px}.ptscps-readable-page__header{margin-bottom:24px;padding-bottom:14px}.ptscps-readable-page__title{font-size:2rem}.ptscps-readable-page__body{font-size:16px;line-height:1.72}.ptscps-readable-page__body h2{font-size:1.5rem}.ptscps-readable-page__body h3{font-size:1.3rem}.ptscps-readable-page__body h4{font-size:1.12rem}.ptscps-readable-page__body ul,.ptscps-readable-page__body ol{padding-left:1.35rem}.ptscps-sitemap{gap:22px}.ptscps-sitemap-quicklinks,.ptscps-sitemap-grid{grid-template-columns:1fr;gap:12px}.ptscps-sitemap-group{padding:21px 20px 19px}.ptscps-sitemap-policy{align-items:flex-start;flex-direction:column;gap:16px;padding:20px 0}.ptscps-sitemap-policy__links{justify-content:flex-start;flex-direction:column;gap:10px}}
 ${CSS_END}`;
 
 const esc = value => String(value || '').replace(/&/g, '&amp;').replace(/</g, '&lt;')
@@ -108,18 +124,25 @@ function renderNested(items) {
 }
 
 function buildSitemap(menuItems) {
-  const cards = [];
+  const quickLinks = [];
+  const groups = [];
   for (const item of menuItems || []) {
     const label = String(item?.label || item?.title || '').trim();
     if (!label) continue;
     const href = safeHref(item?.href || item?.url || item?.slug || '');
+    const childItems = Array.isArray(item?.children) ? item.children : [];
+    if (childItems.length === 0) {
+      if (href) quickLinks.push(`<a class="ptscps-sitemap-quicklink" href="${esc(href)}">${esc(label)}</a>`);
+      continue;
+    }
     const heading = href ? `<a href="${esc(href)}">${esc(label)}</a>` : `<span>${esc(label)}</span>`;
-    const children = renderNested(item?.children || []);
-    cards.push(`<section class="ptscps-sitemap-group"><h2 class="ptscps-sitemap-group__title">${heading}</h2>${children}</section>`);
+    const children = renderNested(childItems);
+    groups.push(`<section class="ptscps-sitemap-group"><h2 class="ptscps-sitemap-group__title">${heading}</h2>${children}</section>`);
   }
-  cards.push(`<section class="ptscps-sitemap-group"><h2 class="ptscps-sitemap-group__title"><span>Thông tin &amp; chính sách</span></h2><ul><li><a href="/dieu-khoan-dich-vu">Điều khoản dịch vụ</a></li><li><a href="/chinh-sach-bao-mat">Chính sách bảo mật</a></li></ul></section>`);
-  assert(cards.length >= 4, `Sitemap menu groups unexpectedly short: ${cards.length}`);
-  return `<nav class="ptscps-sitemap-grid" aria-label="Sitemap">${cards.join('')}</nav>`;
+  assert(quickLinks.length >= 1, `Sitemap quick links unexpectedly empty`);
+  assert(groups.length >= 4, `Sitemap menu groups unexpectedly short: ${groups.length}`);
+  const policies = `<section class="ptscps-sitemap-policy"><h2 class="ptscps-sitemap-policy__title">Thông tin &amp; chính sách</h2><div class="ptscps-sitemap-policy__links"><a href="/dieu-khoan-dich-vu">Điều khoản dịch vụ</a><a href="/chinh-sach-bao-mat">Chính sách bảo mật</a></div></section>`;
+  return `<nav class="ptscps-sitemap" aria-label="Sitemap"><div class="ptscps-sitemap-quicklinks">${quickLinks.join('')}</div><div class="ptscps-sitemap-grid">${groups.join('')}</div>${policies}</nav>`;
 }
 
 async function login() {
