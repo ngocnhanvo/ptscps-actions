@@ -351,9 +351,17 @@ try {
       assert(coords.table && coords.row !== null && coords.field, 'Incomplete ESC coordinate: ' + fragment);
       await cell.click();
       await page.locator('#esc-vb-text-editor').waitFor({ state: 'visible' });
-      await page.waitForFunction(() => !document.getElementById('esc-vb-edit-title')?.disabled);
-      assert(await page.locator('#esc-vb-edit-row').evaluate(select => select.selectedIndex >= 0),
-        'Native editor did not resolve exact source: ' + fragment);
+      // The previous cell may still be enabled while the new async REST read is pending.
+      // Wait for the exact source coordinate AND its loaded canonical value.
+      const expectedKey = coords.row === 'section' ? 'section'
+        : coords.row === 'description' ? 'section_description'
+        : `${coords.row}:${coords.field}`;
+      await page.waitForFunction(({ expectedKey, fragment }) => {
+        const select = document.getElementById('esc-vb-edit-row');
+        const input = document.getElementById('esc-vb-edit-title');
+        return select?.selectedIndex >= 0 && select.value === expectedKey &&
+          input && !input.disabled && input.value.includes(fragment);
+      }, { expectedKey, fragment }, { timeout: 30000 });
       const editorValue = await page.locator('#esc-vb-edit-title').inputValue();
       log('PTSCPS_BUILDER_TEXT_DIAG', {fragment, table: coords.table, row: coords.row,
         field: coords.field, editorValue: editorValue.slice(0, 120), match: editorValue.includes(fragment)});
