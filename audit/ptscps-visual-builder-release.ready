@@ -2,9 +2,9 @@
   "php": "f910b55bea81a33f324f5103bbb6cbfd7f9c5299",
   "astro": "bb3a139c444002c76ab82f1b7b83a81968418d1c",
   "scope": "PTSCPS native Visual Builder only; backed-up reversible CMS acceptance; auto-build",
-  "phase": "release",
-  "acceptance_attempt": 9,
-  "verify_final_controls": true,
-  "skip_completed_shared": false,
+  "phase": "verify",
+  "acceptance_attempt": 10,
+  "verify_final_controls": false,
+  "skip_completed_shared": true,
   "skip_completed_text": false
 }
