@@ -1250,10 +1250,10 @@ async function ensureEnglishHeader(n, targetPages, serviceContext) {
     if (enTerm?.slug) serviceTermsByViSlug.set(String(viTerm.slug), enTerm);
   }
   const newsRoutes = new Map([
-    ['tin-tuc', { url: '/tin-tuc?lang=en', title: 'News' }],
-    ['c/tin-tuc/hoat-dong-cua-cong-ty', { url: '/c/tin-tuc/hoat-dong-cua-cong-ty?lang=en', title: 'Company Activities' }],
-    ['c/tin-tuc/dau-khi-trong-nuoc-va-khu-vuc', { url: '/c/tin-tuc/dau-khi-trong-nuoc-va-khu-vuc?lang=en', title: 'Domestic and Regional' }],
-    ['thu-moi-chao-gia', { url: '/thu-moi-chao-gia?lang=en', title: 'Invitation for Quotation' }],
+    ['tin-tuc', { url: '/news', title: 'News' }],
+    ['c/tin-tuc/hoat-dong-cua-cong-ty', { url: '/c/news/company-activities', title: 'Company Activities' }],
+    ['c/tin-tuc/dau-khi-trong-nuoc-va-khu-vuc', { url: '/c/news/domestic-and-regional', title: 'Domestic and Regional' }],
+    ['thu-moi-chao-gia', { url: '/invitation-for-quotation', title: 'Invitation for Quotation' }],
     ['tuyen-dung', { url: '/search-jobs', title: 'Careers' }],
   ]);
 
@@ -1584,10 +1584,13 @@ async function productionQa(viPages, enProducts, enPosts, targetPages) {
     results.push({ route, status: 200 });
   }
 
-  const newsResponse = await qa.goto(`${front}/tin-tuc?lang=en&_qa=${Date.now()}`, { waitUntil: 'load', timeout: 50000 });
+  const newsResponse = await qa.goto(`${front}/news?_qa=${Date.now()}`, { waitUntil: 'load', timeout: 50000 });
   assert(newsResponse?.status() === 200, 'English News production route failed');
   assert((await qa.locator('main').innerText()).includes('News'), 'English News heading missing');
-  results.push({ route: '/tin-tuc?lang=en', status: 200 });
+  const newsUrl = new URL(qa.url());
+  assert(newsUrl.pathname === '/news' && !newsUrl.searchParams.has('lang'),
+    `English News identity must use /news without lang query, got ${newsUrl.pathname}${newsUrl.search}`);
+  results.push({ route: '/news', status: 200 });
 
   const recruitmentResponse = await qa.goto(`${front}/search-jobs?_qa=${Date.now()}`, { waitUntil: 'load', timeout: 50000 });
   assert(recruitmentResponse?.status() === 200, 'English Recruitment production route failed');
