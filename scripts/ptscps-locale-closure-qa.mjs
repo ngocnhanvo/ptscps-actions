@@ -21,12 +21,14 @@ const page = await context.newPage();
 const log = (key, value) => console.log(`LOCALE_CLOSURE_${key}=${JSON.stringify(value)}`);
 
 const scenarios = [
-  { path: '/tin-tuc', lang: 'vi', h1: 'Tin tức' },
-  { path: '/tin-tuc?lang=en', lang: 'en', h1: 'News', shared: true },
-  { path: '/c/tin-tuc/hoat-dong-cua-cong-ty', lang: 'vi', h1: 'Hoạt động của công ty' },
-  { path: '/c/tin-tuc/hoat-dong-cua-cong-ty?lang=en', lang: 'en', h1: 'Company Activities', shared: true },
-  { path: '/c/tin-tuc/dau-khi-trong-nuoc-va-khu-vuc?lang=en', lang: 'en', h1: 'Domestic and Regional', shared: true },
-  { path: '/thu-moi-chao-gia?lang=en', lang: 'en', h1: 'Invitation for Quotation', shared: true },
+  { path: '/tin-tuc', lang: 'vi', h1: 'Tin tức', newsRoute: true, counterpart: '/news' },
+  { path: '/news', lang: 'en', h1: 'News', newsRoute: true, counterpart: '/tin-tuc', legacy: '/tin-tuc?lang=en' },
+  { path: '/c/tin-tuc/hoat-dong-cua-cong-ty', lang: 'vi', h1: 'Hoạt động của công ty', newsRoute: true, counterpart: '/c/news/company-activities' },
+  { path: '/c/news/company-activities', lang: 'en', h1: 'Company Activities', newsRoute: true, counterpart: '/c/tin-tuc/hoat-dong-cua-cong-ty', legacy: '/c/tin-tuc/hoat-dong-cua-cong-ty?lang=en' },
+  { path: '/c/tin-tuc/dau-khi-trong-nuoc-va-khu-vuc', lang: 'vi', h1: 'Dầu khí trong nước và khu vực', newsRoute: true, counterpart: '/c/news/domestic-and-regional' },
+  { path: '/c/news/domestic-and-regional', lang: 'en', h1: 'Domestic and Regional', newsRoute: true, counterpart: '/c/tin-tuc/dau-khi-trong-nuoc-va-khu-vuc', legacy: '/c/tin-tuc/dau-khi-trong-nuoc-va-khu-vuc?lang=en' },
+  { path: '/thu-moi-chao-gia', lang: 'vi', h1: 'Thư mời chào giá', newsRoute: true, counterpart: '/invitation-for-quotation' },
+  { path: '/invitation-for-quotation', lang: 'en', h1: 'Invitation for Quotation', newsRoute: true, counterpart: '/thu-moi-chao-gia', legacy: '/thu-moi-chao-gia?lang=en' },
   { path: '/tuyen-dung', lang: 'vi', h1: 'Thông tin tuyển dụng' },
   { path: '/search-jobs', lang: 'en', h1: 'Search Jobs', recruitment: true },
 ];
@@ -56,16 +58,26 @@ try {
         `${test.path}: Vietnamese footer ARIA leaked`);
     }
 
-    if (test.shared) {
+    if (test.newsRoute) {
       const canonical = await page.locator('link[rel="canonical"]').getAttribute('href');
       assert(canonical, `${test.path}: canonical missing`);
       const canonicalUrl = new URL(canonical);
-      assert.equal(canonicalUrl.pathname, new URL(test.path, front).pathname, `${test.path}: canonical identity mismatch`);
-      assert.equal(canonicalUrl.searchParams.get('lang'), 'en', `${test.path}: EN canonical lost lang`);
-      const links = await page.locator('[data-header-language] a[href]').evaluateAll(nodes => nodes.map(n => n.getAttribute('href')));
       const pathname = new URL(test.path, front).pathname;
-      assert(links.some(href => href === pathname), `${test.path}: VI switch must preserve identity without lang; actual=${links}`);
-      assert(links.some(href => href === `${pathname}?lang=en`), `${test.path}: EN switch must preserve identity with lang; actual=${links}`);
+      assert.equal(canonicalUrl.pathname, pathname, `${test.path}: canonical identity mismatch`);
+      assert.equal(canonicalUrl.searchParams.has('lang'), false, `${test.path}: canonical must not contain lang query`);
+      const links = await page.locator('[data-header-language] a[href]').evaluateAll(nodes => nodes.map(n => n.getAttribute('href')));
+      assert(links.includes(pathname), `${test.path}: current locale identity missing from language switch; actual=${links}`);
+      assert(links.includes(test.counterpart), `${test.path}: counterpart identity missing from language switch; actual=${links}`);
+      assert(!links.some(href => String(href || '').includes('lang=')), `${test.path}: language switch must not use ?lang=; actual=${links}`);
+    }
+    if (test.legacy) {
+      const legacyTarget = new URL(test.legacy, front);
+      legacyTarget.searchParams.set('_qa_locale_legacy', String(Date.now()));
+      const legacyResponse = await page.goto(legacyTarget.href, { waitUntil: 'domcontentloaded', timeout: 50000 });
+      assert.equal(legacyResponse?.status(), 200, `${test.legacy}: HTTP ${legacyResponse?.status()}`);
+      const finalLegacy = new URL(page.url());
+      assert.equal(finalLegacy.pathname, new URL(test.path, front).pathname, `${test.legacy}: legacy route did not resolve to clean EN identity`);
+      assert.equal(finalLegacy.searchParams.has('lang'), false, `${test.legacy}: legacy redirect retained lang query`);
     }
     if (test.recruitment) {
       const links = await page.locator('[data-header-language] a[href]').evaluateAll(nodes => nodes.map(n => n.getAttribute('href')));

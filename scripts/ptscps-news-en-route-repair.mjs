@@ -204,12 +204,12 @@ async function triggerBuild() {
   const body = await response.json().catch(() => null);
   assert(response.ok() && body?.success, 'WordPress Build Website rejected trigger');
   log('BUILD_TRIGGER', Number(state.pending || 0) === 0 ? 'FORCE_EMPTY_QUEUE' : 'NORMAL');
-  const token = String(process.env.SOURCE_REPO_PAT || '').trim();
-  assert(token, 'SOURCE_REPO_PAT is required to monitor the exact Astro build run');
+  const token = String(process.env.GITHUB_TOKEN || '').trim();
+  assert(token, 'GITHUB_TOKEN is required to monitor the exact production build run');
   const build = await waitForWordPressBuild({
     page,
     log: (key, value) => log(`BUILD_${key}`, value),
-    githubRepository: 'ngocnhanvo/ptscps-astro',
+    githubRepository: 'ngocnhanvo/ptscps-actions',
     githubToken: token,
   });
   log('BUILD_RESULT', build);
@@ -236,6 +236,8 @@ async function qaProduction() {
       assert(switchLinks.includes(route.vi), `${route.en}: VI counterpart missing; actual=${switchLinks}`);
       assert(switchLinks.includes(route.en), `${route.en}: EN counterpart missing; actual=${switchLinks}`);
       assert(!switchLinks.some(href => String(href || '').includes('lang=')), `${route.en}: language switch still uses ?lang=`);
+      assert.equal(await qa.locator('#search-form input[name="lang"]').count(), 0,
+        `${route.en}: search form must not regenerate ?lang=en`);
       log('QA_ROUTE', { route: route.en, h1, status: 200 });
 
       const legacyResponse = await qa.goto(`${front}${route.legacy}&_qa_news_en_legacy=${Date.now()}`, { waitUntil: 'domcontentloaded', timeout: 50000 });

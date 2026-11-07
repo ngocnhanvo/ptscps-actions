@@ -58,5 +58,5 @@ jobs:
         env:
           WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
           WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
-          SOURCE_REPO_PAT: ${{ secrets.SOURCE_REPO_PAT }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: node scripts/ptscps-news-en-route-repair.mjs
