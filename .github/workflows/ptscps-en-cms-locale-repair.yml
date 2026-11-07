@@ -1,0 +1,36 @@
+name: PTSCPS English CMS locale repair
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/ptscps-en-cms-locale-repair.mjs'
+      - '.github/workflows/ptscps-en-cms-locale-repair.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ptscps-en-cms-locale-repair
+  cancel-in-progress: false
+jobs:
+  repair:
+    if: github.repository == 'ngocnhanvo/ptscps-actions'
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.0-noble
+      options: --ipc=host
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Check repair script
+        run: node --check scripts/ptscps-en-cms-locale-repair.mjs
+      - name: Install Playwright
+        run: npm install --no-save --no-package-lock --ignore-scripts --no-audit --no-fund playwright@1.64.0
+      - name: Repair known English ESC Table strings
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+          WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
+          WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
+        run: node scripts/ptscps-en-cms-locale-repair.mjs
