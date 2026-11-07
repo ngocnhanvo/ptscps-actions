@@ -1,12 +1,10 @@
 {
-  "php": "98f91467550a0ec3819b124e5a83536c17c68584",
-  "astro": "9c2d791b2b594b61b495ab280b1ed435602ee88e",
+  "php": "05fec5854bfaea3bd63977a5185a5d62293662f2",
+  "astro": "b5c361942bb528ec233ca36271729061cb365eb4",
   "scope": "PTSCPS native Visual Builder only; backed-up reversible CMS acceptance; auto-build",
-  "phase": "build",
-  "completed_build_run": 42169061377,
-  "acceptance_attempt": 7,
+  "phase": "release",
+  "acceptance_attempt": 8,
   "verify_final_controls": true,
-  "skip_completed_shared": true,
-  "skip_completed_text": true,
-  "shared_acceptance_run": 42167548844
+  "skip_completed_shared": false,
+  "skip_completed_text": false
 }
