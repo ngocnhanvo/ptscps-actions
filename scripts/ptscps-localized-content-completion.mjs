@@ -228,9 +228,20 @@ async function targetMediaByFilename(n, file) {
     if (!response.ok() || !Array.isArray(body)) continue;
     candidates.push(...body);
   }
-  return candidates.find(item => {
+  const exact = candidates.find(item => {
     const savedFile = filenameFromUrl(item.source_url);
     return savedFile === file || wordpressFilenameKey(savedFile) === wantedKey;
+  });
+  if (exact) return exact;
+  const wantedMatch = wantedKey.match(/^(.*?)(\.[a-z0-9]{1,8})$/i);
+  if (!wantedMatch) return null;
+  const [, wantedStem, wantedExt] = wantedMatch;
+  return candidates.find(item => {
+    const savedKey = wordpressFilenameKey(filenameFromUrl(item.source_url));
+    const savedMatch = savedKey.match(/^(.*?)(\.[a-z0-9]{1,8})$/i);
+    if (!savedMatch || savedMatch[2] !== wantedExt || !savedMatch[1].startsWith(`${wantedStem}-`)) return false;
+    const suffix = savedMatch[1].slice(wantedStem.length + 1);
+    return /^\d+$/.test(suffix);
   }) || null;
 }
 
@@ -933,7 +944,9 @@ async function ensureEnglishPages(n, sourcePages, targetPages) {
       deferred.push({ type: 'page', slug: sourceEn.slug, sourceViSlug: sourceVi.slug, reason: `missing English ESC Table ${resolved.missingTable}`, sourceTable: resolved.sourceTable });
       continue;
     }
-    if (action === 'IntroPage' && plain(resolved.content).length < 10 && !tableIds(resolved.content).length) {
+    const hasMediaLayout = /<(?:img|picture|figure|video|iframe)\b/i.test(String(resolved.content || ''));
+    if (action === 'IntroPage' && plain(resolved.content).length < 10
+      && !tableIds(resolved.content).length && !hasMediaLayout) {
       deferred.push({ type: 'page', slug: sourceEn.slug, sourceViSlug: sourceVi.slug, reason: 'translated content empty' });
       continue;
     }
@@ -1166,10 +1179,6 @@ async function ensureEnglishHeader(n, targetPages, serviceContext) {
     deferred.push({ type: 'menu', reason: `Header menu missing vi=${Boolean(vi?.id)} en=${Boolean(en?.id)}` });
     return { changed: false, state: 'DEFERRED' };
   }
-  const allNative = await api('GET', '/wp-json/wp/v2/menu-items?context=edit&status=publish&per_page=100&_fields=id,title,url,status,menus,parent,menu_order,type,target', n);
-  assert(allNative.response.ok() && Array.isArray(allNative.body), 'Cannot inspect native menu items');
-  const enNative = allNative.body.filter(item => Number(item.menus) === Number(en.id));
-  const titleOf = item => plain(item?.title?.raw ?? item?.title?.rendered ?? item?.title);
   const groupLabels = new Map([
     ['Giới thiệu', 'About Us'], ['Dịch vụ', 'Services'], ['HSEQ', 'HSEQ'], ['Tin tức', 'News'],
     ['Tuyển dụng', 'Careers'], ['Liên hệ', 'Contact'], ['Trang chủ', 'Home'], ['Home', 'Home'],
@@ -1262,57 +1271,90 @@ async function ensureEnglishHeader(n, targetPages, serviceContext) {
   };
   walk(vi.items || []);
 
-  // Rebuild hierarchy only for records that have a real translation. Existing
-  // EN items are reused whenever exact; obsolete items are drafted, never deleted.
-  const desiredKeys = new Set(desired.map(x => x.key));
-  const reusableByTitle = new Map();
-  for (const row of enNative) {
-    const title = titleOf(row);
-    if (!reusableByTitle.has(title)) reusableByTitle.set(title, []);
-    reusableByTitle.get(title).push(row);
-  }
-  const idByKey = new Map();
-  let changed = false;
+  // The ESC menu API is driven by custom menu-item meta. Core /wp/v2/menu-items
+  // writes do not maintain that meta, so use the theme's guarded JSON Replace
+  // path which snapshots/rolls back and writes the complete ESC menu contract.
+  const nodesByKey = new Map();
+  const desiredTree = [];
   for (const entry of desired) {
-    const parentId = entry.parentKey ? Number(idByKey.get(entry.parentKey) || 0) : 0;
-    const candidates = reusableByTitle.get(entry.title) || [];
-    const menuUrlKey = value => {
-      const url = new URL(String(value || '#'), wp);
-      return `${url.pathname}${url.search}${url.hash}`;
+    const node = {
+      key: entry.key,
+      lang: 'en',
+      label: entry.title,
+      href: entry.url,
+      linkMode: entry.url === '#' ? 'none' : 'custom',
+      target: entry.target || '',
+      children: [],
     };
-    const exact = candidates.find(row => Number(row.parent || 0) === parentId &&
-      menuUrlKey(row.url) === menuUrlKey(entry.url) && String(row.target || '') === String(entry.target || ''));
-    if (exact) { idByKey.set(entry.key, Number(exact.id)); continue; }
-    if (candidates.length === 1) {
-      const row = candidates[0];
-      const updated = await api('POST', `/wp-json/wp/v2/menu-items/${row.id}`, n, {
-        title: entry.title, type: 'custom', url: entry.url, menus: Number(en.id), status: 'publish',
-        parent: parentId, target: entry.target || '', menu_order: idByKey.size + 1,
-      });
-      assert(updated.response.ok(), `Cannot update Header.en item ${entry.title}`);
-      idByKey.set(entry.key, Number(row.id)); writes++; changed = true;
-      log('EN_MENU_UPDATED', { id: row.id, title: entry.title, url: entry.url, parent: parentId });
-      continue;
+    nodesByKey.set(entry.key, node);
+    if (entry.parentKey) {
+      const parent = nodesByKey.get(entry.parentKey);
+      assert(parent, `Header.en desired parent missing for ${entry.title}`);
+      parent.children.push(node);
+    } else {
+      desiredTree.push(node);
     }
-    assert(candidates.length === 0, `Conflicting Header.en item ${entry.title}; refusing overwrite`);
-    const created = await api('POST', '/wp-json/wp/v2/menu-items', n, {
-      title: entry.title, type: 'custom', url: entry.url, menus: Number(en.id), status: 'publish',
-      parent: parentId, target: entry.target || '', menu_order: idByKey.size + 1,
+  }
+
+  const hrefKey = value => {
+    const raw = String(value || '').trim();
+    if (!raw || raw === '#') return '';
+    const url = new URL(raw, wp);
+    if (url.origin === new URL(wp).origin || url.origin === new URL(front).origin) {
+      return `${url.pathname.replace(/^\/+/, '')}${url.search}${url.hash}`;
+    }
+    return url.href;
+  };
+  const treeSignature = nodes => (nodes || []).map(node => ({
+    label: String(node.label || '').trim(),
+    href: hrefKey(node.href || node.slug || ''),
+    target: String(node.target || ''),
+    children: treeSignature(node.children || []),
+  }));
+  const desiredSignature = treeSignature(desiredTree);
+  if (JSON.stringify(treeSignature(en.items || [])) === JSON.stringify(desiredSignature)) {
+    log('EN_MENU', { state: 'ALREADY_CORRECT', desired: desired.map(x => x.title), changed: false });
+    return { changed: false, state: 'PASS', desired: desired.map(x => x.title) };
+  }
+
+  await page.goto(uri(`/wp-admin/nav-menus.php?action=edit&menu=${Number(en.id)}&esc_full_admin=1`), {
+    waitUntil: 'domcontentloaded', timeout: 50000,
+  });
+  const importButton = page.locator('#esc-pse-menu-json-preview');
+  assert(await importButton.count() === 1, 'ESC menu JSON import control unavailable');
+  const nonceValue = String(await importButton.getAttribute('data-nonce') || '').trim();
+  const menuIdValue = String(await importButton.getAttribute('data-menu-id') || '').trim();
+  assert(/^\d+$/.test(menuIdValue) && Number(menuIdValue) === Number(en.id), 'ESC Header.en import menu ID mismatch');
+  assert(nonceValue.length >= 8, 'ESC Header.en import nonce unavailable');
+  const json = JSON.stringify(desiredTree);
+  const ajaxMenu = async (action, extra = {}) => {
+    const response = await page.request.post(uri('/wp-admin/admin-ajax.php'), {
+      timeout: 60000,
+      form: { action, nonce: nonceValue, menu_id: menuIdValue, json, ...extra },
     });
-    assert(created.response.ok() && created.body?.id, `Cannot create Header.en item ${entry.title}`);
-    idByKey.set(entry.key, Number(created.body.id)); writes++; changed = true;
+    const body = await response.json().catch(() => null);
+    assert(response.ok() && body?.success === true,
+      `ESC Header.en ${action} failed HTTP=${response.status()} message=${body?.data?.message || 'unknown'}`);
+    return body;
+  };
+  const preview = await ajaxMenu('esc_pse_menu_json_preview');
+  assert(Number(preview?.data?.stats?.total || 0) === desired.length,
+    `ESC Header.en preview item count mismatch ${preview?.data?.stats?.total}/${desired.length}`);
+  await ajaxMenu('esc_pse_menu_json_replace', { confirm: 'replace' });
+  writes++;
+  let after = null;
+  for (let attempt = 1; attempt <= 10; attempt++) {
+    const afterMenus = await readMenus();
+    after = afterMenus?.Header?.en || null;
+    if (after?.id && Number(after.id) === Number(en.id)
+      && JSON.stringify(treeSignature(after.items || [])) === JSON.stringify(desiredSignature)) break;
+    if (attempt < 10) await sleep(700 * attempt);
   }
-  // Draft only obsolete items not selected into the rebuilt EN hierarchy.
-  const desiredIds = new Set([...idByKey.values()].map(Number));
-  for (const row of enNative) {
-    if (desiredIds.has(Number(row.id))) continue;
-    const updated = await api('POST', `/wp-json/wp/v2/menu-items/${row.id}`, n, { status: 'draft' });
-    assert(updated.response.ok(), `Cannot draft obsolete Header.en item ${titleOf(row)}`);
-    changed = true; writes++;
-    log('EN_MENU_DRAFTED_OBSOLETE', { id: row.id, title: titleOf(row) });
-  }
-  log('EN_MENU', { state: 'PASS', desired: desired.map(x => x.title), changed });
-  return { changed, state: 'PASS', desired: desired.map(x => x.title) };
+  assert(after?.id && Number(after.id) === Number(en.id), 'Header.en missing after JSON Replace');
+  assert(JSON.stringify(treeSignature(after.items || [])) === JSON.stringify(desiredSignature),
+    'Header.en readback differs after JSON Replace');
+  log('EN_MENU', { state: 'REPLACED_VIA_ESC_JSON_IMPORT', desired: desired.map(x => x.title), changed: true });
+  return { changed: true, state: 'PASS', desired: desired.map(x => x.title) };
 }
 
 async function triggerBuildAndWait() {
