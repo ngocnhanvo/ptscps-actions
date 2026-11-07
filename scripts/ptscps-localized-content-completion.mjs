@@ -1398,6 +1398,8 @@ async function productionQa(viPages, enProducts, enPosts, targetPages) {
   if (englishHome) {
     const requiredHeader = ['Services', 'News', 'HSEQ', 'Contact'];
     const forbiddenHeader = ['Dịch vụ', 'Tin tức', 'Tuyển dụng', 'Liên hệ'];
+    const headerHas = (text, label) => String(text || '').toLocaleLowerCase('vi-VN')
+      .includes(String(label || '').toLocaleLowerCase('vi-VN'));
     let response = null;
     let headerText = '';
     let footerText = '';
@@ -1409,8 +1411,8 @@ async function productionQa(viPages, enProducts, enPosts, targetPages) {
         if (response?.status() === 200) {
           headerText = await qa.locator('#header-navrow').innerText().catch(() => '');
           footerText = await qa.locator('footer').innerText().catch(() => '');
-          if (requiredHeader.every(label => headerText.includes(label))
-            && forbiddenHeader.every(label => !headerText.includes(label))) {
+          if (requiredHeader.every(label => headerHas(headerText, label))
+            && forbiddenHeader.every(label => !headerHas(headerText, label))) {
             log('PRODUCTION_READY', { route: `/${englishHome.slug}`, attempt, header: 'PASS' });
             break;
           }
@@ -1431,10 +1433,10 @@ async function productionQa(viPages, enProducts, enPosts, targetPages) {
       assert(!footerText.includes(forbidden), `Untranslated policy label leaked into EN footer: ${forbidden}`);
     }
     for (const required of requiredHeader) {
-      assert(headerText.includes(required), `English Header missing ${required}`);
+      assert(headerHas(headerText, required), `English Header missing ${required}`);
     }
     for (const forbidden of forbiddenHeader) {
-      assert(!headerText.includes(forbidden), `Vietnamese Header label leaked into EN menu: ${forbidden}`);
+      assert(!headerHas(headerText, forbidden), `Vietnamese Header label leaked into EN menu: ${forbidden}`);
     }
     results.push({ route: `/${englishHome.slug}`, status: 200, policiesHidden: true, headerLocalized: true, readyAttempt });
   }
