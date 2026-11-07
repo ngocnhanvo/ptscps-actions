@@ -483,7 +483,33 @@ async function resolveEnglishLegacyNews(viSlug, n) {
   } catch { return null; }
 }
 
-async function repairHomepageTables(pages, n) {
+// Resolve curated card titles from real WordPress Products, never fabricate a
+// detail URL. If a localized EN Product does not exist, link to its verified
+// EN service category instead of silently loading a Vietnamese detail page.
+const normalizeProjectTitle = value => String(value || '').replace(/<[^>]+>/g, '').replace(/&amp;/gi, '&').trim().replace(/\s+/g, ' ').toLowerCase();
+function homepageProjectTarget(title, locale, products, categories) {
+  const matches = products.filter(p => p.status === 'publish'
+    && normalizeProjectTitle(p.title?.raw ?? p.title?.rendered ?? p.title) === normalizeProjectTitle(title));
+  const source = matches.filter(p => acfValue(p.acf?.product_lang) === 'vi');
+  if (source.length !== 1) return null;
+  const viRoute = routeMap.get(`/${source[0].slug}`);
+  if (!viRoute || !viRoute.startsWith('/dich-vu/')) return null;
+  if (locale === 'vi') return viRoute;
+  const translated = matches.filter(p => acfValue(p.acf?.product_lang) === 'en');
+  if (translated.length === 1) {
+    const direct = routeMap.get(`/e/${translated[0].slug}`);
+    if (direct?.startsWith('/services/')) return direct;
+  }
+  const category = viRoute.split('/')[2];
+  const counterpart = {
+    'van-hanh-va-bao-duong-fpso-fso-mopu': 'fpso-fso-om-services',
+    'cung-ung-nhan-luc-ky-thuat-van-hanh-va-bao-duong': 'manpower-supply',
+  }[category];
+  return counterpart && categories.some(c => c.slug === counterpart)
+    ? `/services/${counterpart}` : null;
+}
+
+async function repairHomepageTables(pages, products, categories, n) {
   const homePages = pages.filter(p => {
     const slug = String(p.slug || '').toLowerCase();
     const key = acfValue(p.acf?.key).toLowerCase();
@@ -537,6 +563,23 @@ async function repairHomepageTables(pages, n) {
         return target;
       });
     }));
+    if (/^home_04(?:_en)?$/i.test(id)) {
+      const headers = table.data[0].map(value => String(value || '').trim());
+      const titleCol = headers.indexOf('title');
+      const linkCol = headers.indexOf('link');
+      assert(titleCol >= 0 && linkCol >= 0, `PROJECT_CARD_SCHEMA_MISMATCH: ${id}`);
+      for (let row = 2; row < data.length; row++) {
+        if (String(data[row][linkCol] || '').trim()) continue;
+        const title = String(data[row][titleCol] || '').trim();
+        if (!title) continue;
+        const target = homepageProjectTarget(title, locale, products, categories);
+        if (!target) { unresolved.push({ id, row, title, reason: 'PROJECT_ROUTE_UNRESOLVED' }); continue; }
+        data[row][linkCol] = target;
+        altered++;
+        homeLinkAudit.push({ id, row, col: linkCol, from: '', to: target, title, locale });
+        log('PROJECT_CARD_LINK', { id, title, target, locale });
+      }
+    }
     if (altered) changes.push({ id, table, data, altered });
   }
   log('HOME_LINK_INVENTORY', { tables: ids.length, candidates: homeLinkAudit.length, byTable: changes.map(x => ({ id: x.id, links: x.altered })) });
@@ -765,12 +808,12 @@ try {
   const n = await nonce();
   const pages = await collect('pages', n, 'id,slug,status,content,acf');
   const categories = await listProductCategories(n);
-  const products = await collect('product', n, 'id,slug,status,content,excerpt,product_categories,product_cat,acf');
+  const products = await collect('product', n, 'id,slug,status,title,content,excerpt,product_categories,product_cat,acf');
   log('INVENTORY', { pages: pages.length, categories: categories.length, products: products.length });
 
   prepareRoutes(pages, categories, products);
   await repairContent(n, pages, categories, products);
-  await repairHomepageTables(pages, n);
+  await repairHomepageTables(pages, products, categories, n);
   await writeFile(`${artifactDir}/repairs.json`, JSON.stringify({ repairs, ambiguities }, null, 2));
   log('REPAIR', { writes, replacements: repairs.length, ambiguous: ambiguities.length });
 
