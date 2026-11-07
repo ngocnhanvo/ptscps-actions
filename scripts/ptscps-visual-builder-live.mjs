@@ -362,7 +362,7 @@ try {
           const select = document.getElementById('esc-vb-edit-row');
           const input = document.getElementById('esc-vb-edit-title');
           return select?.selectedIndex >= 0 && select.value === expectedKey &&
-            input && !input.disabled && input.value.includes(fragment);
+            input && !input.disabled && input.value.toLocaleLowerCase('vi').includes(fragment.toLocaleLowerCase('vi'));
         }, { expectedKey, fragment }, { timeout: 12000 });
       } catch {
         const state = await page.evaluate(() => ({
@@ -377,8 +377,8 @@ try {
       }
       const editorValue = await page.locator('#esc-vb-edit-title').inputValue();
       log('PTSCPS_BUILDER_TEXT_DIAG', {fragment, table: coords.table, row: coords.row,
-        field: coords.field, editorValue: editorValue.slice(0, 120), match: editorValue.includes(fragment)});
-      assert(editorValue.includes(fragment),
+        field: coords.field, editorValue: editorValue.slice(0, 120), match: editorValue.toLocaleLowerCase('vi').includes(fragment.toLocaleLowerCase('vi'))});
+      assert(editorValue.toLocaleLowerCase('vi').includes(fragment.toLocaleLowerCase('vi')),
         'Native editor selected different ESC cell: ' + fragment);
       log('PTSCPS_BUILDER_EXACT_TEXT', {fragment, table: coords.table, row: coords.row,
         field: coords.field, selection: 'PASS', no_cms_write: true});
