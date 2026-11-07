@@ -2,8 +2,8 @@
   "php": "754b27cae617ea51f7d03e47e990c2fb85aa9f11",
   "astro": "bb3a139c444002c76ab82f1b7b83a81968418d1c",
   "scope": "PTSCPS native Visual Builder only; backed-up reversible CMS acceptance; auto-build",
-  "phase": "release",
-  "acceptance_attempt": 12,
+  "phase": "verify",
+  "acceptance_attempt": 13,
   "verify_final_controls": false,
   "skip_completed_shared": true,
   "skip_completed_text": false
