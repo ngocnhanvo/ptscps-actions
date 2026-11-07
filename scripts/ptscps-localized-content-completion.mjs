@@ -712,7 +712,7 @@ async function ensureEnglishServiceTaxonomy(n, sourcePages) {
     }
   }
   log('EN_SERVICE_TAXONOMY', { state: 'PASS', translatedCategories: byViId.size, root: enRoot.slug });
-  return { viRoot, enRoot, byViId };
+  return { viRoot, enRoot, byViId, currentViTerms };
 }
 
 const productSlugAliases = new Map([
@@ -765,7 +765,7 @@ async function ensureEnglishProducts(n, sourcePosts, targetProducts, serviceCont
         await setAcf(n, 'product', Number(row.id), needed); writes++;
       }
       existing++;
-      results.push({ slug: sourceEn.slug, id: Number(row.id), state: 'EXISTS', origin: Number(viProduct.id) });
+      results.push({ slug: sourceEn.slug, id: Number(row.id), state: 'EXISTS', origin: Number(viProduct.id), category: enCategory.slug });
       continue;
     }
     const content = await localizeHtml(sourceEn.content?.rendered || '', n, `product-en:${sourceEn.slug}`);
@@ -799,7 +799,7 @@ async function contentForEnglishPage(targetVi, sourceEn, n) {
   const ids = tableIds(viContent);
   if (!ids.length) {
     const localized = await localizeHtml(sourceEn.content?.rendered || '', n, `page-en:${sourceEn.slug}`);
-    if (sourceEn.slug === 'library' && plain(localized).length < 10 && plain(viContent).length > 10) {
+    if (sourceEn.slug === 'library' && plain(localized).length < 10 && String(viContent).trim().length > 10) {
       return { content: viContent, mode: 'media-layout-reuse' };
     }
     return { content: localized, mode: 'editor' };
@@ -867,7 +867,13 @@ async function ensureEnglishPages(n, sourcePages, targetPages) {
       continue;
     }
     const targetViCandidates = targetPages.filter(item => item.slug === sourceVi.slug && acfValue(item.acf?.product_lang) !== 'en');
-    if (targetViCandidates.length !== 1) {
+    if (targetViCandidates.length === 0) {
+      const omitted = { slug: sourceEn.slug, sourceViSlug: sourceVi.slug, state: 'OMITTED_NO_CURRENT_VI_PAGE' };
+      results.push(omitted);
+      log('EN_PAGE', omitted);
+      continue;
+    }
+    if (targetViCandidates.length > 1) {
       deferred.push({ type: 'page', slug: sourceEn.slug, sourceViSlug: sourceVi.slug, reason: `target vi page candidates=${targetViCandidates.length}` });
       continue;
     }
@@ -918,12 +924,94 @@ async function sourceFeaturedUrl(id) {
   return String(body?.source_url || '');
 }
 
+const standaloneEnglishNewsSlugs = new Set([
+  'chim-sao-asd-uwild-2026-completed-safely-ahead-of-schedule-and-with-key-technical-milestones',
+  'pps-completes-asd-2026-and-well-repair-campaign-at-thai-binh-platform',
+  'successful-completion-of-asd-2025-on-fpso-ruby-ii-fso-golden-star',
+  'pps-completes-start-up-assistance-services-for-whp-dh01-wellhead-platform-dai-hung-field-phase-3',
+  'completed-ahead-of-schedule-the-annual-shutdown-on-fpso-ptsc-lam-son',
+  'pressure-safety-valve-psv-maintenance-and-calibrations-services-on-fpso-lewik-emas-for-premier-oil',
+  'notification-for-certification-of-interim-document-of-compliance',
+]);
+
+async function targetCategoryIdBySlug(n, slug) {
+  const { response, body } = await api('GET',
+    `/wp-json/wp/v2/categories?context=edit&hide_empty=false&slug=${encodeURIComponent(slug)}&per_page=20&_fields=id,slug,name,parent`, n);
+  assert(response.ok() && Array.isArray(body), `Target category lookup failed ${slug}`);
+  assert(body.length === 1, `Target category mismatch ${slug}: ${body.length}`);
+  return Number(body[0].id);
+}
+
+async function ensureStandaloneEnglishNewsPost(n, sourceEn, targetPosts, categoryId) {
+  const existing = targetPosts.filter(item => item.slug === sourceEn.slug && acfValue(item.acf?.product_lang) === 'en');
+  assert(existing.length <= 1, `Duplicate standalone EN Post ${sourceEn.slug}`);
+  const needed = { product_lang: 'en', action: 'PostDetails', key: 'ssr-post' };
+  if (existing.length === 1) {
+    let current = existing[0];
+    const categories = (current.categories || []).map(Number);
+    if (!categories.includes(Number(categoryId))) {
+      const updated = await api('POST', `/wp-json/wp/v2/posts/${current.id}`, n,
+        { categories: [...new Set([...categories, Number(categoryId)])] });
+      assert(updated.response.ok(), `Cannot classify standalone EN Post ${sourceEn.slug}`);
+      current = { ...current, ...updated.body }; writes++;
+    }
+    if (!Object.entries(needed).every(([key, value]) => acfValue(current.acf?.[key]) === value)) {
+      await setAcf(n, 'posts', Number(current.id), needed); writes++;
+    }
+    return { slug: sourceEn.slug, id: Number(current.id), state: 'EXISTS', standaloneNews: true };
+  }
+
+  const content = await localizeHtml(sourceEn.content?.rendered || '', n, `post-en:${sourceEn.slug}`);
+  const excerpt = await localizeHtml(sourceEn.excerpt?.rendered || '', n, `post-en-excerpt:${sourceEn.slug}`);
+  if (plain(content).length < 20) {
+    deferred.push({ type: 'post', slug: sourceEn.slug, reason: 'standalone English News content empty' });
+    return null;
+  }
+  let featured = 0;
+  if (Number(sourceEn.featured_media || 0)) {
+    const featuredUrl = await sourceFeaturedUrl(sourceEn.featured_media).catch(() => '');
+    if (featuredUrl) featured = (await ensureMedia(n, featuredUrl, `post-featured:${sourceEn.slug}`)).id;
+  }
+  const payload = {
+    title: plain(sourceEn.title?.rendered), slug: sourceEn.slug, status: 'publish',
+    content, excerpt, date: sourceEn.date, date_gmt: sourceEn.date_gmt,
+    featured_media: featured, categories: [Number(categoryId)],
+  };
+  const created = await api('POST', '/wp-json/wp/v2/posts', n, payload, 90000);
+  assert(created.response.ok() && created.body?.id,
+    `Cannot create standalone EN Post ${sourceEn.slug}: HTTP ${created.response.status()}`);
+  const id = Number(created.body.id); writes++;
+  await setAcf(n, 'posts', id, needed);
+  const verify = await api('GET',
+    `/wp-json/wp/v2/posts/${id}?context=edit&_fields=id,slug,status,categories,acf`, n);
+  assert(verify.response.ok() && verify.body.status === 'publish'
+    && verify.body.categories.map(Number).includes(Number(categoryId))
+    && Object.entries(needed).every(([key, value]) => acfValue(verify.body.acf?.[key]) === value),
+    `Standalone EN Post readback failed ${sourceEn.slug}`);
+  targetPosts.push({ ...created.body, acf: verify.body.acf, categories: verify.body.categories });
+  return { slug: sourceEn.slug, id, state: 'CREATED', standaloneNews: true };
+}
+
 async function ensureEnglishPosts(n, sourcePosts, targetPosts, targetPages) {
   const sourceMap = new Map(sourcePosts.map(item => [Number(item.id), item]));
   const english = sourcePosts.filter(item => langOf(item) === 'en');
   let createdCount = 0;
   let existingCount = 0;
   const results = [];
+  const newsRootCategoryId = await targetCategoryIdBySlug(n, 'tin-tuc');
+  const tryStandaloneNews = async sourceEn => {
+    if (!standaloneEnglishNewsSlugs.has(sourceEn.slug)) return false;
+    const result = await ensureStandaloneEnglishNewsPost(n, sourceEn, targetPosts, newsRootCategoryId);
+    if (result) {
+      if (result.state === 'CREATED') createdCount++;
+      else existingCount++;
+      results.push(result);
+      log('EN_POST', result);
+    } else {
+      results.push({ slug: sourceEn.slug, state: 'DEFERRED_STANDALONE_CONTENT' });
+    }
+    return true;
+  };
   for (const sourceEn of english) {
     if (representedServicePosts.has(sourceEn.slug)) {
       results.push({ slug: sourceEn.slug, state: 'REPRESENTED_BY_PRODUCT' });
@@ -931,7 +1019,10 @@ async function ensureEnglishPosts(n, sourcePosts, targetPosts, targetPages) {
     }
     const sourceVi = await sourceViForEnglish(sourceEn, sourceMap, sourcePosts);
     if (!sourceVi) {
-      deferred.push({ type: 'post', slug: sourceEn.slug, reason: 'legacy translation pairing unavailable' });
+      if (await tryStandaloneNews(sourceEn)) continue;
+      const omitted = { slug: sourceEn.slug, state: 'OMITTED_OUTSIDE_CURRENT_VI_MODEL', reason: 'legacy translation pairing unavailable' };
+      results.push(omitted);
+      log('EN_POST', omitted);
       continue;
     }
     const targetViCandidates = targetPosts.filter(item => item.slug === sourceVi.slug && acfValue(item.acf?.product_lang) !== 'en');
@@ -968,6 +1059,13 @@ async function ensureEnglishPosts(n, sourcePosts, targetPosts, targetPages) {
             reason: `matching VI Page requires missing English ESC Table ${resolved.missingTable}`, sourceTable: resolved.sourceTable });
           continue;
         }
+      }
+      if (targetViCandidates.length === 0) {
+        if (await tryStandaloneNews(sourceEn)) continue;
+        const omitted = { slug: sourceEn.slug, sourceViSlug: sourceVi.slug, state: 'OMITTED_NO_CURRENT_VI_POST' };
+        results.push(omitted);
+        log('EN_POST', omitted);
+        continue;
       }
       deferred.push({ type: 'post', slug: sourceEn.slug, sourceViSlug: sourceVi.slug, reason: `target vi post candidates=${targetViCandidates.length}` });
       continue;
@@ -1009,7 +1107,9 @@ async function ensureEnglishPosts(n, sourcePosts, targetPosts, targetPages) {
     results.push({ slug: sourceEn.slug, id, state: 'CREATED', sourceViSlug: sourceVi.slug, targetViId: targetVi.id });
     log('EN_POST', results.at(-1));
   }
-  log('EN_POST_SUMMARY', { sourceEnglish: english.length, created: createdCount, existing: existingCount });
+  assert(results.length === english.length,
+    `English Post accounting mismatch handled=${results.length} source=${english.length}`);
+  log('EN_POST_SUMMARY', { sourceEnglish: english.length, created: createdCount, existing: existingCount, handled: results.length });
   return { sourceEnglish: english.length, created: createdCount, existing: existingCount, results };
 }
 
@@ -1021,7 +1121,7 @@ async function readMenus() {
   return data.menus || {};
 }
 
-async function ensureEnglishHeader(n, targetPages) {
+async function ensureEnglishHeader(n, targetPages, serviceContext) {
   const menus = await readMenus();
   const vi = menus?.Header?.vi;
   const en = menus?.Header?.en;
@@ -1036,6 +1136,8 @@ async function ensureEnglishHeader(n, targetPages) {
   const groupLabels = new Map([
     ['Giới thiệu', 'About Us'], ['Dịch vụ', 'Services'], ['HSEQ', 'HSEQ'], ['Tin tức', 'News'],
     ['Tuyển dụng', 'Careers'], ['Liên hệ', 'Contact'], ['Trang chủ', 'Home'], ['Home', 'Home'],
+    ['Tất cả', 'All'], ['Hoạt động của công ty', 'Company Activities'],
+    ['Dầu khí trong nước và khu vực', 'Domestic and Regional'],
     ['Thư mời chào giá', 'Invitation for Quotation'], ['Thư viện PPS', 'PPS Library'],
     ['Hồ sơ năng lực', 'Company Brochure'],
   ]);
@@ -1046,6 +1148,17 @@ async function ensureEnglishHeader(n, targetPages) {
   const homeEn = targetPages.find(p => acfValue(p.acf?.product_lang) === 'en' && acfValue(p.acf?.key) === 'home')
     || (homeVi ? pagesEnByOrigin.get(Number(homeVi.id)) : null);
   const internalOrigins = new Set([new URL(wp).origin, new URL(front).origin]);
+  const serviceTermsByViSlug = new Map();
+  for (const viTerm of serviceContext?.currentViTerms || []) {
+    const enTerm = serviceContext?.byViId?.get(Number(viTerm.id));
+    if (enTerm?.slug) serviceTermsByViSlug.set(String(viTerm.slug), enTerm);
+  }
+  const newsRoutes = new Map([
+    ['tin-tuc', { url: '/tin-tuc?lang=en', title: 'News' }],
+    ['c/tin-tuc/hoat-dong-cua-cong-ty', { url: '/c/tin-tuc/hoat-dong-cua-cong-ty?lang=en', title: 'Company Activities' }],
+    ['c/tin-tuc/dau-khi-trong-nuoc-va-khu-vuc', { url: '/c/tin-tuc/dau-khi-trong-nuoc-va-khu-vuc?lang=en', title: 'Domestic and Regional' }],
+    ['thu-moi-chao-gia', { url: '/thu-moi-chao-gia?lang=en', title: 'Invitation for Quotation' }],
+  ]);
 
   const resolveHref = href => {
     try {
@@ -1067,10 +1180,34 @@ async function ensureEnglishHeader(n, targetPages) {
         } else if (!resolvedHref.path) {
           if (homeEn) translated = { title: groupLabels.get(label) || plain(homeEn.title?.raw ?? homeEn.title?.rendered) || 'Home', url: `/${homeEn.slug}`, target: item.target || '' };
         } else {
-          const slug = resolvedHref.path.split('/').pop();
-          const viPage = pagesViBySlug.get(slug);
-          const enPage = viPage ? pagesEnByOrigin.get(Number(viPage.id)) : null;
-          if (enPage) translated = { title: plain(enPage.title?.raw ?? enPage.title?.rendered), url: `/${enPage.slug}`, target: item.target || '' };
+          const servicePath = resolvedHref.path.split('/');
+          if (resolvedHref.path === 'dich-vu' && serviceContext?.enRoot?.slug) {
+            translated = {
+              title: groupLabels.get(label) || plain(serviceContext.enRoot.name) || 'Services',
+              url: `/${serviceContext.enRoot.slug}`, target: item.target || '',
+            };
+          } else if (servicePath[0] === 'dich-vu' && servicePath.length > 1) {
+            const enTerm = serviceTermsByViSlug.get(servicePath.at(-1));
+            if (enTerm) translated = {
+              title: groupLabels.get(label) || plain(enTerm.name),
+              url: `/${serviceContext.enRoot.slug}/${enTerm.slug}`, target: item.target || '',
+            };
+          } else if (newsRoutes.has(resolvedHref.path)) {
+            const route = newsRoutes.get(resolvedHref.path);
+            translated = { title: groupLabels.get(label) || route.title, url: route.url, target: item.target || '' };
+          } else {
+            const slug = resolvedHref.path.split('/').pop();
+            const viPage = pagesViBySlug.get(slug);
+            const enPage = viPage ? pagesEnByOrigin.get(Number(viPage.id)) : null;
+            if (enPage) {
+              const nestedHseq = resolvedHref.path.startsWith('hseq/');
+              translated = {
+                title: groupLabels.get(label) || plain(enPage.title?.raw ?? enPage.title?.rendered),
+                url: nestedHseq ? `/hseq/${enPage.slug}` : `/${enPage.slug}`,
+                target: item.target || '',
+              };
+            }
+          }
         }
       } else {
         const childStart = desired.length;
@@ -1101,9 +1238,24 @@ async function ensureEnglishHeader(n, targetPages) {
   for (const entry of desired) {
     const parentId = entry.parentKey ? Number(idByKey.get(entry.parentKey) || 0) : 0;
     const candidates = reusableByTitle.get(entry.title) || [];
+    const menuUrlKey = value => {
+      const url = new URL(String(value || '#'), wp);
+      return `${url.pathname}${url.search}${url.hash}`;
+    };
     const exact = candidates.find(row => Number(row.parent || 0) === parentId &&
-      new URL(String(row.url || '#'), wp).pathname === new URL(String(entry.url || '#'), wp).pathname && String(row.target || '') === String(entry.target || ''));
+      menuUrlKey(row.url) === menuUrlKey(entry.url) && String(row.target || '') === String(entry.target || ''));
     if (exact) { idByKey.set(entry.key, Number(exact.id)); continue; }
+    if (candidates.length === 1) {
+      const row = candidates[0];
+      const updated = await api('POST', `/wp-json/wp/v2/menu-items/${row.id}`, n, {
+        title: entry.title, type: 'custom', url: entry.url, menus: Number(en.id), status: 'publish',
+        parent: parentId, target: entry.target || '', menu_order: idByKey.size + 1,
+      });
+      assert(updated.response.ok(), `Cannot update Header.en item ${entry.title}`);
+      idByKey.set(entry.key, Number(row.id)); writes++; changed = true;
+      log('EN_MENU_UPDATED', { id: row.id, title: entry.title, url: entry.url, parent: parentId });
+      continue;
+    }
     assert(candidates.length === 0, `Conflicting Header.en item ${entry.title}; refusing overwrite`);
     const created = await api('POST', '/wp-json/wp/v2/menu-items', n, {
       title: entry.title, type: 'custom', url: entry.url, menus: Number(en.id), status: 'publish',
@@ -1112,10 +1264,10 @@ async function ensureEnglishHeader(n, targetPages) {
     assert(created.response.ok() && created.body?.id, `Cannot create Header.en item ${entry.title}`);
     idByKey.set(entry.key, Number(created.body.id)); writes++; changed = true;
   }
-  // Draft only obsolete items that are not represented by desired translated labels.
-  const desiredTitles = new Set(desired.map(x => x.title));
+  // Draft only obsolete items not selected into the rebuilt EN hierarchy.
+  const desiredIds = new Set([...idByKey.values()].map(Number));
   for (const row of enNative) {
-    if (desiredTitles.has(titleOf(row))) continue;
+    if (desiredIds.has(Number(row.id))) continue;
     const updated = await api('POST', `/wp-json/wp/v2/menu-items/${row.id}`, n, { status: 'draft' });
     assert(updated.response.ok(), `Cannot draft obsolete Header.en item ${titleOf(row)}`);
     changed = true; writes++;
@@ -1153,7 +1305,7 @@ async function triggerBuildAndWait() {
   return build;
 }
 
-async function productionQa(viPages, enPosts, targetPages) {
+async function productionQa(viPages, enProducts, enPosts, targetPages) {
   const qa = await context.newPage();
   const results = [];
   for (const item of viPages) {
@@ -1170,8 +1322,54 @@ async function productionQa(viPages, enPosts, targetPages) {
     for (const forbidden of ['Sitemap', 'Terms of Service', 'Privacy Policy', 'Điều khoản dịch vụ', 'Chính sách bảo mật']) {
       assert(!text.includes(forbidden), `Untranslated policy label leaked into EN footer: ${forbidden}`);
     }
-    results.push({ route: `/${englishHome.slug}`, status: 200, policiesHidden: true });
+    const headerText = await qa.locator('#header-navrow').innerText();
+    for (const required of ['Services', 'News', 'HSEQ', 'Contact']) {
+      assert(headerText.includes(required), `English Header missing ${required}`);
+    }
+    for (const forbidden of ['Dịch vụ', 'Tin tức', 'Tuyển dụng', 'Liên hệ']) {
+      assert(!headerText.includes(forbidden), `Vietnamese Header label leaked into EN menu: ${forbidden}`);
+    }
+    results.push({ route: `/${englishHome.slug}`, status: 200, policiesHidden: true, headerLocalized: true });
   }
+
+  const servicesPage = targetPages.find(p => acfValue(p.acf?.product_lang) === 'en' && acfValue(p.acf?.key) === 'ssr-products');
+  if (servicesPage) {
+    const response = await qa.goto(`${front}/${servicesPage.slug}?_qa=${Date.now()}`, { waitUntil: 'load', timeout: 50000 });
+    assert(response?.status() === 200, 'English Services production route failed');
+    assert(await qa.locator('[data-services-category-grid]').count() === 1, 'English Services category grid missing');
+    results.push({ route: `/${servicesPage.slug}`, status: 200, servicesGrid: true });
+  }
+
+  const libraryPage = targetPages.find(p => acfValue(p.acf?.product_lang) === 'en' && p.slug === 'library');
+  if (libraryPage) {
+    const response = await qa.goto(`${front}/library?_qa=${Date.now()}`, { waitUntil: 'load', timeout: 50000 });
+    assert(response?.status() === 200, 'English Library production route failed');
+    assert(await qa.locator('main img').count() > 0, 'English Library reused gallery has no images');
+    results.push({ route: '/library', status: 200, mediaLayout: true });
+  }
+
+  for (const hseqPage of targetPages.filter(p => acfValue(p.acf?.product_lang) === 'en'
+    && String(acfValue(p.acf?.key)).startsWith('hseq-') && p.slug !== 'hseq-en')) {
+    const route = `/hseq/${hseqPage.slug}`;
+    const response = await qa.goto(`${front}${route}?_qa=${Date.now()}`, { waitUntil: 'load', timeout: 50000 });
+    assert(response?.status() === 200, `English HSEQ production route failed ${route}`);
+    results.push({ route, status: 200 });
+  }
+
+  const newsResponse = await qa.goto(`${front}/tin-tuc?lang=en&_qa=${Date.now()}`, { waitUntil: 'load', timeout: 50000 });
+  assert(newsResponse?.status() === 200, 'English News production route failed');
+  assert((await qa.locator('main').innerText()).includes('News'), 'English News heading missing');
+  results.push({ route: '/tin-tuc?lang=en', status: 200 });
+
+  const productSamples = enProducts.results.filter(x => ['CREATED', 'EXISTS'].includes(x.state) && x.category).slice(0, 3);
+  for (const sample of productSamples) {
+    const route = `/${servicesPage?.slug || 'services'}/${sample.category}/${sample.slug}`;
+    const response = await qa.goto(`${front}${route}?_qa=${Date.now()}`, { waitUntil: 'load', timeout: 50000 });
+    assert(response?.status() === 200, `EN Product production route failed ${route}`);
+    assert((await qa.locator('main').innerText()).trim().length > 40, `EN Product production content empty ${sample.slug}`);
+    results.push({ route, status: 200 });
+  }
+
   const samples = enPosts.results.filter(x => x.state === 'CREATED').slice(0, 3);
   for (const sample of samples) {
     const response = await qa.goto(`${front}/${sample.slug}?_qa=${Date.now()}`, { waitUntil: 'load', timeout: 50000 });
@@ -1206,7 +1404,7 @@ try {
   const enProducts = await ensureEnglishProducts(n, sourcePosts, targetProducts, serviceContext);
   targetProducts = await collectTarget('product', n, 'id,slug,status,title,content,excerpt,featured_media,menu_order,product_categories,acf,date,date_gmt');
   const enPosts = await ensureEnglishPosts(n, sourcePosts, targetPosts, targetPages);
-  await ensureEnglishHeader(n, targetPages);
+  await ensureEnglishHeader(n, targetPages, serviceContext);
 
   await writeFile(`${artifactDir}/deferred.json`, JSON.stringify(deferred, null, 2));
   const summary = {
@@ -1221,7 +1419,7 @@ try {
 
   if (writes > 0) await triggerBuildAndWait();
   else log('BUILD', 'NO_CMS_CHANGES_SKIP_TRIGGER');
-  await productionQa(viStatic, enPosts, targetPages);
+  await productionQa(viStatic, enProducts, enPosts, targetPages);
   log('RESULT', deferred.length ? 'PARTIAL_WITH_DEFERRED' : 'PASS');
 } finally {
   await browser.close();
