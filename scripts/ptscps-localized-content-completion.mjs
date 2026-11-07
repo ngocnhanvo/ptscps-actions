@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { chromium } from 'playwright';
 import { waitForWordPressBuild } from './ptscps-wordpress-build-monitor.mjs';
@@ -196,23 +195,14 @@ const filenameFromUrl = value => {
   catch { return ''; }
 };
 
-const safeUploadFilename = value => {
-  const original = filenameFromUrl(value);
-  if (!original) return '';
-  // Keep already-safe ASCII names unchanged so existing migrated media are reused.
-  if (/^[\x20-\x7e]+$/.test(original) && !/["\\\r\n]/.test(original)) return original;
-  const extensionMatch = original.match(/(\.[A-Za-z0-9]{1,8})$/);
-  const extension = extensionMatch?.[1]?.toLowerCase() || '.jpg';
-  const sourceStem = extensionMatch ? original.slice(0, -extensionMatch[1].length) : original;
-  const asciiStem = sourceStem.normalize('NFKD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^\x20-\x7e]+/g, '-')
-    .replace(/[^A-Za-z0-9._-]+/g, '-')
-    .replace(/^[._-]+|[._-]+$/g, '')
-    .slice(0, 80);
-  const digest = createHash('sha256').update(new URL(value, source).href).digest('hex').slice(0, 12);
-  return `${asciiStem || 'legacy-asset'}-${digest}${extension}`;
-};
+const wordpressFilenameKey = value => filenameFromUrl(value)
+  .normalize('NFKD')
+  .replace(/[đĐ]/g, 'd')
+  .replace(/[\u0300-\u036f]/g, '')
+  .toLowerCase()
+  .replace(/[^a-z0-9._-]+/g, '-')
+  .replace(/-+/g, '-')
+  .replace(/^[._-]+|[._-]+$/g, '');
 
 const mimeFor = value => {
   const lower = filenameFromUrl(value).toLowerCase();
@@ -227,10 +217,21 @@ const mimeFor = value => {
 };
 
 async function targetMediaByFilename(n, file) {
-  const stem = file.replace(/\.[^.]+$/, '');
-  const { response, body } = await api('GET', `/wp-json/wp/v2/media?context=edit&search=${encodeURIComponent(stem)}&per_page=100&_fields=id,source_url`, n);
-  if (!response.ok() || !Array.isArray(body)) return null;
-  return body.find(item => filenameFromUrl(item.source_url) === file) || null;
+  const wantedKey = wordpressFilenameKey(file);
+  const rawStem = file.replace(/\.[^.]+$/, '');
+  const normalizedStem = wantedKey.replace(/\.[^.]+$/, '');
+  const searches = [...new Set([rawStem, normalizedStem].filter(Boolean))];
+  const candidates = [];
+  for (const stem of searches) {
+    const { response, body } = await api('GET',
+      `/wp-json/wp/v2/media?context=edit&search=${encodeURIComponent(stem)}&per_page=100&_fields=id,source_url`, n);
+    if (!response.ok() || !Array.isArray(body)) continue;
+    candidates.push(...body);
+  }
+  return candidates.find(item => {
+    const savedFile = filenameFromUrl(item.source_url);
+    return savedFile === file || wordpressFilenameKey(savedFile) === wantedKey;
+  }) || null;
 }
 
 async function ensureMedia(n, sourceUrl, owner) {
@@ -242,9 +243,7 @@ async function ensureMedia(n, sourceUrl, owner) {
   }
   const sourceFile = filenameFromUrl(normalized);
   if (!sourceFile) return { id: 0, url: '' };
-  const file = safeUploadFilename(normalized);
-  let existing = await targetMediaByFilename(n, sourceFile);
-  if (!existing && file !== sourceFile) existing = await targetMediaByFilename(n, file);
+  const existing = await targetMediaByFilename(n, sourceFile);
   if (existing) {
     const result = { id: Number(existing.id), url: String(existing.source_url) };
     mediaCache.set(normalized, result);
@@ -259,34 +258,36 @@ async function ensureMedia(n, sourceUrl, owner) {
       if (!bytes?.length || bytes.length > 30 * 1024 * 1024) throw Error('empty/oversized asset');
       const upload = await page.request.post(uri('/wp-json/wp/v2/media'), {
         timeout: 60000,
-        headers: {
-          'X-WP-Nonce': n,
-          'Content-Type': download.headers()['content-type']?.split(';')[0] || mimeFor(normalized),
-          'Content-Disposition': `attachment; filename="${file.replace(/"/g, '')}"`,
+        headers: { 'X-WP-Nonce': n },
+        multipart: {
+          file: {
+            name: sourceFile,
+            mimeType: download.headers()['content-type']?.split(';')[0] || mimeFor(normalized),
+            buffer: bytes,
+          },
         },
-        data: bytes,
       });
       const saved = await upload.json().catch(() => null);
       if (!upload.ok() || !saved?.id || !saved?.source_url) throw Error(`upload HTTP ${upload.status()}`);
       const result = { id: Number(saved.id), url: String(saved.source_url) };
       mediaCache.set(normalized, result);
       writes++;
-      log('MEDIA', { state: 'UPLOADED', sourceFile, file, owner, id: result.id });
+      log('MEDIA', { state: 'UPLOADED', sourceFile, storedFile: filenameFromUrl(result.url), owner, id: result.id });
       return result;
     } catch (error) {
       reason = String(error?.message || error);
-      const recovered = await targetMediaByFilename(n, file).catch(() => null);
+      const recovered = await targetMediaByFilename(n, sourceFile).catch(() => null);
       if (recovered) {
         const result = { id: Number(recovered.id), url: String(recovered.source_url) };
         mediaCache.set(normalized, result);
-        log('MEDIA', { state: 'UPLOADED_RECOVERED', sourceFile, file, owner, id: result.id });
+        log('MEDIA', { state: 'UPLOADED_RECOVERED', sourceFile, storedFile: filenameFromUrl(result.url), owner, id: result.id });
         return result;
       }
       if (attempt < 3) await sleep(1000 * attempt);
     }
   }
-  deferred.push({ type: 'asset', url: normalized, sourceFile, file, owner, attempts: 3, reason });
-  log('ASSET_DEFERRED', { sourceFile, file, owner, attempts: 3, reason });
+  deferred.push({ type: 'asset', url: normalized, file: sourceFile, owner, attempts: 3, reason });
+  log('ASSET_DEFERRED', { file: sourceFile, owner, attempts: 3, reason });
   const result = { id: 0, url: '' };
   mediaCache.set(normalized, result);
   return result;
@@ -1194,6 +1195,7 @@ async function ensureEnglishHeader(n, targetPages, serviceContext) {
     ['c/tin-tuc/hoat-dong-cua-cong-ty', { url: '/c/tin-tuc/hoat-dong-cua-cong-ty?lang=en', title: 'Company Activities' }],
     ['c/tin-tuc/dau-khi-trong-nuoc-va-khu-vuc', { url: '/c/tin-tuc/dau-khi-trong-nuoc-va-khu-vuc?lang=en', title: 'Domestic and Regional' }],
     ['thu-moi-chao-gia', { url: '/thu-moi-chao-gia?lang=en', title: 'Invitation for Quotation' }],
+    ['tuyen-dung', { url: '/search-jobs', title: 'Careers' }],
   ]);
 
   const resolveHref = href => {
@@ -1396,6 +1398,17 @@ async function productionQa(viPages, enProducts, enPosts, targetPages) {
   assert(newsResponse?.status() === 200, 'English News production route failed');
   assert((await qa.locator('main').innerText()).includes('News'), 'English News heading missing');
   results.push({ route: '/tin-tuc?lang=en', status: 200 });
+
+  const recruitmentResponse = await qa.goto(`${front}/search-jobs?_qa=${Date.now()}`, { waitUntil: 'load', timeout: 50000 });
+  assert(recruitmentResponse?.status() === 200, 'English Recruitment production route failed');
+  assert(await qa.locator('[data-recruitment-listing][data-recruitment-lang="en"]').count() === 1,
+    'English Recruitment SSR marker missing');
+  const recruitmentText = await qa.locator('main').innerText();
+  assert(recruitmentText.includes('Search Jobs'), 'English Recruitment heading missing');
+  for (const forbidden of ['Thông tin tuyển dụng', 'Danh sách thông báo', 'Xem thông báo']) {
+    assert(!recruitmentText.includes(forbidden), `Vietnamese Recruitment label leaked: ${forbidden}`);
+  }
+  results.push({ route: '/search-jobs', status: 200, ssr: true, lang: 'en' });
 
   const productSamples = enProducts.results.filter(x => ['CREATED', 'EXISTS'].includes(x.state) && x.category).slice(0, 3);
   for (const sample of productSamples) {
