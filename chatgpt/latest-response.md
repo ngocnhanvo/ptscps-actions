@@ -4,19 +4,19 @@
 - Project: ptscps.com.vn
 - Repository: ngocnhanvo/ptscps-actions
 - Branch: main
-- Status: PARTIAL / checkpoint SAVED
+- Status: PASS / checkpoint SAVED
 
 ## Response
 
-## Visual Builder PTSCPS — checkpoint PARTIAL
+## Visual Builder: nghiệm thu thành công ba đoạn text
 
-Đã sửa và triển khai PHP `ptscps-php/master` commit `754b27ca` để mở quyền các trường text `home_00`. FTPS readback PASS tại [release #42397918058](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/42397918058); Astro production vẫn commit `bb3a139`.
+[GitHub Actions #42401981694](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/42401981694) đã PASS (`PTSCPS_VISUAL_BUILDER_LIVE`, `checks: 8`, `restored_all: true`). Cả ba đoạn text được chọn đúng tọa độ, lưu qua WordPress, xác nhận REST readback, tải lại private Astro preview và khôi phục đúng giá trị gốc:
 
-QA cụ thể: [#42399233377](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/42399233377) xác nhận **Khám phá dịch vụ** đã chọn đúng `home_00 / row 0 / primary_label` và hiện đúng nội dung trong editor — PASS. Tuy nhiên QA dừng do timeout khi kiểm tra text kế tiếp **Lĩnh vực hoạt động**; **Giải pháp toàn diện cho công trình dầu khí trên biển** và Save → reload → restore chưa được nghiệm thu. Không có ghi dữ liệu ESC Table.
+- **Khám phá dịch vụ** — `home_00 / 0 / primary_label` — PASS.
+- **Lĩnh vực hoạt động** — `home_01 / description / section_description` — PASS.
+- **Giải pháp toàn diện cho công trình dầu khí trên biển** — `home_01 / section / section_title` — PASS.
 
-Bước tiếp theo: chẩn đoán chính xác `home_01 / section_description` của **Lĩnh vực hoạt động** (hoặc tọa độ thực tế), xử lý chờ REST/field mapping, kiểm tra riêng text thứ ba, rồi kiểm thử save/readback/reload/restore có kiểm tra version. Không chạy lại build Astro khi source không đổi.
-
-**Lưu checkpoint:** SAVED tại `ptscps-actions/main/chatgpt/latest-response.md`.
+Code QA đã commit trong `ptscps-actions/main`; PHP `754b27ca` và Astro `bb3a139` được tái sử dụng, không build/deploy lại. Dữ liệu tạm `· VB QA` đã hoàn nguyên, từng cell có log `PTSCPS_BUILDER_CMS_RESTORE` verified=true. Đây là PASS cho ba trường hợp đã báo, không đồng nghĩa đã kiểm mọi ô trên toàn website.
 
 **Chế độ code:** `auto-build`
 **Cổng ghi source:** `source-commit-actions` (mặc định)
