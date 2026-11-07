@@ -465,6 +465,106 @@ try {
       log('PTSCPS_BUILDER_EXACT_SAVE', {fragment,table:coordinate.table_id,
         row:coordinate.row,field:coordinate.field,result:'PASS',restored:true});
     }
+    // Metadata is visible in Astro but owned by native TablePress name/description.
+    for (const test of [
+      {table:'home_02',row:'description',field:'section_description',label:'VỀ PPS'},
+      {table:'home_02',row:'section',field:'section_title',label:'Đồng hành cùng ngành năng lượng Việt Nam từ năm 2002'},
+      {table:'home_04',row:'description',field:'section_description',label:'DỰ ÁN TIÊU BIỂU'},
+      {table:'home_04',row:'section',field:'section_title',label:'Những công trình khẳng định năng lực PPS'},
+    ]) {
+      frame = await openBuilder();
+      const cell = frame.locator('[data-tablepress-preview="' + test.table + '"]')
+        .locator('[data-esc-builder-cell-row="' + test.row + '"]'+
+          '[data-esc-builder-cell-field="' + test.field + '"]').first();
+      await cell.waitFor({state:'visible'});
+      assert((await cell.textContent()).toLocaleLowerCase('vi').includes(test.label.toLocaleLowerCase('vi')),
+        'Wrong homepage section text: ' + test.label);
+      await cell.click();
+      const key = test.row === 'section' ? 'section' : 'section_description';
+      await page.waitForFunction(({key,label}) => {
+        const s=document.getElementById('esc-vb-edit-row');
+        const t=document.getElementById('esc-vb-edit-title');
+        return s?.value===key && t && !t.disabled &&
+          t.value.toLocaleLowerCase('vi').includes(label.toLocaleLowerCase('vi'));
+      }, {key,label:test.label},{timeout:15000});
+      const before=await okApi('editable-text',{table_id:test.table});
+      const row=test.row==='section'?before.section_title:
+        before.rows.find(r=>r.row==='description'&&r.field===test.field);
+      assert(row?.editable,'Section metadata must be editable: '+test.table+'/'+test.field);
+      const temporary=row.title+' · VB QA';
+      const rollback={read:'editable-text',identity:{table_id:test.table},
+        row:test.row,field:test.field,before:{title:row.title},temporary};
+      await backup(rollback);
+      await page.locator('#esc-vb-edit-title').fill(temporary);
+      const saved=await uiSave(page.locator('#esc-vb-text-editor'),'save-text');
+      rollback.savedVersion=saved.version;
+      assert.equal(saved.field,test.field);
+      const latest=await okApi('editable-text',{table_id:test.table});
+      const updated=test.row==='section'?latest.section_title:
+        latest.rows.find(r=>r.row==='description'&&r.field===test.field);
+      assert.equal(updated?.title,temporary);
+      frame=await openBuilder();
+      await frame.locator('[data-tablepress-preview="'+test.table+'"]')
+        .locator('[data-esc-builder-cell-row="'+test.row+'"]'+
+          '[data-esc-builder-cell-field="'+test.field+'"]').filter({hasText:temporary})
+        .first().waitFor({state:'visible',timeout:20000});
+      await restoreAll();
+      frame=await openBuilder();
+      await frame.locator('[data-tablepress-preview="'+test.table+'"]')
+        .locator('[data-esc-builder-cell-row="'+test.row+'"]'+
+          '[data-esc-builder-cell-field="'+test.field+'"]').filter({hasText:row.title})
+        .first().waitFor({state:'visible',timeout:20000});
+      log('PTSCPS_BUILDER_SECTION_METADATA',{table:test.table,field:test.field,
+        select:'PASS',save:'PASS',reload:'PASS',restore:'PASS'});
+      checks.push({source:'Homepage section metadata',table:test.table,field:test.field,result:'PASS'});
+    }
+    // Link editing is confined to a source cell in the same clicked native row.
+    for(const link of [
+      {table:'home_00',field:'primary_href',label:'Khám phá dịch vụ',key:'0:primary_href'},
+      {table:'home_02',field:'href',label:'Tìm hiểu thêm',key:'href'},
+    ]) {
+      frame=await openBuilder();
+      const anchor=frame.locator('[data-tablepress-preview="'+link.table+'"]')
+        .locator('a[data-esc-builder-link-field="'+link.field+'"]:visible').first();
+      await anchor.waitFor({state:'visible'});
+      assert((await anchor.textContent()).includes(link.label));
+      const rowNumber=Number(await anchor.getAttribute('data-esc-builder-cell-row'));
+      assert(Number.isSafeInteger(rowNumber)&&rowNumber>=0);
+      await anchor.click();
+      await page.waitForFunction(()=>!!document.getElementById('esc-vb-edit-row')?.value &&
+        !document.getElementById('esc-vb-edit-title')?.disabled);
+      await page.locator('#esc-vb-edit-row').selectOption(link.key);
+      await page.waitForFunction(({key})=>document.getElementById('esc-vb-edit-row')?.value===key&&
+        !document.getElementById('esc-vb-edit-title')?.disabled,{key:link.key});
+      const before=await okApi('editable-text',{table_id:link.table});
+      const row=before.rows.find(r=>r.row===rowNumber&&r.field===link.field);
+      assert(row?.editable&&row.format==='url','URL source must be editable: '+link.table);
+      assert.equal(await page.locator('#esc-vb-edit-title').inputValue(),row.title);
+      const invalid=await api('save-text',{source_type:'esc_table',table_id:link.table,
+        row:rowNumber,field:link.field,title:'javascript:alert(1)',
+        original_hash:row.hash,rendered_version:before.version,expected_version:before.version});
+      assert.equal(invalid.status,422,'Unsafe URL must fail closed');
+      const temporary=row.title+(row.title.includes('?')?'&':'?')+'vbqa=restore-check';
+      const rollback={read:'editable-text',identity:{table_id:link.table},
+        row:rowNumber,field:link.field,before:{title:row.title},temporary};
+      await backup(rollback);
+      await page.locator('#esc-vb-edit-title').fill(temporary);
+      const saved=await uiSave(page.locator('#esc-vb-text-editor'),'save-text');
+      rollback.savedVersion=saved.version;
+      assert.equal(saved.field,link.field);
+      const result=await okApi('editable-text',{table_id:link.table});
+      assert.equal(result.rows.find(r=>r.row===rowNumber&&r.field===link.field)?.title,temporary);
+      frame=await openBuilder();
+      assert.equal(await frame.locator('[data-tablepress-preview="'+link.table+'"]')
+        .locator('a[data-esc-builder-link-field="'+link.field+'"]:visible').first().getAttribute('href'),temporary);
+      await restoreAll();
+      frame=await openBuilder();
+      assert.equal(await frame.locator('[data-tablepress-preview="'+link.table+'"]')
+        .locator('a[data-esc-builder-link-field="'+link.field+'"]:visible').first().getAttribute('href'),row.title);
+      log('PTSCPS_BUILDER_LINK_SAVE',{table:link.table,field:link.field,
+        safe_validation:'PASS',save:'PASS',reload:'PASS',restore:'PASS'});
+      checks.push({source:'CTA URL',table:link.table,field:link.field,result:'PASS'});
+    }
     }
     const heroButtons = await frame.locator('[data-tablepress-preview="home_00"] button').evaluateAll(nodes =>
       nodes.map(node => Object.fromEntries(Array.from(node.attributes)
