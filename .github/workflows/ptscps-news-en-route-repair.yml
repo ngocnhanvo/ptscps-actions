@@ -1,0 +1,62 @@
+name: PTSCPS English News canonical route repair
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'audit/ptscps-news-en-route-repair.ready'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: ptscps-news-en-route-repair
+  cancel-in-progress: false
+
+jobs:
+  repair-build-qa:
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.0-noble
+      options: --ipc=host
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate configured PTSCPS origins
+        shell: bash
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os,re
+          from urllib.parse import urlsplit
+          vals=dict(re.findall(r'^\s*(?:export\s+)?(WC_URL|WC_URL_CLIENT)\s*=\s*(.+)\s*$',os.environ.get('ENV_FILE',''),re.M))
+          def origin(key):
+              u=urlsplit(vals.get(key,'').strip().strip('"\''))
+              if u.scheme!='https' or not u.hostname or u.path not in ('','/') or u.query or u.fragment or u.username or u.password or u.port not in (None,443):
+                  raise SystemExit('INVALID_ORIGIN '+key)
+              return 'https://'+u.hostname
+          wp,front=origin('WC_URL'),origin('WC_URL_CLIENT')
+          if wp==front: raise SystemExit('ORIGIN_COLLISION')
+          with open(os.environ['GITHUB_ENV'],'a') as f:
+              f.write('WP_ORIGIN='+wp+'\nFRONT_ORIGIN='+front+'\n')
+          print('PTSCPS_NEWS_EN_REPAIR_ORIGINS=PASS')
+          PY
+      - name: Install Playwright driver
+        run: npm install --no-save --no-package-lock --ignore-scripts --no-audit --no-fund playwright@1.64.0
+      - name: Validate repair script and build monitor contract
+        run: |
+          node --check scripts/ptscps-news-en-route-repair.mjs
+          node scripts/ptscps-wordpress-build-monitor.test.mjs
+      - name: Repair Header.en, build through WordPress and QA canonical News routes
+        env:
+          WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
+          WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
+          SOURCE_REPO_PAT: ${{ secrets.SOURCE_REPO_PAT }}
+        run: node scripts/ptscps-news-en-route-repair.mjs
