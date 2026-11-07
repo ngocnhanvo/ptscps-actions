@@ -393,6 +393,145 @@ async function collectLinkRecords(pages, categories, products) {
   return records;
 }
 
+// Homepage links are WordPress ESC Table data, not Astro constants. Use the
+// native TablePress save contract; preserve every untouched cell and option.
+const legacyHomeUrl = /https?:\/\/(?:www\.)?ptscps\.com\.vn(?:\/[\w\-./%?=&+#~:]*)?/gi;
+const legacyLinkHost = /(?:^|\.)ptscps\.com\.vn$/i;
+const homeLinkAudit = [];
+
+function homepageLinkTarget(value, locale, pages) {
+  let url;
+  try { url = new URL(value); } catch { return null; }
+  if (!legacyLinkHost.test(url.hostname)) return null;
+  if (/\/(?:wp-content\/uploads|wp-json|wp-admin)\//.test(url.pathname) || /\.(?:pdf|png|jpe?g|gif|webp|svg|zip|docx?|xlsx?)$/i.test(url.pathname)) return null;
+  let target = rewriteHref(value);
+  const path = new URL(target, front).pathname;
+  const slug = decodeURIComponent(url.pathname).split('/').filter(Boolean).at(-1) || '';
+  const source = pages.find(p => String(p.slug || '') === slug);
+  const sourceKey = source ? acfValue(source.acf?.key) : '';
+  const counterpart = sourceKey ? pages.find(p => acfValue(p.acf?.key) === sourceKey && acfValue(p.acf?.product_lang) === locale && p.status === 'publish') : null;
+  if (source && acfValue(source.acf?.product_lang) !== locale && counterpart) {
+    const newPath = '/' + String(counterpart.slug).replace(/^\/+/, '');
+    target = newPath + url.search + url.hash;
+  }
+  return { target, path, sourceKey, locale };
+}
+
+async function readNativeHomeTable(id) {
+  const editUrl = `/wp-admin/admin.php?page=tablepress&action=edit&table_id=${encodeURIComponent(id)}`;
+  await page.goto(uri(editUrl), { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.waitForFunction(() => globalThis.tp?.table?.data && globalThis.tp?.nonces?.edit_table && globalThis.tp?.editor?.options?.data, null, { timeout: 40000 });
+  const table = await page.evaluate(() => ({
+    id: String(globalThis.tp.table.id || ''),
+    nonce: String(globalThis.tp.nonces.edit_table || ''),
+    name: String(globalThis.tp.table.meta?.name || ''),
+    description: String(globalThis.tp.table.meta?.description || ''),
+    data: JSON.parse(JSON.stringify(globalThis.tp.editor.options.data)),
+    options: JSON.parse(JSON.stringify(globalThis.tp.table.options)),
+    visibility: JSON.parse(JSON.stringify(globalThis.tp.table.visibility)),
+    columns: globalThis.tp.editor.options.columns.length,
+  }));
+  assert(table.id === id && table.nonce && Array.isArray(table.data) && table.columns > 0,
+    `Native ESC Table editor mismatch for ${id}`);
+  return table;
+}
+
+async function repairHomepageTables(pages) {
+  const homePages = pages.filter(p => {
+    const slug = String(p.slug || '').toLowerCase();
+    const key = acfValue(p.acf?.key).toLowerCase();
+    return p.status === 'publish' && (slug === 'home' || slug === 'trang-chu' || key === 'home' || key === 'trang-chu');
+  });
+  const ids = [...new Set(homePages.flatMap(p => tableIds(p.content?.raw ?? p.content?.rendered ?? '')))]
+    .filter(id => /^home_\d{2}(?:_(?:en|vi))?$/i.test(id));
+  assert(ids.length > 0, 'HOME_TABLES_MISSING: Cannot resolve editable home ESC Table ids from published WordPress pages');
+  log('HOME_TABLES', { pages: homePages.map(p => ({ id: p.id, slug: p.slug, locale: acfValue(p.acf?.product_lang) })), ids });
+
+  // Collect and validate candidates before the first TablePress write.
+  const changes = [];
+  const unresolved = [];
+  const availability = new Map();
+  for (const id of ids) {
+    const locale = /_en$/i.test(id) ? 'en' : 'vi';
+    const table = await readNativeHomeTable(id);
+    let altered = 0;
+    const data = table.data.map((row, rowIndex) => row.map((cell, colIndex) => {
+      if (typeof cell !== 'string' || !/ptscps\.com\.vn/i.test(cell)) return cell;
+      return cell.replace(legacyHomeUrl, oldUrl => {
+        const candidate = homepageLinkTarget(oldUrl, locale, pages);
+        if (!candidate) return oldUrl;
+        const { target } = candidate;
+        if (!target.startsWith('/') || target.startsWith('//') || /ptscps\.com\.vn/i.test(target)) {
+          unresolved.push({ id, row: rowIndex, col: colIndex, oldUrl, target, reason: 'INVALID_TARGET' });
+          return oldUrl;
+        }
+        homeLinkAudit.push({ id, row: rowIndex, col: colIndex, from: oldUrl, to: target, locale });
+        altered++;
+        return target;
+      });
+    }));
+    if (altered) changes.push({ id, table, data, altered });
+  }
+  log('HOME_LINK_INVENTORY', { tables: ids.length, candidates: homeLinkAudit.length, byTable: changes.map(x => ({ id: x.id, links: x.altered })) });
+  // An unknown mapping must not be written as a plausible-looking relative 404.
+  for (const row of homeLinkAudit) {
+    if (!availability.has(row.to)) {
+      const response = await context.request.get(front + row.to, { timeout: 25000, maxRedirects: 8 }).catch(() => null);
+      availability.set(row.to, response?.status() || 0);
+    }
+    const http = availability.get(row.to);
+    if (http < 200 || http >= 400) unresolved.push({ ...row, reason: 'TARGET_NOT_FOUND', http });
+  }
+  await writeFile(`${artifactDir}/home-link-audit.json`, JSON.stringify({ ids, homePages: homePages.map(p => ({ id: p.id, slug: p.slug })), candidates: homeLinkAudit, unresolved }, null, 2));
+  if (unresolved.length) {
+    log('HOME_LINK_UNRESOLVED', unresolved);
+    throw Error(`HOME_LINK_UNRESOLVED=${unresolved.length}: some legacy links do not resolve to live routes`);
+  }
+  for (const { id, table, data, altered } of changes) {
+    const form = {
+      action: 'tablepress_save_table',
+      _ajax_nonce: table.nonce,
+      'tablepress[id]': id,
+      'tablepress[new_id]': id,
+      'tablepress[name]': table.name,
+      'tablepress[description]': table.description,
+      'tablepress[data]': JSON.stringify(data),
+      'tablepress[options]': JSON.stringify(table.options),
+      'tablepress[visibility]': JSON.stringify(table.visibility),
+      'tablepress[number][rows]': String(data.length),
+      'tablepress[number][columns]': String(table.columns),
+    };
+    const response = await page.request.post(uri('/wp-admin/admin-ajax.php'), { form, timeout: 90000 });
+    const body = await response.json().catch(() => null);
+    assert(response.ok() && body?.success === true && body.table_id === id,
+      `ESC Table native save rejected ${id}: HTTP=${response.status()} message=${body?.message || 'unknown'}`);
+    const verified = await readNativeHomeTable(id);
+    assert(JSON.stringify(verified.data) === JSON.stringify(data), `ESC Table readback mismatch ${id}`);
+    writes++;
+    repairs.push({ owner: `table:${id}`, fixed: altered });
+    log('HOME_TABLE_SAVED', { id, fixed: altered });
+  }
+}
+
+async function qaHomepageLinks() {
+  const results = [];
+  for (const path of ['/', '/home']) {
+    const response = await context.request.get(front + path, { timeout: 45000 });
+    assert(response.ok(), `HOME_ROUTE_HTTP_${response.status()}: ${path}`);
+    const browserPage = await context.newPage();
+    try {
+      await browserPage.goto(front + path, { waitUntil: 'domcontentloaded', timeout: 45000 });
+      const bad = await browserPage.locator('a[href*="ptscps.com.vn"], [onclick*="ptscps.com.vn"], [data-href*="ptscps.com.vn"]').evaluateAll(nodes => nodes.map(n => ({
+        tag: n.tagName, text: (n.textContent || '').trim().slice(0, 100), href: n.getAttribute('href'), onclick: n.getAttribute('onclick'), dataHref: n.getAttribute('data-href'),
+      })));
+      results.push({ path, legacyLinks: bad });
+    } finally { await browserPage.close(); }
+  }
+  await writeFile(`${artifactDir}/home-link-qa.json`, JSON.stringify(results, null, 2));
+  log('HOME_LINK_QA', results.map(r => ({ path: r.path, legacyLinks: r.legacyLinks.length })));
+  assert(results.every(r => r.legacyLinks.length === 0), 'Homepage still renders legacy clickable pt scps.com.vn links');
+}
+
 async function openBuildPage() {
   await page.goto(uri('/wp-admin/admin.php?page=vcs-build-trigger'), { waitUntil: 'domcontentloaded', timeout: 50000 });
   const button = page.locator('#vcs-build-btn-main');
@@ -501,6 +640,7 @@ try {
 
   prepareRoutes(pages, categories, products);
   await repairContent(n, pages, categories, products);
+  await repairHomepageTables(pages);
   await writeFile(`${artifactDir}/repairs.json`, JSON.stringify({ repairs, ambiguities }, null, 2));
   log('REPAIR', { writes, replacements: repairs.length, ambiguous: ambiguities.length });
 
@@ -510,6 +650,7 @@ try {
   else log('BUILD', 'NO_CMS_CHANGES_SKIP_TRIGGER');
   await waitFrontReady();
   await qaLinks(records);
+  await qaHomepageLinks();
   log('RESULT', { status: 'PASS', writes, replacements: repairs.length });
 } finally {
   await browser.close();
