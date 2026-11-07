@@ -337,6 +337,30 @@ try {
     assert.equal(stale.status, 409);
     assert.equal(stale.body.code, 'editor_preview_stale');
     checks.push({ source: 'ESC Table', exact_selection: 'PASS', cancel: 'PASS', stale_version: '409' });
+    for (const fragment of ['Khám phá dịch vụ', 'Lĩnh vực hoạt động',
+      'Giải pháp toàn diện cho công trình dầu khí trên biển']) {
+      const exactNodes = frame.locator('[data-esc-builder-cell-row][data-esc-builder-cell-field]:visible')
+        .filter({ hasText: fragment });
+      assert(await exactNodes.count() > 0, 'Missing exact ESC cell coordinates for: ' + fragment);
+      const cell = exactNodes.first();
+      const coords = await cell.evaluate(node => ({
+        table: node.closest('[data-tablepress-preview]')?.getAttribute('data-tablepress-preview'),
+        row: node.getAttribute('data-esc-builder-cell-row'),
+        field: node.getAttribute('data-esc-builder-cell-field'),
+      }));
+      assert(coords.table && coords.row !== null && coords.field, 'Incomplete ESC coordinate: ' + fragment);
+      await cell.click();
+      await page.locator('#esc-vb-text-editor').waitFor({ state: 'visible' });
+      await page.waitForFunction(() => !document.getElementById('esc-vb-edit-title')?.disabled);
+      assert(await page.locator('#esc-vb-edit-row').evaluate(select => select.selectedIndex >= 0),
+        'Native editor did not resolve exact source: ' + fragment);
+      assert((await page.locator('#esc-vb-edit-title').inputValue()).includes(fragment),
+        'Native editor selected different ESC cell: ' + fragment);
+      log('PTSCPS_BUILDER_EXACT_TEXT', {fragment, table: coords.table, row: coords.row,
+        field: coords.field, selection: 'PASS', no_cms_write: true});
+      await page.locator('#esc-vb-edit-cancel').click();
+    }
+    checks.push({source:'PTSCPS homepage exact text',cases:3,selection:'PASS',no_cms_write:true});
     }
     const heroButtons = await frame.locator('[data-tablepress-preview="home_00"] button').evaluateAll(nodes =>
       nodes.map(node => Object.fromEntries(Array.from(node.attributes)
