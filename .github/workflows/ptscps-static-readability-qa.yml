@@ -1,0 +1,59 @@
+name: PTSCPS static page readability QA (read-only)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/ptscps-static-readability-qa.mjs'
+      - '.github/workflows/ptscps-static-readability-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ptscps-static-readability-qa
+  cancel-in-progress: true
+
+jobs:
+  qa:
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.0-noble
+      options: --ipc=host
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Resolve configured PTSCPS frontend origin
+        shell: bash
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os,re
+          from urllib.parse import urlsplit
+          vals=dict(re.findall(r'^\s*(?:export\s+)?(WC_URL_CLIENT)\s*=\s*(.+)\s*$',os.environ.get('ENV_FILE',''),re.M))
+          u=urlsplit(vals.get('WC_URL_CLIENT','').strip().strip('"\''))
+          if u.scheme!='https' or not u.hostname or u.path not in ('','/') or u.query or u.fragment or u.username or u.password or u.port not in (None,443):
+              raise SystemExit('PTSCPS_STATIC_QA=BLOCKED invalid frontend origin')
+          with open(os.environ['GITHUB_ENV'],'a',encoding='utf8') as f:f.write('FRONT_ORIGIN=https://'+u.hostname+'\n')
+          print('PTSCPS_STATIC_QA_ORIGIN=PASS')
+          PY
+      - name: Install Playwright driver
+        run: npm install --no-save --no-package-lock --ignore-scripts --no-audit --no-fund playwright@1.64.0
+      - name: Validate QA script syntax
+        run: node --check scripts/ptscps-static-readability-qa.mjs
+      - name: Verify static page readability on production
+        run: node scripts/ptscps-static-readability-qa.mjs
+      - name: Upload readability screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ptscps-static-readability-qa-${{ github.run_id }}
+          path: artifacts/ptscps-static-readability-qa/
+          if-no-files-found: warn
+          retention-days: 14
