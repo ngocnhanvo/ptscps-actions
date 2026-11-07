@@ -354,7 +354,10 @@ try {
       await page.waitForFunction(() => !document.getElementById('esc-vb-edit-title')?.disabled);
       assert(await page.locator('#esc-vb-edit-row').evaluate(select => select.selectedIndex >= 0),
         'Native editor did not resolve exact source: ' + fragment);
-      assert((await page.locator('#esc-vb-edit-title').inputValue()).includes(fragment),
+      const editorValue = await page.locator('#esc-vb-edit-title').inputValue();
+      log('PTSCPS_BUILDER_TEXT_DIAG', {fragment, table: coords.table, row: coords.row,
+        field: coords.field, editorValue: editorValue.slice(0, 120), match: editorValue.includes(fragment)});
+      assert(editorValue.includes(fragment),
         'Native editor selected different ESC cell: ' + fragment);
       log('PTSCPS_BUILDER_EXACT_TEXT', {fragment, table: coords.table, row: coords.row,
         field: coords.field, selection: 'PASS', no_cms_write: true});
