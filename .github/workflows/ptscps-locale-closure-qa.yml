@@ -1,0 +1,36 @@
+name: PTSCPS locale closure production QA
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/ptscps-locale-closure-qa.yml'
+      - 'scripts/ptscps-locale-closure-qa.mjs'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  locale-closure:
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.0-noble
+      options: --ipc=host
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Reuse preinstalled Playwright browser
+        run: npm install --no-save --no-package-lock --ignore-scripts --no-audit --no-fund playwright@1.64.0
+      - name: Validate production locale closure
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: node scripts/ptscps-locale-closure-qa.mjs
+      - name: Upload locale evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ptscps-locale-closure-${{ github.run_id }}
+          path: artifacts/ptscps-locale-closure
+          if-no-files-found: ignore
+          retention-days: 7
