@@ -1,0 +1,69 @@
+name: PTSCPS static page readability recovery, build and QA
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/ptscps-static-readability-recovery.mjs'
+      - '.github/workflows/ptscps-static-readability-recovery.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: ptscps-static-readability-recovery
+  cancel-in-progress: false
+
+jobs:
+  recover-build-qa:
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.0-noble
+      options: --ipc=host
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Resolve configured PTSCPS origins
+        shell: bash
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os,re
+          from urllib.parse import urlsplit
+          vals=dict(re.findall(r'^\s*(?:export\s+)?(WC_URL|WC_URL_CLIENT)\s*=\s*(.+)\s*$',os.environ.get('ENV_FILE',''),re.M))
+          def origin(key):
+              u=urlsplit(vals.get(key,'').strip().strip('"\''))
+              if u.scheme!='https' or not u.hostname or u.path not in ('','/') or u.query or u.fragment or u.username or u.password or u.port not in (None,443):
+                  raise SystemExit('PTSCPS_STATIC_RECOVERY=BLOCKED invalid '+key)
+              return 'https://'+u.hostname
+          wp,front=origin('WC_URL'),origin('WC_URL_CLIENT')
+          if wp==front: raise SystemExit('PTSCPS_STATIC_RECOVERY=BLOCKED origin collision')
+          with open(os.environ['GITHUB_ENV'],'a',encoding='utf8') as f:
+              f.write('WP_ORIGIN='+wp+'\nFRONT_ORIGIN='+front+'\n')
+          print('PTSCPS_STATIC_RECOVERY_ORIGINS=PASS')
+          PY
+      - name: Install Playwright driver (Chromium preinstalled)
+        run: npm install --no-save --no-package-lock --ignore-scripts --no-audit --no-fund playwright@1.64.0
+      - name: Validate recovery script syntax
+        run: node --check scripts/ptscps-static-readability-recovery.mjs
+      - name: Repair/touch CMS, build through WordPress, and QA production
+        env:
+          WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
+          WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/ptscps-static-readability-recovery.mjs
+      - name: Upload readability screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ptscps-static-readability-recovery-${{ github.run_id }}
+          path: artifacts/ptscps-static-readability-recovery/
+          if-no-files-found: warn
+          retention-days: 14
