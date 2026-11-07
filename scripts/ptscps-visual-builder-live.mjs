@@ -471,6 +471,7 @@ try {
       {table:'home_02',row:'section',field:'section_title',label:'Đồng hành cùng ngành năng lượng Việt Nam từ năm 2002'},
       {table:'home_04',row:'description',field:'section_description',label:'DỰ ÁN TIÊU BIỂU'},
       {table:'home_04',row:'section',field:'section_title',label:'Những công trình khẳng định năng lực PPS'},
+      {table:'home_14',row:'section',field:'section_title',label:'Liên kết nhanh'},
     ]) {
       frame = await openBuilder();
       const cell = frame.locator('[data-tablepress-preview="' + test.table + '"]')
@@ -565,6 +566,88 @@ try {
         safe_validation:'PASS',save:'PASS',reload:'PASS',restore:'PASS'});
       checks.push({source:'CTA URL',table:link.table,field:link.field,result:'PASS'});
     }
+    // home_14 quick links must retain physical TablePress row identity.
+    frame = await openBuilder();
+    const quickTable = 'home_14';
+    const quickRoot = frame.locator('[data-tablepress-preview="' + quickTable + '"]');
+    const quickLabels = quickRoot.locator('span[data-esc-builder-cell-row][data-esc-builder-cell-field="title"]:visible');
+    assert.equal(await quickLabels.count(), 4, 'Each quick link must have its real ESC row');
+    const quickLabel = quickLabels.first();
+    const quickRow = Number(await quickLabel.getAttribute('data-esc-builder-cell-row'));
+    const quickName = (await quickLabel.textContent()).trim();
+    assert(Number.isSafeInteger(quickRow) && quickRow >= 0);
+    await quickLabel.click();
+    await page.waitForFunction(({ key, title }) => {
+      const row = document.getElementById('esc-vb-edit-row');
+      const input = document.getElementById('esc-vb-edit-title');
+      return row?.value === key && input && !input.disabled && input.value === title;
+    }, { key: quickRow + ':title', title: quickName }, { timeout: 15000 });
+    const quickBefore = await okApi('editable-text', { table_id: quickTable });
+    const quickSource = quickBefore.rows.find(r => r.row === quickRow && r.field === 'title');
+    assert(quickSource?.editable && quickSource.title === quickName,
+      'Quick link text must match the canonical WordPress cell');
+    const quickTemp = quickName + ' · VB QA';
+    const quickRollback = { read: 'editable-text', identity: { table_id: quickTable },
+      row: quickRow, field: 'title', before: { title: quickName }, temporary: quickTemp };
+    await backup(quickRollback);
+    await page.locator('#esc-vb-edit-title').fill(quickTemp);
+    quickRollback.savedVersion = (await uiSave(page.locator('#esc-vb-text-editor'), 'save-text')).version;
+    assert.equal((await okApi('editable-text', { table_id: quickTable })).rows
+      .find(r => r.row === quickRow && r.field === 'title')?.title, quickTemp);
+    frame = await openBuilder();
+    await frame.locator('[data-tablepress-preview="' + quickTable + '"]')
+      .locator('span[data-esc-builder-cell-row="' + quickRow + '"][data-esc-builder-cell-field="title"]')
+      .filter({ hasText: quickTemp }).first().waitFor({ state: 'visible', timeout: 20000 });
+    await restoreAll();
+    frame = await openBuilder();
+    const restoredQuick = frame.locator('[data-tablepress-preview="' + quickTable + '"]')
+      .locator('span[data-esc-builder-cell-row="' + quickRow + '"][data-esc-builder-cell-field="title"]');
+    await restoredQuick.filter({ hasText: quickName }).first().waitFor({ state: 'visible', timeout: 20000 });
+    const quickAnchor = restoredQuick.first().locator('xpath=ancestor::a[1]');
+    const quickField = await quickAnchor.getAttribute('data-esc-builder-link-field');
+    assert(['href', 'link'].includes(quickField), 'Quick link URL must map to native ESC field');
+    const quickHref = await quickAnchor.getAttribute('href');
+    assert(quickHref, 'Quick link URL must be present');
+    await restoredQuick.first().click();
+    const quickKey = quickRow + ':' + quickField;
+    await page.waitForFunction(({ key }) => {
+      const row = document.getElementById('esc-vb-edit-row');
+      const input = document.getElementById('esc-vb-edit-title');
+      return row?.value === key && input && !input.disabled;
+    }, { key: quickRow + ':title' }, { timeout: 15000 });
+    await page.locator('#esc-vb-edit-row').selectOption(quickKey);
+    await page.waitForFunction(({ key }) =>
+      document.getElementById('esc-vb-edit-row')?.value === key &&
+      !document.getElementById('esc-vb-edit-title')?.disabled,
+      { key: quickKey }, { timeout: 15000 });
+    const quickLinkBefore = await okApi('editable-text', { table_id: quickTable });
+    const quickLinkSource = quickLinkBefore.rows.find(r => r.row === quickRow && r.field === quickField);
+    assert(quickLinkSource?.editable && quickLinkSource.format === 'url',
+      'Quick link native URL must be editable');
+    assert.equal(quickLinkSource.title, quickHref);
+    const quickUnsafe = await api('save-text', { source_type: 'esc_table',
+      table_id: quickTable, row: quickRow, field: quickField,
+      title: 'javascript:alert(1)', original_hash: quickLinkSource.hash,
+      rendered_version: quickLinkBefore.version, expected_version: quickLinkBefore.version });
+    assert.equal(quickUnsafe.status, 422);
+    const quickLinkTemp = quickHref + (quickHref.includes('?') ? '&' : '?') + 'vbqa=home14';
+    const quickLinkRollback = { read: 'editable-text', identity: { table_id: quickTable },
+      row: quickRow, field: quickField, before: { title: quickHref }, temporary: quickLinkTemp };
+    await backup(quickLinkRollback);
+    await page.locator('#esc-vb-edit-title').fill(quickLinkTemp);
+    quickLinkRollback.savedVersion = (await uiSave(page.locator('#esc-vb-text-editor'), 'save-text')).version;
+    assert.equal((await okApi('editable-text', { table_id: quickTable })).rows
+      .find(r => r.row === quickRow && r.field === quickField)?.title, quickLinkTemp);
+    frame = await openBuilder();
+    assert.equal(await frame.locator('[data-tablepress-preview="' + quickTable + '"]')
+      .locator('a[data-esc-builder-link-field="' + quickField + '"]').first().getAttribute('href'), quickLinkTemp);
+    await restoreAll();
+    frame = await openBuilder();
+    assert.equal(await frame.locator('[data-tablepress-preview="' + quickTable + '"]')
+      .locator('a[data-esc-builder-link-field="' + quickField + '"]').first().getAttribute('href'), quickHref);
+    log('PTSCPS_BUILDER_HOME14', { title: 'PASS', item: 'PASS', href: 'PASS',
+      canonical_readback: 'PASS', reload: 'PASS', restored: true, row: quickRow });
+    checks.push({ source: 'home_14 quick links', result: 'PASS' });
     }
     const heroButtons = await frame.locator('[data-tablepress-preview="home_00"] button').evaluateAll(nodes =>
       nodes.map(node => Object.fromEntries(Array.from(node.attributes)
