@@ -1,0 +1,114 @@
+name: PTSCPS internal link repair
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/ptscps-internal-link-repair.mjs'
+      - 'scripts/ptscps-localized-content-completion.mjs'
+      - '.github/workflows/ptscps-internal-link-repair.yml'
+      - 'audit/ptscps-internal-link-repair.ready'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  statuses: write
+
+concurrency:
+  group: ptscps-internal-link-repair
+  cancel-in-progress: false
+
+jobs:
+  repair-build-qa:
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.0-noble
+      options: --ipc=host
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate script syntax
+        run: |
+          node --check scripts/ptscps-internal-link-repair.mjs
+          node --check scripts/ptscps-localized-content-completion.mjs
+      - name: Resolve configured PTSCPS origins
+        shell: bash
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os,re
+          from urllib.parse import urlsplit
+          vals=dict(re.findall(r'^\s*(?:export\s+)?(WC_URL|WC_URL_CLIENT)\s*=\s*(.+)\s*$',os.environ.get('ENV_FILE',''),re.M))
+          def origin(key):
+              u=urlsplit(vals.get(key,'').strip().strip('"\''))
+              if u.scheme!='https' or not u.hostname or u.path not in ('','/') or u.query or u.fragment or u.username or u.password or u.port not in (None,443):
+                  raise SystemExit('INVALID_ORIGIN '+key)
+              return 'https://'+u.hostname
+          wp,front=origin('WC_URL'),origin('WC_URL_CLIENT')
+          if wp==front: raise SystemExit('ORIGIN_COLLISION')
+          with open(os.environ['GITHUB_ENV'],'a') as f:
+              f.write('WP_ORIGIN='+wp+'\nFRONT_ORIGIN='+front+'\n')
+          print('PTSCPS_INTERNAL_LINK_ORIGINS=PASS')
+          PY
+      - name: Install Playwright driver
+        run: npm install --no-save --no-package-lock --ignore-scripts --no-audit --no-fund playwright@1.64.0
+      - name: Verify WordPress build monitor contract
+        run: node scripts/ptscps-wordpress-build-monitor.test.mjs
+      - name: Repair internal links, build through WordPress, and QA
+        env:
+          WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
+          WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
+          SOURCE_REPO_PAT: ${{ secrets.SOURCE_REPO_PAT }}
+        run: node scripts/ptscps-internal-link-repair.mjs
+      - name: Upload internal-link evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ptscps-internal-link-repair-${{ github.run_id }}
+          path: artifacts/ptscps-internal-link-repair/
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Publish repair status on source commit
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFile } from 'node:fs/promises';
+          const state = process.env.JOB_STATUS === 'success' ? 'success' : 'failure';
+          let description = state === 'success'
+            ? 'Internal link repair and 404 QA passed'
+            : 'Internal link repair/404 QA failed';
+          try {
+            const qa = JSON.parse(await readFile('artifacts/ptscps-internal-link-repair/internal-link-qa.json', 'utf8'));
+            if (Array.isArray(qa.failures) && qa.failures.length) {
+              const first = String(qa.failures[0]?.target || 'unknown target');
+              description = `404 QA failed: ${first}${qa.failures.length > 1 ? ` (+${qa.failures.length - 1})` : ''}`;
+            }
+          } catch {}
+          description = description.slice(0, 140);
+          const response = await fetch(`https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/statuses/${process.env.GITHUB_SHA}`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
+              Accept: 'application/vnd.github+json',
+              'X-GitHub-Api-Version': '2022-11-28',
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              state,
+              context: 'ptscps/internal-link-repair',
+              description,
+              target_url: `https://github.com/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`,
+            }),
+          });
+          if (!response.ok) throw new Error(`Commit status publish failed HTTP ${response.status}`);
+          console.log(`PTSCPS_INTERNAL_LINK_STATUS=${state}`);
+          NODE

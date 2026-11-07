@@ -180,6 +180,60 @@ const langOf = row => {
   try { return new URL(row?.link || source).pathname.startsWith('/e/') ? 'en' : 'vi'; } catch { return 'vi'; }
 };
 
+const legacyServiceRouteHints = { vi: new Set(), en: new Set() };
+
+function prepareLegacyServiceRouteHints(sourcePages) {
+  legacyServiceRouteHints.vi.clear();
+  legacyServiceRouteHints.en.clear();
+  const byId = new Map(sourcePages.map(item => [Number(item.id), item]));
+  const roots = [
+    { lang: 'vi', row: sourcePages.find(item => langOf(item) !== 'en' && item.slug === 'dich-vu') },
+    { lang: 'en', row: sourcePages.find(item => langOf(item) === 'en' && item.slug === 'services') },
+  ];
+  const isDescendant = (row, rootId) => {
+    let current = row;
+    const seen = new Set();
+    while (current && Number(current.id) > 0 && !seen.has(Number(current.id))) {
+      if (Number(current.id) === Number(rootId)) return true;
+      seen.add(Number(current.id));
+      current = byId.get(Number(current.parent || 0));
+    }
+    return false;
+  };
+  for (const spec of roots) {
+    if (!spec.row) continue;
+    for (const item of sourcePages) {
+      if (Number(item.id) === Number(spec.row.id) || !isDescendant(item, Number(spec.row.id))) continue;
+      if (spec.lang === 'en' ? langOf(item) !== 'en' : langOf(item) === 'en') continue;
+      const slug = String(item.slug || '').trim();
+      if (slug) legacyServiceRouteHints[spec.lang].add(slug);
+    }
+  }
+  log('LEGACY_SERVICE_ROUTES', {
+    vi: legacyServiceRouteHints.vi.size,
+    en: legacyServiceRouteHints.en.size,
+  });
+}
+
+function localizeInternalHref(value) {
+  const raw = String(value || '').trim();
+  if (!raw.startsWith('/')) return raw;
+  let url;
+  try { url = new URL(raw, source); } catch { return raw; }
+  let pathname = decodeURIComponent(url.pathname || '/').replace(/\/{2,}/g, '/');
+  if (pathname.startsWith('/e/')) {
+    const rest = pathname.slice(3).replace(/^\/+/, '');
+    const parts = rest.split('/').filter(Boolean);
+    pathname = parts.length === 1 && legacyServiceRouteHints.en.has(parts[0])
+      ? `/services/${parts[0]}`
+      : `/${rest}`;
+  } else {
+    const parts = pathname.replace(/^\/+|\/+$/g, '').split('/').filter(Boolean);
+    if (parts.length === 1 && legacyServiceRouteHints.vi.has(parts[0])) pathname = `/dich-vu/${parts[0]}`;
+  }
+  return `${pathname}${url.search}${url.hash}`;
+}
+
 function translationId(row, lang) {
   const sourceValue = row?.translations?.[lang];
   const candidates = [sourceValue?.id, sourceValue?.ID, sourceValue?.value, sourceValue];
@@ -318,9 +372,11 @@ async function localizeHtml(html, n, owner) {
       output = output.split(raw).join('');
     }
   }
-  return output
-    .replace(/https?:\/\/ptscps\.com\.vn(?=\/)/gi, '')
-    .replace(/href=(['"])\/e\//gi, 'href=$1/');
+  output = output.replace(/https?:\/\/ptscps\.com\.vn(?=\/)/gi, '');
+  return output.replace(/\bhref\s*=\s*(['"])([^'"]+)\1/gi, (full, quote, href) => {
+    const localized = localizeInternalHref(href);
+    return localized === href ? full : `href=${quote}${localized}${quote}`;
+  });
 }
 
 async function setAcf(n, collection, id, values) {
@@ -1629,6 +1685,7 @@ try {
   const n = await nonce();
   const sourcePages = await collectSource('pages', 'id,slug,status,link,title,content,excerpt,featured_media,parent,lang,translations,date,date_gmt');
   const sourcePosts = await collectSource('posts', 'id,slug,status,link,title,content,excerpt,featured_media,categories,tags,lang,translations,date,date_gmt');
+  prepareLegacyServiceRouteHints(sourcePages);
   let targetPages = await collectTarget('pages', n, 'id,slug,status,title,content,acf,parent,date,date_gmt');
   let targetPosts = await collectTarget('posts', n, 'id,slug,status,title,content,excerpt,featured_media,categories,acf,date,date_gmt');
   let targetProducts = await collectTarget('product', n, 'id,slug,status,title,content,excerpt,featured_media,menu_order,product_categories,acf,date,date_gmt');
