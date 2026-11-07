@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { chromium } from 'playwright';
 import { waitForWordPressBuild } from './ptscps-wordpress-build-monitor.mjs';
 
@@ -8,6 +8,11 @@ const front = String(process.env.FRONT_ORIGIN || '').replace(/\/$/, '');
 const user = process.env.WP_ADMIN_USERNAME;
 const pass = process.env.WP_ADMIN_PASSWORD;
 const githubToken = String(process.env.GITHUB_TOKEN || '').trim();
+// Only the explicitly labelled one-off homepage source release forces a build
+// when WordPress has no pending content updates. Ordinary QA remains no-op.
+const releaseEvent = process.env.GITHUB_EVENT_PATH
+  ? JSON.parse(await readFile(process.env.GITHUB_EVENT_PATH, 'utf8')) : {};
+const forceBuild = /\[home-release\]/.test(String(releaseEvent.head_commit?.message || ''));
 assert(wp.startsWith('https://') && front.startsWith('https://') && wp !== front && user && pass,
   'Missing validated PTSCPS origins or WordPress credentials');
 
@@ -630,12 +635,23 @@ async function qaHomepageLinks() {
       const bad = await browserPage.locator('a[href*="ptscps.com.vn"], [onclick*="ptscps.com.vn"], [data-href*="ptscps.com.vn"]').evaluateAll(nodes => nodes.map(n => ({
         tag: n.tagName, text: (n.textContent || '').trim().slice(0, 100), href: n.getAttribute('href'), onclick: n.getAttribute('onclick'), dataHref: n.getAttribute('data-href'),
       })));
-      results.push({ path, legacyLinks: bad });
+      const cards = await browserPage.locator('[data-pps-section="services"] article, [data-pps-section="projects"] article, [data-pps-section="news"] article').evaluateAll(nodes => nodes.map(card => {
+        const a = card.querySelector(':scope > a[href]');
+        return { section: card.closest('[data-pps-section]')?.getAttribute('data-pps-section'),
+          href: a?.getAttribute('href') || '', fullCard: Boolean(a?.classList.contains('inset-0')) };
+      }));
+      results.push({ path, legacyLinks: bad, cards });
     } finally { await browserPage.close(); }
   }
   await writeFile(`${artifactDir}/home-link-qa.json`, JSON.stringify(results, null, 2));
   log('HOME_LINK_QA', results.map(r => ({ path: r.path, legacyLinks: r.legacyLinks.length })));
   assert(results.every(r => r.legacyLinks.length === 0), 'Homepage still renders legacy clickable pt scps.com.vn links');
+  for (const row of results) {
+    assert(row.cards.length >= 10, `HOME_CARDS_MISSING: ${row.path}, count=${row.cards.length}`);
+    assert(row.cards.every(c => c.fullCard && c.href.startsWith('/') && !c.href.startsWith('//') && !/ptscps\.com\.vn/i.test(c.href)),
+      `HOME_CARD_LINK_INVALID: ${row.path} ${JSON.stringify(row.cards.filter(c => !c.fullCard || !c.href.startsWith('/') || /ptscps\.com\.vn/i.test(c.href)))}`);
+    log('HOME_CARD_QA', { path: row.path, cards: row.cards.length, fullCard: true });
+  }
 }
 
 async function openBuildPage() {
@@ -645,6 +661,7 @@ async function openBuildPage() {
   const state = await page.evaluate(() => ({
     configured: globalThis.vcsBuild?.build_configured,
     active: globalThis.vcsBuild?.initial_active,
+    pending: globalThis.vcsBuild?.pending_count,
   }));
   assert(state.configured === true || state.configured === 1 || state.configured === '1', 'WordPress Build Website is not configured');
   return { button, state, disabled: await button.isDisabled() };
@@ -653,7 +670,7 @@ async function openBuildPage() {
 async function waitForBuildSlot() {
   for (let attempt = 1; attempt <= 6; attempt++) {
     const current = await openBuildPage();
-    if (!current.state.active && !current.disabled) return current;
+    if (!current.state.active && (!current.disabled || (forceBuild && Number(current.state.pending || 0) === 0))) return current;
     log('BUILD_SLOT_WAIT', { attempt, active: Boolean(current.state.active), disabled: current.disabled });
     const existing = await waitForWordPressBuild({
       page,
@@ -671,7 +688,14 @@ async function waitForBuildSlot() {
 
 async function triggerBuildAndWait() {
   assert(githubToken, 'GITHUB_TOKEN is required to monitor the exact Astro build run');
-  const { button } = await waitForBuildSlot();
+  const { button, state } = await waitForBuildSlot();
+  if (forceBuild && Number(state.pending || 0) === 0) {
+    const force = page.locator('#vcs-force-build');
+    assert(await force.count() === 1 && !await force.isDisabled(), 'WordPress force-build control unavailable');
+    if (!await force.isChecked()) await force.check();
+    assert(!await button.isDisabled(), 'Build button disabled after force checkbox');
+    log('BUILD_SOURCE_RELEASE', 'FORCE_EMPTY_QUEUE');
+  }
   const ack = page.waitForResponse(response => response.url().startsWith(wp + '/wp-admin/admin-ajax.php')
     && response.request().method() === 'POST'
     && String(response.request().postData() || '').includes('action=vcs_trigger_build'), { timeout: 45000 });
@@ -752,7 +776,7 @@ try {
 
   const records = await collectLinkRecords(pages, categories, products);
   await writeFile(`${artifactDir}/link-records.json`, JSON.stringify(records, null, 2));
-  if (writes > 0) await triggerBuildAndWait();
+  if (writes > 0 || forceBuild) await triggerBuildAndWait();
   else log('BUILD', 'NO_CMS_CHANGES_SKIP_TRIGGER');
   await waitFrontReady();
   await qaLinks(records);
