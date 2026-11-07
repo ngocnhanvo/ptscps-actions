@@ -3,7 +3,7 @@
   "astro": "bb3a139c444002c76ab82f1b7b83a81968418d1c",
   "scope": "PTSCPS native Visual Builder only; backed-up reversible CMS acceptance; auto-build",
   "phase": "verify",
-  "acceptance_attempt": 14,
+  "acceptance_attempt": 15,
   "verify_final_controls": false,
   "skip_completed_shared": true,
   "skip_completed_text": false
