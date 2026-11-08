@@ -1,9 +1,9 @@
 {
   "php": "5d4594a77799ef7212d3f9827f95752803e32080",
-  "astro": "41634ecd33a6833817aef7c1a492eadec749a6d1",
-  "scope": "PTSCPS service category preview matches public SSR products",
+  "astro": "7582f2e417598982e59ec238688c6f667ce23728",
+  "scope": "PTSCPS service detail ESC tables render on native Page Visual Builder",
   "phase": "build",
-  "acceptance_attempt": 30,
+  "acceptance_attempt": 31,
   "verify_final_controls": true,
   "skip_completed_shared": true,
   "skip_completed_text": true
