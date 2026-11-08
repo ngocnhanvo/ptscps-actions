@@ -32,13 +32,47 @@ async function categoryFeed(){
   const items=await res.json(); assert(Array.isArray(items),'Category feed is not an array');
   return items;
 }
+async function repairKnownTwoRowTable(id,description){
+  // The first guarded migration was saved with keys + data but no labels row.
+  // Refuse any other unexpected structure; never overwrite an authored table.
+  await page.goto(uri('/wp-admin/admin.php?page=tablepress&action=edit&table_id='+encodeURIComponent(id)+'&esc_full_admin=1'),{waitUntil:'load',timeout:50000});
+  await page.waitForFunction(()=>Boolean(globalThis.tp?.editor?.options?.data),null,{timeout:30000});
+  const evidence=await page.evaluate(()=>globalThis.tp.editor.options.data.map(row=>row.map(value=>String(value||''))));
+  const head=['type','title','content','img'];
+  assert(evidence.length===2&&JSON.stringify(evidence[0])===JSON.stringify(head),`Unknown 2-row ESC Table structure ${id}`);
+  assert(evidence[1][0]==='prose'&&String(evidence[1][2]||'')===description,`Existing 2-row content mismatch; refusing overwrite ${id}`);
+  await page.evaluate(({description})=>{
+    const editor=globalThis.tp.editor;
+    editor.insertRow(1);
+    if(editor.options.data.length!==3) throw Error('ESC Table repair failed to append label row');
+    const labels=['Loại','Tiêu đề','Nội dung','Hình ảnh'];
+    labels.forEach((value,x)=>editor.setValueFromCoords(x,1,value));
+    ['prose','',description,''].forEach((value,x)=>editor.setValueFromCoords(x,2,value));
+  },{description});
+  const save=page.getByRole('button',{name:/Save Changes|Lưu thay đổi|Lưu các thay đổi/i}).first();
+  const ackPromise=page.waitForResponse(response=>response.url().startsWith(wp+'/wp-admin/admin-ajax.php')&&String(response.request().postData()||'').includes('action=tablepress_save_table'),{timeout:45000});
+  await save.click();
+  const ack=await ackPromise;
+  assert(ack.ok(),`Failed TablePress repair save HTTP ${ack.status()}`);
+  const body=await ack.json();
+  assert(body?.success===true&&body?.table_id===id,`Failed TablePress repair acknowledgement ${id}`);
+  for(let i=0;i<8;i++){
+    await wait(600);
+    const actual=await tableRead(id);
+    if(actual?.items?.[0]?.type==='prose'&&String(actual.items[0].content||'')===description){
+      log('REPAIRED',{id,source:'product_cat.description',recoveredMissingLabels:true});
+      return;
+    }
+  }
+  throw Error('Repaired TablePress content did not match readback '+id);
+}
 async function createTable(id,name,description){
   let autoId=''; let completed=false;
   try{
     await page.goto(uri('/wp-admin/admin.php?page=tablepress_add&esc_full_admin=1'),{waitUntil:'domcontentloaded',timeout:50000});
     await page.locator('input[name="table[name]"]').fill('Dịch vụ - '+name);
     await page.locator('textarea[name="table[description]"]').fill('Nội dung dịch vụ, nguồn ESC Table');
-    await page.locator('input[name="table[rows]"]').fill('2');
+    await page.locator('input[name="table[rows]"]').fill('3');
     await page.locator('input[name="table[columns]"]').fill('4');
     const add=page.getByRole('button',{name:/Add Table|Thêm bảng/i}).first();
     assert.equal(await add.count(),1,'TablePress Add button not found');
@@ -48,7 +82,7 @@ async function createTable(id,name,description){
     await page.goto(uri('/wp-admin/admin.php?page=tablepress&action=edit&table_id='+encodeURIComponent(autoId)+'&esc_full_admin=1'),{waitUntil:'load',timeout:50000});
     await page.waitForFunction(()=>Boolean(globalThis.tp?.editor?.options?.data),null,{timeout:30000});
     const dims=await page.evaluate(()=>({rows:globalThis.tp.editor.options.data.length,cols:globalThis.tp.editor.options.columns.length}));
-    assert.deepEqual(dims,{rows:2,cols:4},`Unexpected TablePress dimensions ${JSON.stringify(dims)}`);
+    assert.deepEqual(dims,{rows:3,cols:4},`Unexpected TablePress dimensions ${JSON.stringify(dims)}`);
     await page.locator('#table-name').fill('Dịch vụ - '+name);
     await page.locator('#table-description').fill('Nội dung chi tiết dịch vụ, lưu trong ESC Table');
     if(autoId!==id){
@@ -57,7 +91,7 @@ async function createTable(id,name,description){
       await page.locator('#table-id').press('Tab');
     }
     await page.evaluate(({description})=>{
-      const cells=[['type','title','content','img'],['prose','',description,'']];
+      const cells=[['type','title','content','img'],['Loại','Tiêu đề','Nội dung','Hình ảnh'],['prose','',description,'']];
       cells.forEach((row,y)=>row.forEach((value,x)=>globalThis.tp.editor.setValueFromCoords(x,y,value)));
     },{description});
     const save=page.getByRole('button',{name:/Save Changes|Lưu thay đổi|Lưu các thay đổi/i}).first();
@@ -105,8 +139,13 @@ try{
   }
   for(const item of sources){
     if(item.existing){
-      assert(Array.isArray(item.existing.items)&&item.existing.items.length>0,`Existing table ${item.id} is empty; refusing overwrite`);
-      log('SKIPPED',{id:item.id,reason:'Existing ESC Table source preserved'});
+      if(Array.isArray(item.existing.items)&&item.existing.items.length>0){
+        log('SKIPPED',{id:item.id,reason:'Existing ESC Table source preserved'});
+        continue;
+      }
+      // Only repair our own known first 2-row table; verify every cell before writing.
+      assert(item.id===slugs.map(x=>'pub_service_'+x)[0],'Unexpected empty ESC Table; refusing mutation');
+      await repairKnownTwoRowTable(item.id,item.description);
       continue;
     }
     await createTable(item.id,item.name,item.description);
