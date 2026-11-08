@@ -1,0 +1,49 @@
+name: PTSCPS native service Pages Visual Builder QA (read-only)
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'audit/ptscps-service-native-pages-qa.ready'
+permissions:
+  contents: read
+concurrency:
+  group: ptscps-service-native-pages-qa
+  cancel-in-progress: false
+jobs:
+  qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 16
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.0-noble
+      options: --ipc=host
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Resolve configured origins
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: |
+          python3 - <<'PY'
+          import os,re
+          vals={}
+          for line in os.environ.get('ENV_FILE','').splitlines():
+              m=re.fullmatch(r'\s*(?:export\s+)?(WC_URL|WC_URL_CLIENT)\s*=\s*(.*?)\s*',line)
+              if m: vals[m[1]]=m[2].strip().strip('"\'')
+          assert vals.get('WC_URL')=='https://admin-ptscps.thegioihosting.io.vn'
+          assert vals.get('WC_URL_CLIENT')=='https://ptscps.thegioihosting.io.vn'
+          with open(os.environ['GITHUB_ENV'],'a') as output:
+              output.write('WP_ORIGIN='+vals['WC_URL']+'\nCLIENT_ORIGIN='+vals['WC_URL_CLIENT']+'\n')
+          PY
+      - name: Install Playwright Chromium driver
+        run: npm install --prefix .qa --no-save --no-package-lock --ignore-scripts --no-audit --no-fund playwright@1.64.0
+      - name: Check QA script syntax
+        run: node --check scripts/ptscps-service-native-pages-qa.mjs
+      - name: Verify four native Pages select and edit ESC cells without writes
+        env:
+          WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
+          WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
+        run: node scripts/ptscps-service-native-pages-qa.mjs
