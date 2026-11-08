@@ -139,9 +139,18 @@ try {
   await page.locator('#user_login').fill(user);
   await page.locator('#user_pass').fill(password);
   await Promise.all([page.waitForURL(/\/wp-admin\//,{timeout:45000}),page.locator('#wp-submit').click()]);
-  const nr=await page.request.post(wp+'/wp-admin/admin-ajax.php',{form:{action:'rest-nonce'},timeout:25000});
-  nonce=(await nr.text()).trim();
-  assert(nr.ok() && /^[a-f\d]{8,20}$/i.test(nonce),'Authenticated REST nonce missing');
+  // Use the working WordPress admin nonce contract (not hexadecimal-only).
+  for (const route of ['/wp-admin/nav-menus.php?esc_full_admin=1',
+    '/wp-admin/edit-tags.php?taxonomy=product_cat&post_type=product&esc_full_admin=1']) {
+    await page.goto(wp+route,{waitUntil:'domcontentloaded',timeout:50000});
+    nonce=await page.evaluate(()=>String(globalThis.wpApiSettings?.nonce||'').trim());
+    if (/^[A-Za-z0-9_-]{8,32}$/.test(nonce)) break;
+  }
+  if (!/^[A-Za-z0-9_-]{8,32}$/.test(nonce)) {
+    const nr=await page.request.post(wp+'/wp-admin/admin-ajax.php',{form:{action:'rest-nonce'},timeout:30000});
+    nonce=nr.ok() ? (await nr.text()).trim() : '';
+  }
+  assert(/^[A-Za-z0-9_-]{8,32}$/.test(nonce),'Authenticated REST nonce missing');
   const root=await pageBySlug('dich-vu');
   assert(root && root.status==='publish' && root.acf?.action==='ProductsSSRPage','Root service Page source mismatch');
   report('ROOT',{id:root.id,slug:root.slug});

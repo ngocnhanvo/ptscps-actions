@@ -1,4 +1,5 @@
 {
   "scope": "ptscps-service-page-bridge",
-  "astro": "7582f2e417598982e59ec238688c6f667ce23728"
+  "astro": "7582f2e417598982e59ec238688c6f667ce23728",
+  "attempt": 2
 }
