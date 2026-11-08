@@ -1,10 +1,10 @@
 {
-  "php": "fcdb935f439ad9d5358b660e8d901aeff9fea383",
-  "astro": "cf943f991e3cef685b56e2989333c813a00123ca",
-  "scope": "PTSCPS home05 ACF product_lang value normalization; production retry and QA",
-  "phase": "build",
-  "acceptance_attempt": 22,
-  "verify_final_controls": false,
+  "php": "497e5b7f3d5d4b2756829fb438be4bec48423b1f",
+  "astro": "9965a20ea2ecde32f889789ec65653cee2accdfb",
+  "scope": "PTSCPS about_00 Visual Builder exact ESC cell coordinates for introduction letter",
+  "phase": "release",
+  "acceptance_attempt": 23,
+  "verify_final_controls": true,
   "skip_completed_shared": true,
-  "skip_completed_text": true
+  "skip_completed_text": false
 }
