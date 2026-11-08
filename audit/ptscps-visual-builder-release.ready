@@ -1,10 +1,10 @@
 {
   "php": "5d4594a77799ef7212d3f9827f95752803e32080",
-  "astro": "35288e54c519ce4d82ea3aff16585f1c4afa5a21",
-  "scope": "PTSCPS accept 65-character service category in Visual Builder private preview",
+  "astro": "41634ecd33a6833817aef7c1a492eadec749a6d1",
+  "scope": "PTSCPS service category preview matches public SSR products",
   "phase": "build",
-  "acceptance_attempt": 29,
+  "acceptance_attempt": 30,
   "verify_final_controls": true,
   "skip_completed_shared": true,
-  "skip_completed_text": false
+  "skip_completed_text": true
 }
