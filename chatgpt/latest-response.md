@@ -4,28 +4,24 @@
 - Project: ptscps.com.vn
 - Repository: ngocnhanvo/ptscps-actions
 - Branch: main
-- Status: PASS / checkpoint SAVED
+- Status: PASS / deployed / visual QA PASS
 
 ## Response
 
-## Đã sửa xong chữ “Khách hàng” — `home_15`
+## Hoàn tất `home_05` lấy tin tức theo API tùy chỉnh của ESC Table
 
-<badge color="success"><icon name="check-circle" inline size="xs"/> PASS — Đã triển khai production</badge>
-
-Tiêu đề **“Khách hàng”** trên trang chủ giờ đã được gắn đúng tọa độ `home_15 / section / section_title`, nên có thể nhấp vào chữ để sửa trực tiếp bằng Visual Builder.
-
-Kết quả kiểm thử thực tế:
-
-- Chọn đúng ô ESC Table: **PASS**
-- Lưu nội dung vào WordPress: **PASS**
-- Tải lại Builder và đọc đúng nội dung mới: **PASS**
-- Khôi phục nội dung gốc: **PASS**
-
-[Production build #42427881199](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/42427881199) và [QA #42427761550](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/42427761550) đều **SUCCESS**. Toàn bộ 17 kiểm thử PASS, `restored_all: true`.
-
-Astro `ptscps-astro/master`: `9c8c83358995342e81c5859ac944731dd6eab5c4`; PHP `ptscps-php/master` không đổi (`fcdb935f439ad9d5358b660e8d901aeff9fea383`).
-
-Checkpoint đã lưu tại [`chatgpt/latest-response.md`](https://github.com/ngocnhanvo/ptscps-actions/blob/main/chatgpt/latest-response.md).
+- Bảng ESC Table `home_05` và `home_05_en` đã chọn **API tùy chỉnh**, nguồn lưu trong `meta.api` WordPress; native Save và REST readback PASS, giữ nguyên các hàng cũ.
+- API VI: `/wp-json/wp/v2/posts?cat=tin-tuc&lang=vi&_embed=true&status=publish&orderby=date&order=desc&per_page=3`.
+- API EN: `/wp-json/wp/v2/posts?cat=tin-tuc&lang=en&_embed=true&status=publish&orderby=date&order=desc&per_page=3`.
+- Astro đọc nguồn API từ ESC Table thay vì gọi `getPosts()` hardcode cho `home_05`, hiển thị card động theo các bài publish mới nhất. ACF `product_lang.value` đã được hỗ trợ.
+- WordPress CMS configuration [#42434417432](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/42434417432): SUCCESS.
+- Production build [#42435170160](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/42435170160): SUCCESS.
+- Visual Builder release / build and verify [#42435077686](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/42435077686): SUCCESS.
+- Real production Playwright API-vs-UI test [#42435408490](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/42435408490): SUCCESS; `PTSCPS_HOME05_LIVE_QA_PASS=1 count_vi=3 count_en=3 api_source=ESC_TABLE`. Đã so sánh title, link, thứ tự bài và nguồn section.
+- Astro `ptscps-astro/master`: `cf943f991e3cef685b56e2989333c813a00123ca`.
+- PHP `ptscps-php/master` giữ nguyên: `fcdb935f439ad9d5358b660e8d901aeff9fea383`.
+- Actions workflow/QA source: `0794964faa3e89fc5e29836d80e664ed849715e8` (trước commit checkpoint).
+- Đã sửa lỗi build ban đầu `LOCALE_MIXED_CONTENT` và build lại thành công; bản lỗi không được deploy.
 
 **Chế độ code:** `auto-build`
 **Cổng ghi source:** `source-commit-actions`
