@@ -1,9 +1,9 @@
 {
-  "php": "5d4594a77799ef7212d3f9827f95752803e32080",
+  "php": "aa6bbea429d41e4bae2595ba38b44a015648ecd3",
   "astro": "3e4ee8005d2ab51d0f0fc14ac9b7594962e7e1ce",
-  "scope": "PTSCPS authenticated native service Page Preview fallback",
-  "phase": "build",
-  "acceptance_attempt": 32,
+  "scope": "PTSCPS native service Page ESC Table ownership authorization",
+  "phase": "release",
+  "acceptance_attempt": 33,
   "verify_final_controls": true,
   "skip_completed_shared": true,
   "skip_completed_text": true
