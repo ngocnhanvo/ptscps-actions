@@ -1,9 +1,9 @@
 {
   "php": "fcdb935f439ad9d5358b660e8d901aeff9fea383",
-  "astro": "a19740fc10fd29fb2c9f5fa6615b0d892911c095",
-  "scope": "PTSCPS home_14 quick links native source selection and safe CMS rollback; auto-build",
+  "astro": "9c8c83358995342e81c5859ac944731dd6eab5c4",
+  "scope": "PTSCPS home_15 customer heading native ESC section title; reversible QA; auto-build",
   "phase": "build",
-  "acceptance_attempt": 19,
+  "acceptance_attempt": 20,
   "verify_final_controls": false,
   "skip_completed_shared": true,
   "skip_completed_text": false
