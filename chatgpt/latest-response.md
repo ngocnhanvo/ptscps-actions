@@ -8,18 +8,15 @@
 
 ## Response
 
-## Hoàn tất sửa Visual Builder trang `/thu-ngo` (ESC Table `about_00`)
+### Hoàn tất chuẩn hóa Visual Builder nhóm giới thiệu và dịch vụ
 
-- Nguồn quản lý vẫn là WordPress ESC Table `about_00`, không hardcode nội dung vào Astro và không đổi dữ liệu CMS.
-- Astro `ptscps-astro/master`: `9965a20ea2ecde32f889789ec65653cee2accdfb`. Đã gắn tọa độ nguồn `row+field` cho tiêu đề, mô tả, đoạn thư, tiêu đề và metadata giải thưởng.
-- PHP `ptscps-php/master`: `497e5b7f3d5d4b2756829fb438be4bec48423b1f`. Đã cho phép sửa tiêu đề và mô tả ESC Table `about_00` bằng metadata được kiểm tra.
-- Actions release commit: `227d8513668bbeb493de1745f43c062b0b77ddfb`.
-- Production guarded release [#42440092598](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/42440092598): SUCCESS, bao gồm kiểm thử offline, preflight, PHP FTPS readback, build và Visual Builder live acceptance.
-- Astro production build [#42440299937](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/42440299937): SUCCESS.
-- Bài kiểm thử chuyên biệt, read-only [#42440726617](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/42440726617): SUCCESS. Log xác nhận `PTSCPS_ABOUT00_BUILDER_QA_PASS=1 prose=2 awards=2 source=ESC_TABLE click_selection=PASS cms_writes=0`. Kiểm tra tọa độ native, REST editable-text, click mở đúng trình sửa đoạn thư, và `/thu-ngo` HTTP 200.
-- Test riêng lần đầu [#42440478838](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/42440478838) FAIL do đọc trạng thái loading quá sớm, đã sửa cơ chế chờ readiness và test lại PASS mà không build lại.
-- Actions QA code: `da49f00a91e5e5ed47d1878a5e6f926509bffa7d` (trước checkpoint).
-- Phạm vi đã nghiệm thu: `about_00` trên `/thu-ngo`. Không suy rộng QA PASS sang mọi trang khác. Phần `home_05` đã PASS ở checkpoint trước, không chạy lại.
+- Nguồn nội dung giữ tại WordPress ESC Table; không hardcode trong Astro. `about_00` đến `about_04` có tọa độ `row + field`; tiêu đề `/dich-vu` lấy `services_00_vi`.
+- Đã phục hồi/tạo ba bảng `pub_service_*` thiếu, lấy dữ liệu từ mô tả WooCommerce nhưng giữ nguyên mô tả gốc. Migration [#42447660235](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/42447660235) SUCCESS, `count=3`, đọc lại nguồn thành công.
+- Nguyên nhân trang sửa chữa/bảo dưỡng không mở Preview: slug dài 65 ký tự, PHP cho phép tối đa 68 nhưng Astro giới hạn 60, trả HTTP 400. Đã đồng bộ Astro giới hạn 68 ký tự: `ptscps-astro/master` commit `35288e54c519ce4d82ea3aff16585f1c4afa5a21`.
+- `ptscps-php/master`: `5d4594a77799ef7212d3f9827f95752803e32080`; các trường và section meta đã được cấp quyền theo nguồn đã xác minh.
+- Guarded release [#42451439911](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/42451439911) SUCCESS; WordPress-native production build [#42451520168](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/42451520168) SUCCESS.
+- Read-only QA [#42450954473, attempt 2](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/42450954473) SUCCESS: `about_00` đến `about_04` PASS, bốn bảng dịch vụ PASS (sửa chữa/bảo dưỡng 2 cell; FPSO 1; thiết kế/gia công 1; cung ứng nhân lực 1), REST `editable-text` và chọn ô đúng nguồn, `cms_writes=0`.
+- Đã nghiệm thu các trang giới thiệu và bốn nhóm dịch vụ nằm trong bộ QA. Những trang khác ngoài bộ QA này không được suy ra là PASS.
 
 **Chế độ code:** `auto-build`
 **Cổng ghi source:** `source-commit-actions`
