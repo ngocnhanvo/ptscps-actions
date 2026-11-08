@@ -1,0 +1,33 @@
+name: PTSCPS home05 native ESC Table custom API configuration
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/ptscps-home05-config.yml'
+permissions:
+  contents: read
+concurrency:
+  group: ptscps-home05-tablepress-config
+  cancel-in-progress: false
+jobs:
+  configure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.0-noble
+      options: --ipc=host
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install matching Playwright driver
+        run: npm install --prefix .qa --no-save --no-package-lock --ignore-scripts --no-audit --no-fund playwright@1.64.0
+      - name: Configure home05 source through native WordPress editor and REST readback
+        env:
+          WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
+          WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
+          WP_ORIGIN: https://admin-ptscps.thegioihosting.io.vn
+        run: NODE_PATH="${{ github.workspace }}/.qa/node_modules" node scripts/ptscps-home05-config.mjs
