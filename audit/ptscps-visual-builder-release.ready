@@ -1,9 +1,9 @@
 {
   "php": "5d4594a77799ef7212d3f9827f95752803e32080",
-  "astro": "3eec553524c9a3be71f222db231a4c74170512d8",
-  "scope": "PTSCPS service detail ESC Table source intro without duplicated taxonomy content",
+  "astro": "958d3527d28933a2980172080be0b0f977434f66",
+  "scope": "PTSCPS final service detail ESC Table wrapper mapping and Builder selection",
   "phase": "release",
-  "acceptance_attempt": 27,
+  "acceptance_attempt": 28,
   "verify_final_controls": true,
   "skip_completed_shared": true,
   "skip_completed_text": false
