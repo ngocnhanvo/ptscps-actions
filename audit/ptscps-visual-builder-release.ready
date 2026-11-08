@@ -1,10 +1,10 @@
 {
   "php": "fcdb935f439ad9d5358b660e8d901aeff9fea383",
-  "astro": "9c8c83358995342e81c5859ac944731dd6eab5c4",
-  "scope": "PTSCPS home_15 customer heading native ESC section title; reversible QA; auto-build",
+  "astro": "cc4d7b4fbc436037d1136f0586b8ac0ee94d9baa",
+  "scope": "PTSCPS home_05 VI/EN native ESC Table custom API source; build and verify",
   "phase": "build",
-  "acceptance_attempt": 20,
+  "acceptance_attempt": 21,
   "verify_final_controls": false,
   "skip_completed_shared": true,
-  "skip_completed_text": false
+  "skip_completed_text": true
 }
