@@ -1,9 +1,9 @@
 {
-  "php": "497e5b7f3d5d4b2756829fb438be4bec48423b1f",
-  "astro": "9965a20ea2ecde32f889789ec65653cee2accdfb",
-  "scope": "PTSCPS about_00 Visual Builder exact ESC cell coordinates for introduction letter",
+  "php": "3e3301b270984120857d5e346506a56b2fbd14ab",
+  "astro": "4c40bc552cb7b0d6612001dbb0268dd72b2c21c5",
+  "scope": "PTSCPS about_02 through about_04 exact Builder coordinates and metadata",
   "phase": "release",
-  "acceptance_attempt": 23,
+  "acceptance_attempt": 24,
   "verify_final_controls": true,
   "skip_completed_shared": true,
   "skip_completed_text": false
