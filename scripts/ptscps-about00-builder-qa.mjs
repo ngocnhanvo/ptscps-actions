@@ -77,8 +77,22 @@ try {
   await table.locator('[data-esc-builder-cell-field="content"]').first().click();
   const inspector=page.locator('#esc-vb-text-editor');
   await inspector.waitFor({state:'visible',timeout:30000});
-  assert.equal(await inspector.locator('#esc-vb-edit-title').isDisabled(),false,
-    'Click on letter paragraph does not unlock native text editor');
+  // The inspector becomes visible before its authenticated REST read finishes.
+  // Wait for the native editor to unlock rather than sampling its loading state.
+  try {
+    await page.waitForFunction(() => {
+      const editor = document.querySelector('#esc-vb-edit-title');
+      return editor && !editor.disabled;
+    }, null, { timeout: 30000 });
+  } catch (error) {
+    const state = await page.evaluate(() => ({
+      caption: document.querySelector('#esc-vb-edit-caption')?.textContent?.slice(0,180),
+      feedback: document.querySelector('#esc-vb-edit-feedback')?.textContent?.slice(0,200),
+      row: document.querySelector('#esc-vb-edit-row')?.value,
+      panel: document.querySelector('#esc-vb-text-editor')?.style.display,
+    }));
+    throw new Error('Letter paragraph editor did not unlock: '+JSON.stringify(state), {cause:error});
+  }
   const current=await inspector.locator('#esc-vb-edit-row').inputValue();
   assert(current.endsWith(':content'),'Selected ESC row/field does not match clicked letter paragraph');
   const publicPage=await context.newPage();
