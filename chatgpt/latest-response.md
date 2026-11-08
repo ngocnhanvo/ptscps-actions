@@ -4,19 +4,19 @@
 - Project: ptscps.com.vn
 - Repository: ngocnhanvo/ptscps-actions
 - Branch: main
-- Status: DONE / deployed / visual QA PASS
+- Status: DONE — native Services Pages Visual Builder deployed and verified
 
 ## Response
 
-### Hoàn tất chuẩn hóa Visual Builder nhóm giới thiệu và dịch vụ
+### Hoàn tất WordPress Page + ESC Table cho menu DỊCH VỤ
 
-- Nguồn nội dung giữ tại WordPress ESC Table; không hardcode trong Astro. `about_00` đến `about_04` có tọa độ `row + field`; tiêu đề `/dich-vu` lấy `services_00_vi`.
-- Đã phục hồi/tạo ba bảng `pub_service_*` thiếu, lấy dữ liệu từ mô tả WooCommerce nhưng giữ nguyên mô tả gốc. Migration [#42447660235](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/42447660235) SUCCESS, `count=3`, đọc lại nguồn thành công.
-- Nguyên nhân trang sửa chữa/bảo dưỡng không mở Preview: slug dài 65 ký tự, PHP cho phép tối đa 68 nhưng Astro giới hạn 60, trả HTTP 400. Đã đồng bộ Astro giới hạn 68 ký tự: `ptscps-astro/master` commit `35288e54c519ce4d82ea3aff16585f1c4afa5a21`.
-- `ptscps-php/master`: `5d4594a77799ef7212d3f9827f95752803e32080`; các trường và section meta đã được cấp quyền theo nguồn đã xác minh.
-- Guarded release [#42451439911](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/42451439911) SUCCESS; WordPress-native production build [#42451520168](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/42451520168) SUCCESS.
-- Read-only QA [#42450954473, attempt 2](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/42450954473) SUCCESS: `about_00` đến `about_04` PASS, bốn bảng dịch vụ PASS (sửa chữa/bảo dưỡng 2 cell; FPSO 1; thiết kế/gia công 1; cung ứng nhân lực 1), REST `editable-text` và chọn ô đúng nguồn, `cms_writes=0`.
-- Đã nghiệm thu các trang giới thiệu và bốn nhóm dịch vụ nằm trong bộ QA. Những trang khác ngoài bộ QA này không được suy ra là PASS.
+- Knowledge rule: `knowledge/main@98a466ca`, `stacks/wordpress-page-esc-category-sources.md`. WordPress Page sở hữu shortcode và section, ESC Table giữ nội dung; ProductCategory là dữ liệu tham chiếu readonly.
+- Trang tổng `/dich-vu`: Page `82755`, ESC Table `services_00_vi` dùng `meta.api=ProductCategory`. Không tạo category giả `Tất cả`.
+- Bốn Page con: `85614` FPSO/FSO/MOPU; `85617` thiết kế/mua sắm; `85620` nhân lực; `85623` sửa chữa/bảo dưỡng. WordPress Page thật, `IntroPage`, `ssr-service`, `product_lang=vi`, shortcode `pub_service_<slug>` tương ứng. Setup [#42455603659](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/42455603659) PASS.
+- Astro production `ptscps-astro/master@3e4ee8005d2ab51d0f0fc14ac9b7594962e7e1ce`: hỗ trợ native Page Preview render ESC Table, cập nhật Page qua REST. PHP production `ptscps-php/master@aa6bbea429d41e4bae2595ba38b44a015648ecd3`: cho phép sửa bảng gắn shortcode đúng Page con, vẫn khóa Page giả/sai slug/parent. Guarded release [#42459103868](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/42459103868) PASS.
+- Read-only QA [#42458273852 attempt 2](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/42458273852): 4/4 Page đúng identity, REST `editable-text` HTTP 200, Inspector chọn cell đúng, không ghi CMS.
+- Guarded Save/REST/Reload/Restore QA [#42459957204](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/42459957204) PASS 4/4: tất cả 4 cell `content` lưu qua Visual Builder, đọc lại REST và Preview sau reload đúng, khôi phục nguyên giá trị; `temporaryRecordsRemaining=0`.
+- Những field lấy trực tiếp từ Product/ProductCategory vẫn readonly về giá trị taxonomy, cần sửa dữ liệu gốc trong WordPress; không coi chúng là cell ESC Table. QA xác nhận bốn cell thực tế, không suy mọi field/API đều sửa được.
 
 **Chế độ code:** `auto-build`
 **Cổng ghi source:** `source-commit-actions`
