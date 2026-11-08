@@ -1,9 +1,9 @@
 {
   "php": "5d4594a77799ef7212d3f9827f95752803e32080",
-  "astro": "958d3527d28933a2980172080be0b0f977434f66",
-  "scope": "PTSCPS final service detail ESC Table wrapper mapping and Builder selection",
-  "phase": "release",
-  "acceptance_attempt": 28,
+  "astro": "35288e54c519ce4d82ea3aff16585f1c4afa5a21",
+  "scope": "PTSCPS accept 65-character service category in Visual Builder private preview",
+  "phase": "build",
+  "acceptance_attempt": 29,
   "verify_final_controls": true,
   "skip_completed_shared": true,
   "skip_completed_text": false
