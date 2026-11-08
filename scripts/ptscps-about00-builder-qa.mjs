@@ -152,6 +152,84 @@ try {
     await publicDetail.close();
     console.log('PTSCPS_ABOUT_BUILDER_PASS table='+test.table+' editable_rows='+matching.length+' cms_writes=0');
   }
+  const servicePage = choices.find(option=>/^dịch\s*vụ$/i.test(option.label));
+  assert(servicePage && /^\d+$/.test(servicePage.id),'Native Page picker lacks root Dịch vụ');
+  const categories = [
+    'van-hanh-va-bao-duong-fpso-fso-mopu',
+    'dich-vu-thiet-ke-mua-sam-gia-cong-che-tao',
+    'cung-ung-nhan-luc-ky-thuat-van-hanh-va-bao-duong',
+    'dich-vu-sua-chua-bao-duong-cac-thiet-bi-va-cong-trinh-cong-nghiep',
+  ];
+  const categoryIndex = await context.newPage();
+  const indexResponse = await categoryIndex.goto(client+'/dich-vu',
+    {waitUntil:'domcontentloaded',timeout:45000});
+  assert.equal(indexResponse?.status(),200,'Public services landing not HTTP 200');
+  assert(await categoryIndex.locator('[data-tablepress-preview="services_00"]').count()>0,
+    'Services landing missing canonical ESC Table services_00');
+  await categoryIndex.close();
+  for (const slug of categories) {
+    const tableId='pub_service_'+slug;
+    const url=wp+'/wp-admin/edit.php?post_type=page&page=esc-visual-builder&esc_vb_page='+
+      servicePage.id+'&esc_vb_category='+encodeURIComponent(slug);
+    await page.goto(url,{waitUntil:'domcontentloaded',timeout:45000});
+    const option=page.locator('#esc-vb-category option[value="'+slug+'"]');
+    assert.equal(await option.count(),1,'Service category missing in Builder dropdown: '+slug);
+    assert.equal(await page.locator('#esc-vb-category').inputValue(),slug,
+      'Builder category selection mismatch: '+slug);
+    const iframe=page.locator('#esc-vb-frame');
+    const frameUrl=new URL(await iframe.getAttribute('src'));
+    assert.equal(frameUrl.searchParams.get('category'),slug,
+      'Private Builder preview lost service category: '+slug);
+    const serviceFrame=await iframe.elementHandle().then(handle=>handle.contentFrame());
+    await serviceFrame.locator('html.esc-builder-preview').waitFor({state:'attached',timeout:60000});
+    const detail=serviceFrame.locator('[data-tablepress-preview="'+tableId+'"]').first();
+    await detail.waitFor({state:'visible',timeout:60000});
+    const markers=await detail.locator('[data-esc-builder-cell-row][data-esc-builder-cell-field]')
+      .evaluateAll(nodes=>nodes.map(node=>({
+        row:node.getAttribute('data-esc-builder-cell-row'),
+        field:node.getAttribute('data-esc-builder-cell-field'),
+        text:(node.textContent||'').trim()
+      })).filter(item=>/^\d+$/.test(item.row||'')&&item.text));
+    assert(markers.length>0,'Service detail has no source cell coordinates: '+slug);
+    const versions=JSON.parse(await serviceFrame.locator('#esc-vb-region-rules')
+      .getAttribute('data-versions')||'{}');
+    const version=versions[tableId];
+    assert(/^[a-f0-9]{64}$/.test(version||''),'Missing canonical service table version: '+tableId);
+    await page.waitForFunction(()=>typeof window.escVBGetTicket==='function');
+    const response=await page.evaluate(async({wp,pageId,tableId,version,slug})=>{
+      const nonce=window.wpApiSettings?.nonce||
+        document.documentElement.innerHTML.match(/"nonce"\s*:\s*"([a-f0-9]+)"/)?.[1];
+      const ticket=await window.escVBGetTicket(false);
+      const request=await fetch(wp+'/wp-json/esc-builder/v1/editable-text',{
+        method:'POST',credentials:'same-origin',cache:'no-store',
+        headers:{'Content-Type':'application/json','X-WP-Nonce':nonce},
+        body:JSON.stringify({ticket,page_id:Number(pageId),table_id:tableId,
+          rendered_version:version,category:slug})
+      });
+      return {status:request.status,body:await request.json()};
+    },{wp,pageId:servicePage.id,tableId,version,slug});
+    assert.equal(response.status,200,'Native source rejected '+tableId+': '+response.body?.code);
+    const selected=markers.find(item=>response.body?.rows?.some(row=>
+      String(row.row)===item.row&&row.field===item.field&&row.editable));
+    assert(selected,'Service detail has no editable native cell: '+tableId);
+    await detail.locator('[data-esc-builder-cell-row="'+selected.row+'"]'+
+      '[data-esc-builder-cell-field="'+selected.field+'"]').first().click();
+    await page.waitForFunction(()=>{
+      const editor=document.querySelector('#esc-vb-edit-title');
+      return editor&&!editor.disabled;
+    },null,{timeout:30000});
+    assert.equal(await page.locator('#esc-vb-edit-row').inputValue(),
+      selected.row+':'+selected.field,'Service detail selection drifted: '+tableId);
+    const publicDetail=await context.newPage();
+    const publicResponse=await publicDetail.goto(client+'/dich-vu/'+slug,
+      {waitUntil:'domcontentloaded',timeout:45000});
+    assert.equal(publicResponse?.status(),200,'Service route not HTTP 200: '+slug);
+    assert(await publicDetail.locator('[data-service-detail-content]').count()>0,
+      'Service detail content missing from public route: '+slug);
+    await publicDetail.close();
+    console.log('PTSCPS_SERVICE_DETAIL_BUILDER_PASS='+tableId+
+      ' cells='+markers.length+' source=ESC_TABLE cms_writes=0');
+  }
   console.log('PTSCPS_ABOUT00_BUILDER_QA_PASS=1 prose='+prose.length+
     ' awards='+awardTitles.length+' source=ESC_TABLE click_selection=PASS cms_writes=0');
 }finally{
