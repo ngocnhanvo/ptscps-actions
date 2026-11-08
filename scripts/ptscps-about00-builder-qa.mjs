@@ -174,9 +174,9 @@ try {
   const indexResponse = await categoryIndex.goto(client+'/dich-vu',
     {waitUntil:'domcontentloaded',timeout:45000});
   assert.equal(indexResponse?.status(),200,'Public services landing not HTTP 200');
-  assert(await categoryIndex.locator('[data-tablepress-preview="services_00"]').count()>0,
-    'Services landing missing canonical ESC Table services_00');
-  const indexHeading=categoryIndex.locator('[data-tablepress-preview="services_00"] h1').first();
+  assert(await categoryIndex.locator('[data-tablepress-preview="services_00_vi"]').count()>0,
+    'Services landing missing canonical ESC Table services_00_vi');
+  const indexHeading=categoryIndex.locator('[data-tablepress-preview="services_00_vi"] h1').first();
   assert.equal(await indexHeading.getAttribute('data-esc-builder-cell-row'),'section',
     'Services index heading is not bound to ESC Table section metadata');
   assert.equal(await indexHeading.getAttribute('data-esc-builder-cell-field'),'section_title',
