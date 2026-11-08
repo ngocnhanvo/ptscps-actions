@@ -188,7 +188,8 @@ try {
       servicePage.id+'&esc_vb_category='+encodeURIComponent(slug);
     await page.goto(url,{waitUntil:'domcontentloaded',timeout:45000});
     const option=page.locator('#esc-vb-category option[value="'+slug+'"]');
-    assert.equal(await option.count(),1,'Service category missing in Builder dropdown: '+slug);
+    const dropdownOptions=await page.locator('#esc-vb-category option').evaluateAll(nodes=>nodes.map(node=>({value:node.value,label:node.textContent?.trim()})));
+    assert.equal(await option.count(),1,'Service category missing in Builder dropdown: '+JSON.stringify({slug,servicePage,dropdownOptions,pageMatches:choices.filter(item=>/^dịch\s*vụ$/i.test(item.label))}));
     assert.equal(await page.locator('#esc-vb-category').inputValue(),slug,
       'Builder category selection mismatch: '+slug);
     const iframe=page.locator('#esc-vb-frame');
