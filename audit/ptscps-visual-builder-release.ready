@@ -1,9 +1,9 @@
 {
   "php": "5d4594a77799ef7212d3f9827f95752803e32080",
-  "astro": "3818df4580ca4e650fd0f1dcfb1dfba34586c39e",
-  "scope": "PTSCPS company introduction and services index ESC Table Visual Builder mapping",
+  "astro": "3eec553524c9a3be71f222db231a4c74170512d8",
+  "scope": "PTSCPS service detail ESC Table source intro without duplicated taxonomy content",
   "phase": "release",
-  "acceptance_attempt": 26,
+  "acceptance_attempt": 27,
   "verify_final_controls": true,
   "skip_completed_shared": true,
   "skip_completed_text": false
