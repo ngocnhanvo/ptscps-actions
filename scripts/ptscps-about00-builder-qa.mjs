@@ -102,6 +102,56 @@ try {
   assert(await publicPage.locator('[data-tablepress-preview="about_00"]').count()>0,
     'Public letter does not render from ESC Table about_00');
   await publicPage.close();
+  for (const test of [
+    { label: /ban\s+lãnh\s+đạo/i, table:'about_02', url:'/ban-lanh-dao', fields:['title','meta','group'] },
+    { label: /quá\s+trình\s+phát\s+triển/i, table:'about_03', url:'/qua-trinh-phat-trien', fields:['content','meta','title'] },
+    { label: /định\s+hướng\s+phát\s+triển/i, table:'about_04', url:'/dinh-huong-phat-trien', fields:['content'] },
+  ]) {
+    const choice = choices.find(option=>test.label.test(option.label));
+    assert(choice && /^\d+$/.test(choice.id),'Missing WordPress Page '+test.url);
+    await page.goto(wp+'/wp-admin/edit.php?post_type=page&page=esc-visual-builder&esc_vb_page='+choice.id,
+      {waitUntil:'domcontentloaded',timeout:45000});
+    const pane = await page.locator('#esc-vb-frame').elementHandle().then(handle=>handle.contentFrame());
+    await pane.locator('html.esc-builder-preview').waitFor({state:'attached',timeout:60000});
+    const wrapper = pane.locator('[data-tablepress-preview="'+test.table+'"]').first();
+    await wrapper.waitFor({state:'visible',timeout:60000});
+    const elements = await wrapper.locator('[data-esc-builder-cell-row][data-esc-builder-cell-field]')
+      .evaluateAll(nodes=>nodes.map(node=>({
+        row:node.getAttribute('data-esc-builder-cell-row'),
+        field:node.getAttribute('data-esc-builder-cell-field'),
+        text:(node.textContent||'').trim()
+      })).filter(item=>item.text));
+    assert(elements.some(item=>item.row==='section'&&item.field==='section_title'),
+      'Missing source-bound heading '+test.table);
+    const matching=elements.filter(item=>test.fields.includes(item.field)&&/^\d+$/.test(item.row||''));
+    assert(matching.length>0,'No row-bound content for '+test.table);
+    const foundVersion=JSON.parse(await pane.locator('#esc-vb-region-rules').getAttribute('data-versions')||'{}')[test.table];
+    assert(/^[a-f0-9]{64}$/.test(foundVersion||''),'Missing source version for '+test.table);
+    const response=await page.evaluate(async({wp,pageId,tableId,foundVersion})=>{
+      const nonce=window.wpApiSettings?.nonce||document.documentElement.innerHTML.match(/"nonce"\s*:\s*"([a-f0-9]+)"/)?.[1];
+      const ticket=await window.escVBGetTicket(false);
+      const res=await fetch(wp+'/wp-json/esc-builder/v1/editable-text',{
+        method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-WP-Nonce':nonce},
+        body:JSON.stringify({ticket,page_id:Number(pageId),table_id:tableId,rendered_version:foundVersion})
+      });
+      return {status:res.status,data:await res.json()};
+    },{wp,pageId:choice.id,tableId:test.table,foundVersion});
+    assert.equal(response.status,200,'Native REST editable-text failed '+test.table);
+    assert(response.data.section_title?.editable,'Hero title not editable '+test.table);
+    const canEdit=matching.find(item=>response.data.rows.some(row=>String(row.row)===item.row&&row.field===item.field&&row.editable));
+    assert(canEdit,'No editable source row for '+test.table);
+    await wrapper.locator('[data-esc-builder-cell-row="'+canEdit.row+'"][data-esc-builder-cell-field="'+canEdit.field+'"]').first().click();
+    await page.waitForFunction(()=>{
+      const el=document.querySelector('#esc-vb-edit-title');return el&&!el.disabled;
+    },null,{timeout:30000});
+    const publicDetail=await context.newPage();
+    const load=await publicDetail.goto(client+test.url,{waitUntil:'domcontentloaded',timeout:45000});
+    assert.equal(load?.status(),200,'Public route missing '+test.url);
+    assert(await publicDetail.locator('[data-tablepress-preview="'+test.table+'"]').count()>0,
+      'Public page no longer has canonical '+test.table);
+    await publicDetail.close();
+    console.log('PTSCPS_ABOUT_BUILDER_PASS table='+test.table+' editable_rows='+matching.length+' cms_writes=0');
+  }
   console.log('PTSCPS_ABOUT00_BUILDER_QA_PASS=1 prose='+prose.length+
     ' awards='+awardTitles.length+' source=ESC_TABLE click_selection=PASS cms_writes=0');
 }finally{
