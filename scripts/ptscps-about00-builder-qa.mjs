@@ -103,6 +103,7 @@ try {
     'Public letter does not render from ESC Table about_00');
   await publicPage.close();
   for (const test of [
+    { label: /giới\s*thiệu\s*công\s*ty/i, table:'about_01', url:'/gioi-thieu-cong-ty', fields:['title','content'] },
     { label: /ban\s+lãnh\s+đạo/i, table:'about_02', url:'/ban-lanh-dao', fields:['title','meta','group'] },
     { label: /quá\s+trình\s+phát\s+triển/i, table:'about_03', url:'/qua-trinh-phat-trien', fields:['content','meta','title'] },
     { label: /định\s+hướng\s+phát\s+triển/i, table:'about_04', url:'/dinh-huong-phat-trien', fields:['content'] },
@@ -125,6 +126,15 @@ try {
       'Missing source-bound heading '+test.table);
     const matching=elements.filter(item=>test.fields.includes(item.field)&&/^\d+$/.test(item.row||''));
     assert(matching.length>0,'No row-bound content for '+test.table);
+    if(test.table==='about_01') {
+      const headings=wrapper.locator('h3');
+      assert(await headings.count()>0,'Company introduction lacks service cards');
+      assert.equal(await headings.count(),await wrapper.locator('h3[data-esc-builder-cell-field="title"][data-esc-builder-cell-row]').count(),
+        'Company service title lacks source cell coordinate');
+      assert.equal(await wrapper.locator('p').count(),await wrapper.locator('p[data-esc-builder-cell-row][data-esc-builder-cell-field]').count(),
+        'Company visible paragraph lacks source cell coordinate');
+      assert(await wrapper.locator('h2[data-esc-builder-cell-field="title"][data-esc-builder-cell-row]').count()>0,'Company section heading not mapped');
+    }
     const foundVersion=JSON.parse(await pane.locator('#esc-vb-region-rules').getAttribute('data-versions')||'{}')[test.table];
     assert(/^[a-f0-9]{64}$/.test(foundVersion||''),'Missing source version for '+test.table);
     const response=await page.evaluate(async({wp,pageId,tableId,foundVersion})=>{
@@ -166,6 +176,11 @@ try {
   assert.equal(indexResponse?.status(),200,'Public services landing not HTTP 200');
   assert(await categoryIndex.locator('[data-tablepress-preview="services_00"]').count()>0,
     'Services landing missing canonical ESC Table services_00');
+  const indexHeading=categoryIndex.locator('[data-tablepress-preview="services_00"] h1').first();
+  assert.equal(await indexHeading.getAttribute('data-esc-builder-cell-row'),'section',
+    'Services index heading is not bound to ESC Table section metadata');
+  assert.equal(await indexHeading.getAttribute('data-esc-builder-cell-field'),'section_title',
+    'Services index heading must be editable as section_title');
   await categoryIndex.close();
   for (const slug of categories) {
     const tableId='pub_service_'+slug;
