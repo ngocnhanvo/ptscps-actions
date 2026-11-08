@@ -4,24 +4,23 @@
 - Project: ptscps.com.vn
 - Repository: ngocnhanvo/ptscps-actions
 - Branch: main
-- Status: PASS / deployed / visual QA PASS
+- Status: DONE / deployed / visual QA PASS
 
 ## Response
 
-## Hoàn tất `home_05` lấy tin tức theo API tùy chỉnh của ESC Table
+## Hoàn tất sửa Visual Builder trang `/thu-ngo` (ESC Table `about_00`)
 
-- Bảng ESC Table `home_05` và `home_05_en` đã chọn **API tùy chỉnh**, nguồn lưu trong `meta.api` WordPress; native Save và REST readback PASS, giữ nguyên các hàng cũ.
-- API VI: `/wp-json/wp/v2/posts?cat=tin-tuc&lang=vi&_embed=true&status=publish&orderby=date&order=desc&per_page=3`.
-- API EN: `/wp-json/wp/v2/posts?cat=tin-tuc&lang=en&_embed=true&status=publish&orderby=date&order=desc&per_page=3`.
-- Astro đọc nguồn API từ ESC Table thay vì gọi `getPosts()` hardcode cho `home_05`, hiển thị card động theo các bài publish mới nhất. ACF `product_lang.value` đã được hỗ trợ.
-- WordPress CMS configuration [#42434417432](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/42434417432): SUCCESS.
-- Production build [#42435170160](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/42435170160): SUCCESS.
-- Visual Builder release / build and verify [#42435077686](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/42435077686): SUCCESS.
-- Real production Playwright API-vs-UI test [#42435408490](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/42435408490): SUCCESS; `PTSCPS_HOME05_LIVE_QA_PASS=1 count_vi=3 count_en=3 api_source=ESC_TABLE`. Đã so sánh title, link, thứ tự bài và nguồn section.
-- Astro `ptscps-astro/master`: `cf943f991e3cef685b56e2989333c813a00123ca`.
-- PHP `ptscps-php/master` giữ nguyên: `fcdb935f439ad9d5358b660e8d901aeff9fea383`.
-- Actions workflow/QA source: `0794964faa3e89fc5e29836d80e664ed849715e8` (trước commit checkpoint).
-- Đã sửa lỗi build ban đầu `LOCALE_MIXED_CONTENT` và build lại thành công; bản lỗi không được deploy.
+- Nguồn quản lý vẫn là WordPress ESC Table `about_00`, không hardcode nội dung vào Astro và không đổi dữ liệu CMS.
+- Astro `ptscps-astro/master`: `9965a20ea2ecde32f889789ec65653cee2accdfb`. Đã gắn tọa độ nguồn `row+field` cho tiêu đề, mô tả, đoạn thư, tiêu đề và metadata giải thưởng.
+- PHP `ptscps-php/master`: `497e5b7f3d5d4b2756829fb438be4bec48423b1f`. Đã cho phép sửa tiêu đề và mô tả ESC Table `about_00` bằng metadata được kiểm tra.
+- Actions release commit: `227d8513668bbeb493de1745f43c062b0b77ddfb`.
+- Production guarded release [#42440092598](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/42440092598): SUCCESS, bao gồm kiểm thử offline, preflight, PHP FTPS readback, build và Visual Builder live acceptance.
+- Astro production build [#42440299937](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/42440299937): SUCCESS.
+- Bài kiểm thử chuyên biệt, read-only [#42440726617](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/42440726617): SUCCESS. Log xác nhận `PTSCPS_ABOUT00_BUILDER_QA_PASS=1 prose=2 awards=2 source=ESC_TABLE click_selection=PASS cms_writes=0`. Kiểm tra tọa độ native, REST editable-text, click mở đúng trình sửa đoạn thư, và `/thu-ngo` HTTP 200.
+- Test riêng lần đầu [#42440478838](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/42440478838) FAIL do đọc trạng thái loading quá sớm, đã sửa cơ chế chờ readiness và test lại PASS mà không build lại.
+- Actions QA code: `da49f00a91e5e5ed47d1878a5e6f926509bffa7d` (trước checkpoint).
+- Phạm vi đã nghiệm thu: `about_00` trên `/thu-ngo`. Không suy rộng QA PASS sang mọi trang khác. Phần `home_05` đã PASS ở checkpoint trước, không chạy lại.
 
 **Chế độ code:** `auto-build`
 **Cổng ghi source:** `source-commit-actions`
+**Trạng thái:** `DONE — hoàn tất`
