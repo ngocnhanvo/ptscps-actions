@@ -1,0 +1,32 @@
+name: PTSCPS home05 custom API production content acceptance
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/ptscps-home05-live-qa.yml']
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.0-noble
+      options: --ipc=host
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install matching Playwright driver
+        run: npm install --prefix .qa --no-save --no-package-lock --ignore-scripts --no-audit --no-fund playwright@1.64.0
+      - name: Check source API and actual homepage news cards
+        run: node scripts/ptscps-home05-live-qa.mjs
+      - name: Save visible regression evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ptscps-home05-api-qa
+          path: artifacts/home05
+          if-no-files-found: ignore
