@@ -8,19 +8,22 @@
 
 ## Response
 
-## `home_14` — Đã sửa và nghiệm thu PASS
+## Đã sửa xong chữ “Khách hàng” — `home_15`
 
-<badge color="success"><icon name="check-circle" inline size="xs"/> 16 kiểm thử PASS</badge>
+<badge color="success"><icon name="check-circle" inline size="xs"/> PASS — Đã triển khai production</badge>
 
-Phần **“Liên kết nhanh”** trên trang chủ đã được sửa và triển khai lên production.
+Tiêu đề **“Khách hàng”** trên trang chủ giờ đã được gắn đúng tọa độ `home_15 / section / section_title`, nên có thể nhấp vào chữ để sửa trực tiếp bằng Visual Builder.
 
-- **Tiêu đề “Liên kết nhanh”:** chọn đúng `section_title`, lưu và tải lại được.
-- **Bốn nhãn card:** đã có tọa độ ESC Table theo hàng nguồn; kiểm thử lưu một nhãn thực tế PASS.
-- **URL liên kết:** chỉnh sửa được qua trường `href` cùng hàng; kiểm tra URL không an toàn cũng PASS.
+Kết quả kiểm thử thực tế:
 
-Log xác nhận các thao tác **Save → REST readback → Reload → Restore** đều thành công, `restored_all: true`. Không còn dữ liệu thử trong các cell đã kiểm tra.
+- Chọn đúng ô ESC Table: **PASS**
+- Lưu nội dung vào WordPress: **PASS**
+- Tải lại Builder và đọc đúng nội dung mới: **PASS**
+- Khôi phục nội dung gốc: **PASS**
 
-Source Astro: [`a19740fc`](https://github.com/ngocnhanvo/ptscps-astro/commit/a19740fc10fd29fb2c9f5fa6615b0d892911c095). Production build [#42426082371](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/42426082371) SUCCESS; [QA #42425980605](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/42425980605) SUCCESS.
+[Production build #42427881199](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/42427881199) và [QA #42427761550](https://github.com/ngocnhanvo/ptscps-actions/actions/runs/42427761550) đều **SUCCESS**. Toàn bộ 17 kiểm thử PASS, `restored_all: true`.
+
+Astro `ptscps-astro/master`: `9c8c83358995342e81c5859ac944731dd6eab5c4`; PHP `ptscps-php/master` không đổi (`fcdb935f439ad9d5358b660e8d901aeff9fea383`).
 
 Checkpoint đã lưu tại [`chatgpt/latest-response.md`](https://github.com/ngocnhanvo/ptscps-actions/blob/main/chatgpt/latest-response.md).
 
