@@ -23,9 +23,18 @@ try {
  await page.locator('#user_pass').fill(process.env.WP_ADMIN_PASSWORD);
  await page.locator('#wp-submit').click();
  await page.waitForURL(u=>u.origin===wp&&u.pathname.startsWith('/wp-admin/'),{timeout:45000});
- const nonceRes=await page.request.post(wp+'/wp-admin/admin-ajax.php',{form:{action:'rest-nonce'}});
- const nonce=(await nonceRes.text()).trim();
- assert(nonceRes.ok()&&/^[a-z0-9_-]{8,32}$/i.test(nonce),'Missing native WordPress nonce');
+ let nonce='';
+ for(const route of ['/wp-admin/nav-menus.php?esc_full_admin=1',
+   '/wp-admin/edit-tags.php?taxonomy=product_cat&post_type=product&esc_full_admin=1']) {
+  await page.goto(wp+route,{waitUntil:'domcontentloaded',timeout:45000});
+  nonce=await page.evaluate(()=>String(window.wpApiSettings?.nonce||'').trim());
+  if(/^[a-z0-9_-]{8,32}$/i.test(nonce))break;
+ }
+ if(!/^[a-z0-9_-]{8,32}$/i.test(nonce)) {
+  const nonceRes=await page.request.post(wp+'/wp-admin/admin-ajax.php',{form:{action:'rest-nonce'}});
+  nonce=nonceRes.ok()?(await nonceRes.text()).trim():'';
+ }
+ assert(/^[a-z0-9_-]{8,32}$/i.test(nonce),'Missing native WordPress nonce');
  for(const [slug,id] of cases){
   const tableId='pub_service_'+slug;
   const native=await page.request.get(wp+'/wp-json/wp/v2/pages/'+id+'?context=edit&_fields=id,slug,parent,status,acf,content',{headers:{'X-WP-Nonce':nonce}});
