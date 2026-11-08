@@ -1,0 +1,69 @@
+name: PTSCPS service native WordPress Page bridge
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'audit/ptscps-service-native-pages.ready'
+permissions:
+  contents: read
+concurrency:
+  group: ptscps-native-service-pages
+  cancel-in-progress: false
+jobs:
+  pages:
+    if: github.repository == 'ngocnhanvo/ptscps-actions'
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.0-noble
+      options: --ipc=host
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate exact deployed source and configured origins
+        shell: bash
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os,json,re
+          from urllib.parse import urlsplit
+          from pathlib import Path
+          marker=json.loads(Path('audit/ptscps-service-native-pages.ready').read_text())
+          assert marker.get('scope')=='ptscps-service-page-bridge'
+          assert re.fullmatch('[a-f0-9]{40}', marker.get('astro',''))
+          expected=marker['astro']
+          vals={}
+          for line in os.environ.get('ENV_FILE','').splitlines():
+              line=line.strip()
+              if line.startswith('export '): line=line[7:].strip()
+              if '=' not in line: continue
+              key,val=line.split('=',1);vals[key.strip()]=val.strip().strip('"').strip("'")
+          for key,dest in [('WC_URL','WP_ORIGIN'),('WC_URL_CLIENT','FRONT_ORIGIN')]:
+              url=urlsplit(vals.get(key,''))
+              assert url.scheme=='https' and url.hostname and url.path in ('','/') and url.port in (None,443) and not url.query and not url.fragment
+              with open(os.environ['GITHUB_ENV'],'a') as out:out.write(dest+'=https://'+url.hostname+'\n')
+          with open(os.environ['GITHUB_ENV'],'a') as out:out.write('PTSCPS_ASTRO_SOURCE_SHA='+expected+'\n')
+          print('SERVICE_PAGE_BRIDGE_LEASE=PASS')
+          PY
+      - name: Verify Astro deployed commit before any WordPress write
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+        run: python3 scripts/ptscps-visual-builder-provenance.py verify
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install Playwright driver only
+        run: npm install --no-save --no-package-lock --ignore-scripts --no-audit --no-fund playwright@1.64.0
+      - name: Validate native Page setup script
+        run: node --check scripts/ptscps-service-native-pages.mjs
+      - name: Register service Pages, native ESC shortcodes and verify CMS readback
+        env:
+          WP_ADMIN_USERNAME: ${{ secrets.WP_ADMIN_USERNAME }}
+          WP_ADMIN_PASSWORD: ${{ secrets.WP_ADMIN_PASSWORD }}
+        run: node scripts/ptscps-service-native-pages.mjs
