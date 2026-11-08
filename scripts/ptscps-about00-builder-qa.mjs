@@ -165,10 +165,10 @@ try {
   const servicePage = choices.find(option=>/^dịch\s*vụ$/i.test(option.label));
   assert(servicePage && /^\d+$/.test(servicePage.id),'Native Page picker lacks root Dịch vụ');
   const categories = [
+    'dich-vu-sua-chua-bao-duong-cac-thiet-bi-va-cong-trinh-cong-nghiep',
     'van-hanh-va-bao-duong-fpso-fso-mopu',
     'dich-vu-thiet-ke-mua-sam-gia-cong-che-tao',
     'cung-ung-nhan-luc-ky-thuat-van-hanh-va-bao-duong',
-    'dich-vu-sua-chua-bao-duong-cac-thiet-bi-va-cong-trinh-cong-nghiep',
   ];
   const categoryIndex = await context.newPage();
   const indexResponse = await categoryIndex.goto(client+'/dich-vu',
@@ -182,6 +182,12 @@ try {
   assert.equal(await indexHeading.getAttribute('data-esc-builder-cell-field'),'section_title',
     'Services index heading must be editable as section_title');
   await categoryIndex.close();
+  const previewResponses=[];
+  page.on('response',response=>{
+    if (!response.url().startsWith(client+'/esc-builder/preview/')) return;
+    const u=new URL(response.url());
+    previewResponses.push({category:u.searchParams.get('category'),status:response.status()});
+  });
   for (const slug of categories) {
     const tableId='pub_service_'+slug;
     const url=wp+'/wp-admin/edit.php?post_type=page&page=esc-visual-builder&esc_vb_page='+
@@ -197,7 +203,18 @@ try {
     assert.equal(frameUrl.searchParams.get('category'),slug,
       'Private Builder preview lost service category: '+slug);
     const serviceFrame=await iframe.elementHandle().then(handle=>handle.contentFrame());
-    await serviceFrame.locator('html.esc-builder-preview').waitFor({state:'attached',timeout:60000});
+    try {
+      await serviceFrame.locator('html.esc-builder-preview').waitFor({state:'attached',timeout:60000});
+    } catch(error) {
+      const frameText=await serviceFrame.locator('body').innerText({timeout:2500}).catch(()=>'');
+      let framePath='';
+      try { framePath=new URL(serviceFrame.url()).pathname; } catch {}
+      console.log('PTSCPS_SERVICE_PREVIEW_DIAGNOSTIC='+JSON.stringify({
+        slug,framePath,bodyExcerpt:frameText.replace(/\s+/g,' ').slice(0,160),
+        responses:previewResponses.filter(item=>item.category===slug),
+      }));
+      throw error;
+    }
     const detail=serviceFrame.locator('[data-tablepress-preview="'+tableId+'"]').first();
     await detail.waitFor({state:'visible',timeout:60000});
     const markers=await detail.locator('[data-esc-builder-cell-row][data-esc-builder-cell-field]')
