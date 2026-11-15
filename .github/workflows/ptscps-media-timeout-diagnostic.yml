@@ -64,7 +64,7 @@ jobs:
           with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
               futures=[executor.submit(get,p) for p,i in tasks]
               for ((path,iteration),future) in zip(tasks,futures):
-                  v=future.result();v['try']=iteration+1;print('ASSET_PROBE '+json.dumps(v),flush=True)
+                  v=future.result();v.pop('body',None);v['try']=iteration+1;print('ASSET_PROBE '+json.dumps(v),flush=True)
                   c=counts[path];c['codes'].append(v.get('status') or v.get('error'))
                   if v.get('status')==200 and (v.get('bytes',0)>0):c['ok']+=1
                   else:c['bad']+=1
