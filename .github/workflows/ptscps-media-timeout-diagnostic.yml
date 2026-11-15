@@ -36,7 +36,7 @@ jobs:
               def __init__(self): super().__init__(); self.srcs=[]
               def handle_starttag(self,tag,attrs):
                   if tag!='img':return
-                  d=dict(attrs);src=d.get('src',''); alt=d.get('alt','')
+                  d=dict(attrs);src=d.get('src') or ''; alt=d.get('alt') or ''
                   if 'logo' in src.lower() or ('logo' in alt.lower()):self.srcs.append(src)
           class NoRedirect(urllib.request.HTTPRedirectHandler):
               def redirect_request(self,*args,**kwargs):return None
