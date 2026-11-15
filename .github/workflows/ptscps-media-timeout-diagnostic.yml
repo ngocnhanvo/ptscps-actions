@@ -1,0 +1,93 @@
+name: PTSCPS public image timeout diagnostic (read-only)
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/ptscps-media-timeout-diagnostic.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  image-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      ENV_FILE: ${{ secrets.ENV_FILE }}
+      FTP_SERVER: ${{ secrets.FTP_SERVER }}
+      FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+      FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+    steps:
+      - name: Check image URLs through public HTTPS and source file presence through FTPS
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os,re,time,json,ssl,urllib.request,urllib.parse,urllib.error,socket,ftplib,concurrent.futures
+          from html.parser import HTMLParser
+          def configured(name):
+              hits=re.findall(r'^\s*(?:export\s+)?'+re.escape(name)+r'\s*=\s*(.+?)\s*$',os.environ.get('ENV_FILE',''),re.M)
+              if len(hits)!=1: raise RuntimeError('Invalid '+name)
+              u=urllib.parse.urlsplit(hits[0].strip().strip('"\''))
+              if u.scheme!='https' or not u.hostname or u.port not in (None,443) or u.path not in ('','/') or u.query or u.fragment or u.username or u.password: raise RuntimeError('Invalid origin '+name)
+              return 'https://'+u.hostname
+          front=configured('WC_URL_CLIENT'); configured('WC_URL')
+          host=urllib.parse.urlsplit(front).hostname
+          print('PUBLIC_ORIGIN_VALIDATED '+host,flush=True)
+          print('DNS_IP_FAMILIES '+str(sorted(set(t[0] for t in socket.getaddrinfo(host,443)))),flush=True)
+          class Images(HTMLParser):
+              def __init__(self): super().__init__(); self.srcs=[]
+              def handle_starttag(self,tag,attrs):
+                  if tag!='img':return
+                  d=dict(attrs);src=d.get('src',''); alt=d.get('alt','')
+                  if 'logo' in src.lower() or ('logo' in alt.lower()):self.srcs.append(src)
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self,*args,**kwargs):return None
+          opener=urllib.request.build_opener(urllib.request.HTTPSHandler(context=ssl.create_default_context()),NoRedirect)
+          def get(path,timeout=12):
+              url=front+path;t=time.monotonic()
+              try:
+                  req=urllib.request.Request(url,headers={'User-Agent':'PTSCPS-Image-Diagnostic/1.0','Cache-Control':'no-cache'})
+                  with opener.open(req,timeout=timeout) as res:
+                      raw=res.read(6*1024*1024);return {'path':path,'status':res.status,'bytes':len(raw),'ms':round((time.monotonic()-t)*1000),'type':res.headers.get('Content-Type','')[:60],'server':res.headers.get('Server','')[:80],'body':raw if path=='/' else b''}
+              except urllib.error.HTTPError as e:return {'path':path,'status':e.code,'ms':round((time.monotonic()-t)*1000),'error':'HTTPError'}
+              except Exception as e:return {'path':path,'ms':round((time.monotonic()-t)*1000),'error':type(e).__name__,'reason':str(e)[:100]}
+          homepage=get('/');raw=homepage.pop('body',b'');print('HOMEPAGE '+json.dumps(homepage),flush=True)
+          parser=Images();parser.feed(raw.decode('utf8','replace'))
+          logos=[]
+          for src in parser.srcs:
+              url=urllib.parse.urljoin(front+'/',src);p=urllib.parse.urlsplit(url)
+              if p.netloc==host and (p.path.startswith('/images/') or p.path.startswith('/wp-content/uploads/')) and p.path not in logos:logos.append(p.path)
+          print('LOGO_URLS '+json.dumps(logos[:3]),flush=True)
+          paths=['/tool/avatar-agent.webp','/client/tool/avatar-agent.webp']+logos[:2]
+          # Include normal index file to differentiate a generalized server timeout.
+          paths.append('/robots.txt')
+          counts={p:{'ok':0,'bad':0,'timeouts':0,'codes':[]} for p in paths}
+          tasks=[(p,i) for i in range(6) for p in paths]
+          with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+              futures=[executor.submit(get,p) for p,i in tasks]
+              for ((path,iteration),future) in zip(tasks,futures):
+                  v=future.result();v['try']=iteration+1;print('ASSET_PROBE '+json.dumps(v),flush=True)
+                  c=counts[path];c['codes'].append(v.get('status') or v.get('error'))
+                  if v.get('status')==200 and (v.get('bytes',0)>0):c['ok']+=1
+                  else:c['bad']+=1
+                  if 'timeout' in str(v).lower():c['timeouts']+=1
+          print('ASSET_SUMMARY '+json.dumps(counts),flush=True)
+          rawftp=os.environ['FTP_SERVER'].strip()
+          if '://' not in rawftp:rawftp='ftp://'+rawftp
+          ftpurl=urllib.parse.urlsplit(rawftp)
+          if ftpurl.scheme not in ('ftp','ftps') or not ftpurl.hostname or ftpurl.path.strip('/') or ftpurl.username or ftpurl.password or ftpurl.port not in (None,21):raise RuntimeError('Invalid FTPS address')
+          ftp=ftplib.FTP_TLS(context=ssl.create_default_context(),timeout=20)
+          try:
+              ftp.connect(ftpurl.hostname,ftpurl.port or 21);ftp.auth();ftp.login(os.environ['FTP_USERNAME'],os.environ['FTP_PASSWORD']);ftp.prot_p()
+              root='/domains/'+host+'/public_html';ftp.cwd(root)
+              if ftp.pwd().rstrip('/')!=root:raise RuntimeError('Unexpected FTP root')
+              ftp.voidcmd('TYPE I')
+              for path in paths:
+                  if path.startswith('/client/'): continue
+                  for item in ('client/'+path.lstrip('/'),path.lstrip('/')):
+                      try:print('FTPS_ASSET '+json.dumps({'relative':item,'size':ftp.size(item)}),flush=True)
+                      except ftplib.error_perm as e:print('FTPS_ASSET '+json.dumps({'relative':item,'error':str(e)[:60]}),flush=True)
+          except Exception as e:print('FTPS_DIAGNOSTIC_ERROR '+type(e).__name__,flush=True)
+          finally:
+              try:ftp.quit()
+              except Exception:ftp.close()
+          print('PTSCPS_MEDIA_DIAGNOSTIC=COMPLETE_READ_ONLY',flush=True)
+          PY
