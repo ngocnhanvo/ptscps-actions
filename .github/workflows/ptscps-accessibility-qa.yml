@@ -1,0 +1,83 @@
+name: PTSCPS production accessibility Lighthouse audit (read-only)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/ptscps-accessibility-qa.yml'
+      - 'audit/ptscps-accessibility-qa.ready'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lighthouse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    env:
+      ENV_FILE: ${{ secrets.ENV_FILE }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify production URL from ENV_FILE
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os,re
+          from urllib.parse import urlsplit
+          found=[]
+          for line in os.environ.get('ENV_FILE','').splitlines():
+              match=re.match(r'^\s*(?:export\s+)?WC_URL_CLIENT\s*=\s*(.*?)\s*$',line)
+              if match: found.append(match.group(1).strip('"\''))
+          if len(found)!=1: raise SystemExit('Expected one WC_URL_CLIENT in ENV_FILE')
+          url=urlsplit(found[0])
+          if (url.scheme!='https' or not url.hostname or url.username or url.password or
+              url.port not in (None,443) or url.path not in ('','/') or url.query or url.fragment):
+              raise SystemExit('Invalid HTTPS WC_URL_CLIENT origin')
+          with open(os.environ['GITHUB_ENV'],'a',encoding='utf-8') as output:
+              output.write('PTSCPS_FRONTEND=https://'+url.hostname+'\n')
+          print('PASS: audited production origin comes exclusively from ENV_FILE')
+          PY
+      - name: Lighthouse 13.5.0 accessibility on desktop and mobile
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p lighthouse-results
+          failed=0
+          for device in desktop mobile; do
+            flags=()
+            if [[ "$device" == 'desktop' ]]; then flags+=(--preset=desktop); fi
+            npx --yes lighthouse@13.5.0 "$PTSCPS_FRONTEND/" \
+              --only-categories=accessibility --output=json \
+              --output-path="lighthouse-results/${device}.json" \
+              --quiet --chrome-flags='--headless --no-sandbox --disable-dev-shm-usage' \
+              "${flags[@]}"
+            if ! node --input-type=module - "$device" <<'JS'
+          import { readFileSync, appendFileSync } from 'node:fs';
+          const device = process.argv[2];
+          const report = JSON.parse(readFileSync(`lighthouse-results/${device}.json`, 'utf8'));
+          const score = Math.round(100 * report.categories.accessibility.score);
+          const failures = Object.values(report.audits)
+            .filter(a => a.score !== null && a.score < 1 && a.scoreDisplayMode !== 'manual' && a.scoreDisplayMode !== 'informative')
+            .map(a => `${a.id}: ${a.title} (score ${a.score})`);
+          console.log(`${device} Accessibility=${score}/100`);
+          console.log('Remaining audit findings:', failures.length ? failures.join('; ') : '(none)');
+          appendFileSync(process.env.GITHUB_STEP_SUMMARY, `### ${device}: Accessibility ${score}/100\n\n${failures.map(f=>'- '+f).join('\n') || 'No failing scored audits'}\n\n`);
+          if (score !== 100) process.exitCode=1;
+          JS
+            then
+              failed=1
+            fi
+          done
+          exit "$failed"
+      - name: Preserve reports for review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ptscps-accessibility-lighthouse
+          path: lighthouse-results/
+          if-no-files-found: warn
